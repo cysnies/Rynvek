@@ -24,6 +24,8 @@ pub mod instance;
 pub mod layer;
 pub mod lod;
 pub mod palette;
+pub mod picking;
+pub mod renderer;
 pub mod scene;
 
 pub use camera::Camera2D;
@@ -31,4 +33,6 @@ pub use instance::{InstanceData, InstanceShape, PickId};
 pub use layer::{RenderLayer, RenderLayerMask};
 pub use lod::NeuralLod;
 pub use palette::{OKABE_ITO, Rgba8, WorldPalette};
+pub use picking::{PickReadback, PickResult};
+pub use renderer::{FieldOverlay, OffscreenTarget, WorldRenderer};
 pub use scene::{FrameScene, VisualizationProvider, collect_scene};
