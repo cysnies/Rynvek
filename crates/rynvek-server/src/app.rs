@@ -16,7 +16,7 @@ use rynvek_security::{
     AuthChallenges, CommandGateConfig, League, OrgRole, PrincipalKindCode, PrincipalStatus, ServerSigningKey, Subject,
     TokenAuthority, VerifiedToken,
 };
-use rynvek_storage::{BlobStore, MemoryBlobStore};
+use rynvek_storage::{BlobStore, FsBlobStore, MemoryBlobStore};
 use tokio::sync::mpsc;
 
 use crate::error::{ApiError, ApiResult};
@@ -52,6 +52,10 @@ pub struct AppConfig {
     pub webtransport: Option<WebTransportInfo>,
     /// 新建对局的地图种子；`None` 时由 match_id 派生
     pub fixed_map_seed: Option<u64>,
+    /// CAS Blob 目录；`None` 时使用进程内存（重启丢失，仅适合测试与开发）
+    pub blob_dir: Option<std::path::PathBuf>,
+    /// 同时执行的 Lab 实验数（每个实验内部再按 CPU 核数并行 run）
+    pub lab_max_concurrent: usize,
 }
 
 /// WebTransport 入口信息
@@ -74,11 +78,13 @@ impl Default for AppConfig {
             token_ttl_s: rynvek_security::token::DEFAULT_TOKEN_TTL_S,
             webtransport: None,
             fixed_map_seed: None,
+            blob_dir: None,
+            lab_max_concurrent: 2,
         }
     }
 }
 
-/// 实验任务（M7 只登记，执行器在 M8）
+/// Lab 实验任务：`queued` → `running` → `completed` / `failed`
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Experiment {
     pub exp_id: String,
@@ -86,10 +92,20 @@ pub struct Experiment {
     pub name: String,
     pub seeds: Vec<u64>,
     pub ticks: u64,
+    pub sample_every: u64,
+    pub variants: Vec<rynvek_rts::lab::VariantSpec>,
     pub status: String,
     pub submitted_at_unix_s: u64,
-    /// 产出 Parquet 的 CAS 标识（执行完成后才有）
+    pub started_at_unix_s: Option<u64>,
+    pub completed_at_unix_s: Option<u64>,
+    pub runs_total: usize,
+    pub runs_done: usize,
+    /// `metrics` 表 Parquet 的 CAS 标识（执行完成后才有；路由 18 缺省下载此表）
     pub parquet_cid: Option<String>,
+    /// 全部结果表 → CAS 标识（`runs` / `metrics` / `lineage`）
+    pub tables: BTreeMap<String, String>,
+    /// 失败原因
+    pub error: Option<String>,
 }
 
 /// 进行中对局注册表
@@ -142,6 +158,10 @@ pub struct AppInner {
     pub matchmaker: Mutex<Matchmaker>,
     pub registry: Mutex<MatchRegistry>,
     pub experiments: Mutex<BTreeMap<String, Experiment>>,
+    /// Lab 执行并发槽
+    pub lab_slots: Arc<tokio::sync::Semaphore>,
+    /// WASM 插件运行时（首次使用时创建）
+    pub plugins: std::sync::OnceLock<rynvek_rules::plugin::PluginRuntime>,
     pub signer: ServerSigningKey,
     pub resume_secret: [u8; 32],
     pub started: Instant,
@@ -171,12 +191,20 @@ impl AppState {
         let state = Self {
             inner: Arc::new(AppInner {
                 store,
-                blobs: Arc::new(MemoryBlobStore::new()),
+                blobs: match &config.blob_dir {
+                    Some(dir) => Arc::new(
+                        FsBlobStore::open(dir)
+                            .map_err(|e| ApiError::internal(format!("无法打开 Blob 目录 {}：{e}", dir.display())))?,
+                    ),
+                    None => Arc::new(MemoryBlobStore::new()),
+                },
                 tokens: RwLock::new(TokenAuthority::new(signer.clone())),
                 challenges: Mutex::new(AuthChallenges::new().map_err(ApiError::from)?),
                 matchmaker: Mutex::new(Matchmaker::new()),
                 registry: Mutex::new(MatchRegistry::default()),
                 experiments: Mutex::new(BTreeMap::new()),
+                lab_slots: Arc::new(tokio::sync::Semaphore::new(config.lab_max_concurrent.max(1))),
+                plugins: std::sync::OnceLock::new(),
                 signer,
                 resume_secret: secret,
                 started: Instant::now(),
@@ -217,6 +245,16 @@ impl AppState {
 
     pub fn experiments(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Experiment>> {
         lock(&self.inner.experiments)
+    }
+
+    /// 共享的 WASM 插件运行时
+    pub fn plugin_runtime(&self) -> ApiResult<rynvek_rules::plugin::PluginRuntime> {
+        if let Some(rt) = self.inner.plugins.get() {
+            return Ok(rt.clone());
+        }
+        let rt = rynvek_rules::plugin::PluginRuntime::new()
+            .map_err(|e| ApiError::internal(format!("插件运行时初始化失败：{e}")))?;
+        Ok(self.inner.plugins.get_or_init(|| rt).clone())
     }
 
     pub fn tokens(&self) -> std::sync::RwLockReadGuard<'_, TokenAuthority> {

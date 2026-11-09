@@ -29,6 +29,7 @@ pub mod server;
 pub mod source;
 pub mod store;
 pub mod stream;
+pub mod verify;
 
 pub use app::{AppConfig, AppState};
 pub use error::{ApiError, ApiResult};
