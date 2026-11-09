@@ -21,6 +21,7 @@ pub mod ids;
 pub mod map_gen;
 pub mod math;
 pub mod resources;
+pub mod tech;
 pub mod terrain;
 pub mod units;
 
