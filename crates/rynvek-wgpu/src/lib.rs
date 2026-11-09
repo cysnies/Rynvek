@@ -24,6 +24,7 @@ pub mod profile;
 pub mod readback;
 pub mod recovery;
 pub mod segment;
+pub mod shader;
 
 pub use binding::{BindGroupSlot, BindingKind, BindingSpec, DIAGNOSTICS_BINDING};
 pub use device::{DeviceLostInfo, GpuDeviceOwner, GpuDeviceRequest};
@@ -34,6 +35,7 @@ pub use recovery::{
     DeviceLostRecovery, InvalidRecoveryTransition, RecoveryEvent, RecoveryOutcome, RecoveryPhase, RecoveryStep,
 };
 pub use segment::{MAX_MONOLITHIC_STORAGE_BUFFER_BYTES, SEGMENT_SIZE_BYTES, SegmentPlan, SegmentedBufferPool};
+pub use shader::{ShaderLibrary, ShaderSource, validate_wgsl};
 
 /// 线性 Workgroup 尺寸（规范 01 §1.1：`128×1×1`）
 pub const LINEAR_WORKGROUP_SIZE: u32 = 128;
