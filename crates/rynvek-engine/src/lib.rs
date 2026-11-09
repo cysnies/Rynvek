@@ -13,6 +13,9 @@
 
 #![deny(unsafe_code)]
 
+pub mod gpu_field;
+pub mod gpu_neural;
+pub mod gpu_rules;
 pub mod protocol;
 
 pub use protocol::{ComputeBackendKind, EngineCommand, EngineEvent, GpuMode};
