@@ -1,0 +1,25 @@
+{
+  "name": "@rynvek/core",
+  "version": "0.1.0",
+  "description": "Rynvek 客户端 SDK 内核：与 rynvek-core 位级对齐的定点数、坐标、Philox RNG 与错误码",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
