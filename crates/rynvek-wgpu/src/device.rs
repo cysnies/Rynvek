@@ -227,6 +227,11 @@ impl GpuDeviceOwner {
         pollster::block_on(self.reacquire())
     }
 
+    /// 唯一的 `wgpu::Instance`（浏览器 Worker 需借它从 OffscreenCanvas 创建 Surface；重获设备也复用它）
+    pub fn instance(&self) -> &wgpu::Instance {
+        &self.instance
+    }
+
     pub fn adapter(&self) -> &wgpu::Adapter {
         &self.adapter
     }
