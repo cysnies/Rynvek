@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rynvek.dev/schemas/rworld.schema.json",
+  "title": "Rynvek .rworld 世界包清单",
+  "description": ".rworld（魔数 RYWL）容器内嵌的 UTF-8 清单 JSON，容器布局与 .rview 相同（ERRATA E-019 / E-049）。必须恰好包含一个路径为 world.json 的 world_config 条目（结构见 $defs/world_config），可选一个路径为 dependencies.lock 的 lockfile 条目（规范 10.3.1）。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "version",
+    "name",
+    "license",
+    "engine_compat",
+    "entries"
+  ],
+  "properties": {
+    "schema": {
+      "const": "rynvek.rworld.v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)+$",
+      "examples": [
+        "community.worlds.duel-42"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "license": {
+      "enum": [
+        "CC0-1.0",
+        "CC-BY-4.0",
+        "AGPL-3.0-only",
+        "Apache-2.0",
+        "Apache-2.0 WITH LLVM-exception",
+        "MIT"
+      ]
+    },
+    "engine_compat": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": [
+        ">=0.1.0 <0.2.0"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 65535,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "kind",
+        "media_type",
+        "offset",
+        "length",
+        "blake3_256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^(?!.*(?:^|/)\\.\\.?(?:/|$))[a-z0-9_-]+(?:/[a-z0-9_.-]+)*\\.[a-z0-9]+$"
+        },
+        "kind": {
+          "enum": [
+            "world_config",
+            "lockfile",
+            "genome",
+            "data"
+          ]
+        },
+        "media_type": {
+          "enum": [
+            "application/json",
+            "application/octet-stream"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "multipleOf": 8
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blake3_256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "world_config"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "application/json"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "lockfile"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "application/json"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "genome"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "application/json"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "data"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "application/json",
+                  "application/octet-stream"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "world_config": {
+      "title": "world.json 世界配置",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "template",
+        "map_seed"
+      ],
+      "properties": {
+        "schema": {
+          "const": "rynvek.world-config.v1"
+        },
+        "template": {
+          "enum": [
+            "arena_duel",
+            "arena_pve"
+          ]
+        },
+        "map_seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "players": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2,
+          "description": "PvE 玩家数；arena_duel 固定为 2"
+        }
+      }
+    }
+  }
+}

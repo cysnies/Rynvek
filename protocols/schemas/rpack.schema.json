@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rynvek.dev/schemas/rpack.schema.json",
+  "title": "Rynvek .rpack 规则 / 插件包清单",
+  "description": ".rpack（魔数 RYPK）容器内嵌的 UTF-8 清单 JSON，容器布局与 .rview 相同（ERRATA E-019 / E-049）。条目：rule_module（RYIR 二进制 Rule IR）、rule_source（QuickJS 规则源码）、plugin（rynvek:plugin@1.0.0 WebAssembly Component）、genome 与 data。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "version",
+    "name",
+    "license",
+    "engine_compat",
+    "entries"
+  ],
+  "properties": {
+    "schema": {
+      "const": "rynvek.rpack.v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)+$",
+      "examples": [
+        "community.rules.thermal-vents"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "license": {
+      "enum": [
+        "CC0-1.0",
+        "CC-BY-4.0",
+        "AGPL-3.0-only",
+        "Apache-2.0",
+        "Apache-2.0 WITH LLVM-exception",
+        "MIT"
+      ]
+    },
+    "engine_compat": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": [
+        ">=0.1.0 <0.2.0"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 65535,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "kind",
+        "media_type",
+        "offset",
+        "length",
+        "blake3_256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^(?!.*(?:^|/)\\.\\.?(?:/|$))[a-z0-9_-]+(?:/[a-z0-9_.-]+)*\\.[a-z0-9]+$"
+        },
+        "kind": {
+          "enum": [
+            "rule_module",
+            "rule_source",
+            "plugin",
+            "genome",
+            "data"
+          ]
+        },
+        "media_type": {
+          "enum": [
+            "application/json",
+            "application/octet-stream",
+            "application/vnd.rynvek.rir",
+            "application/wasm",
+            "text/javascript",
+            "text/typescript"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "multipleOf": 8
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blake3_256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "rule_module"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "application/vnd.rynvek.rir"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "rule_source"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "text/javascript",
+                  "text/typescript"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "plugin"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "application/wasm"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "genome"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "application/json"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "data"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "media_type": {
+                "enum": [
+                  "application/json",
+                  "application/octet-stream"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
