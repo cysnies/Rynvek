@@ -1,0 +1,443 @@
+[
+  {
+    "name": "simple",
+    "trust_level": 1,
+    "source": "\n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n",
+    "ok": true,
+    "instruction_count": 6
+  },
+  {
+    "name": "simple",
+    "trust_level": 2,
+    "source": "\n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n",
+    "ok": true,
+    "instruction_count": 6
+  },
+  {
+    "name": "simple",
+    "trust_level": 3,
+    "source": "\n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n",
+    "ok": true,
+    "instruction_count": 6
+  },
+  {
+    "name": "ops_10",
+    "trust_level": 1,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": true,
+    "instruction_count": 23
+  },
+  {
+    "name": "ops_10",
+    "trust_level": 2,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": true,
+    "instruction_count": 23
+  },
+  {
+    "name": "ops_10",
+    "trust_level": 3,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": true,
+    "instruction_count": 23
+  },
+  {
+    "name": "ops_255",
+    "trust_level": 1,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": true,
+    "instruction_count": 513
+  },
+  {
+    "name": "ops_255",
+    "trust_level": 2,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": true,
+    "instruction_count": 513
+  },
+  {
+    "name": "ops_255",
+    "trust_level": 3,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "ops_1100",
+    "trust_level": 1,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": true,
+    "instruction_count": 2203
+  },
+  {
+    "name": "ops_1100",
+    "trust_level": 2,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "ops_1100",
+    "trust_level": 3,
+    "source": "@fragment\nfn fs_main() -> @location(0) vec4<f32> {\n  var x: f32 = 0.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  x = x + 1.0;\n  return vec4<f32>(x);\n}\n",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "calls",
+    "trust_level": 1,
+    "source": "fn shade(v: f32) -> f32 { return v * 2.0 + 1.0; }\n@fragment fn main() -> @location(0) vec4<f32> {\n  let a = shade(1.0);\n  let b = shade(a);\n  return vec4<f32>(a, b, 0.0, 1.0);\n}",
+    "ok": true,
+    "instruction_count": 12
+  },
+  {
+    "name": "calls",
+    "trust_level": 2,
+    "source": "fn shade(v: f32) -> f32 { return v * 2.0 + 1.0; }\n@fragment fn main() -> @location(0) vec4<f32> {\n  let a = shade(1.0);\n  let b = shade(a);\n  return vec4<f32>(a, b, 0.0, 1.0);\n}",
+    "ok": true,
+    "instruction_count": 12
+  },
+  {
+    "name": "calls",
+    "trust_level": 3,
+    "source": "fn shade(v: f32) -> f32 { return v * 2.0 + 1.0; }\n@fragment fn main() -> @location(0) vec4<f32> {\n  let a = shade(1.0);\n  let b = shade(a);\n  return vec4<f32>(a, b, 0.0, 1.0);\n}",
+    "ok": true,
+    "instruction_count": 12
+  },
+  {
+    "name": "recursion",
+    "trust_level": 1,
+    "source": "fn a() -> f32 { return b(); }\nfn b() -> f32 { return a(); }\n@fragment fn m() -> @location(0) vec4<f32> { return vec4<f32>(a()); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "recursion",
+    "trust_level": 2,
+    "source": "fn a() -> f32 { return b(); }\nfn b() -> f32 { return a(); }\n@fragment fn m() -> @location(0) vec4<f32> { return vec4<f32>(a()); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "recursion",
+    "trust_level": 3,
+    "source": "fn a() -> f32 { return b(); }\nfn b() -> f32 { return a(); }\n@fragment fn m() -> @location(0) vec4<f32> { return vec4<f32>(a()); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "storage",
+    "trust_level": 1,
+    "source": "@group(0) @binding(0) var<storage, read_write> buf: array<u32>;\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 2
+  },
+  {
+    "name": "storage",
+    "trust_level": 2,
+    "source": "@group(0) @binding(0) var<storage, read_write> buf: array<u32>;\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "storage",
+    "trust_level": 3,
+    "source": "@group(0) @binding(0) var<storage, read_write> buf: array<u32>;\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "atomic",
+    "trust_level": 1,
+    "source": "var<workgroup> c: atomic<u32>;\n@fragment fn m() -> @location(0) vec4<f32> { atomicAdd(&c, 1u); return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 4
+  },
+  {
+    "name": "atomic",
+    "trust_level": 2,
+    "source": "var<workgroup> c: atomic<u32>;\n@fragment fn m() -> @location(0) vec4<f32> { atomicAdd(&c, 1u); return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "atomic",
+    "trust_level": 3,
+    "source": "var<workgroup> c: atomic<u32>;\n@fragment fn m() -> @location(0) vec4<f32> { atomicAdd(&c, 1u); return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "texture_store",
+    "trust_level": 1,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { textureStore(t, vec2<i32>(0), vec4<f32>(0.0)); return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 5
+  },
+  {
+    "name": "texture_store",
+    "trust_level": 2,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { textureStore(t, vec2<i32>(0), vec4<f32>(0.0)); return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "texture_store",
+    "trust_level": 3,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { textureStore(t, vec2<i32>(0), vec4<f32>(0.0)); return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "enable",
+    "trust_level": 1,
+    "source": "enable f16;\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 2
+  },
+  {
+    "name": "enable",
+    "trust_level": 2,
+    "source": "enable f16;\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "enable",
+    "trust_level": 3,
+    "source": "enable f16;\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "compute",
+    "trust_level": 1,
+    "source": "@compute @workgroup_size(64) fn c() {}\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 2
+  },
+  {
+    "name": "compute",
+    "trust_level": 2,
+    "source": "@compute @workgroup_size(64) fn c() {}\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "compute",
+    "trust_level": 3,
+    "source": "@compute @workgroup_size(64) fn c() {}\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "vertex",
+    "trust_level": 1,
+    "source": "@vertex fn v() -> @builtin(position) vec4<f32> { return vec4<f32>(0.0); }\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 2
+  },
+  {
+    "name": "vertex",
+    "trust_level": 2,
+    "source": "@vertex fn v() -> @builtin(position) vec4<f32> { return vec4<f32>(0.0); }\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "vertex",
+    "trust_level": 3,
+    "source": "@vertex fn v() -> @builtin(position) vec4<f32> { return vec4<f32>(0.0); }\n\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "no_fragment",
+    "trust_level": 1,
+    "source": "fn only() {}",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "no_fragment",
+    "trust_level": 2,
+    "source": "fn only() {}",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "no_fragment",
+    "trust_level": 3,
+    "source": "fn only() {}",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "two_fragments",
+    "trust_level": 1,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }\n\n@fragment fn m2() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "two_fragments",
+    "trust_level": 2,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }\n\n@fragment fn m2() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "two_fragments",
+    "trust_level": 3,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }\n\n@fragment fn m2() -> @location(0) vec4<f32> {  return vec4<f32>(1.0); }",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "looped",
+    "trust_level": 1,
+    "source": "@fragment fn m() -> @location(0) vec4<f32> {\n  var s = 0.0;\n  for (var i = 0; i < 4; i++) { s += 1.0; }\n  return vec4<f32>(s);\n}",
+    "ok": true,
+    "instruction_count": 8
+  },
+  {
+    "name": "looped",
+    "trust_level": 2,
+    "source": "@fragment fn m() -> @location(0) vec4<f32> {\n  var s = 0.0;\n  for (var i = 0; i < 4; i++) { s += 1.0; }\n  return vec4<f32>(s);\n}",
+    "ok": true,
+    "instruction_count": 8
+  },
+  {
+    "name": "looped",
+    "trust_level": 3,
+    "source": "@fragment fn m() -> @location(0) vec4<f32> {\n  var s = 0.0;\n  for (var i = 0; i < 4; i++) { s += 1.0; }\n  return vec4<f32>(s);\n}",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "loop_kw",
+    "trust_level": 1,
+    "source": "@fragment fn m() -> @location(0) vec4<f32> {\n  var s = 0.0;\n  loop { s += 1.0; }\n  return vec4<f32>(s);\n}",
+    "ok": true,
+    "instruction_count": 5
+  },
+  {
+    "name": "loop_kw",
+    "trust_level": 2,
+    "source": "@fragment fn m() -> @location(0) vec4<f32> {\n  var s = 0.0;\n  loop { s += 1.0; }\n  return vec4<f32>(s);\n}",
+    "ok": true,
+    "instruction_count": 5
+  },
+  {
+    "name": "loop_kw",
+    "trust_level": 3,
+    "source": "@fragment fn m() -> @location(0) vec4<f32> {\n  var s = 0.0;\n  loop { s += 1.0; }\n  return vec4<f32>(s);\n}",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "unclosed_comment",
+    "trust_level": 1,
+    "source": "/* storage \n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "unclosed_comment",
+    "trust_level": 2,
+    "source": "/* storage \n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "unclosed_comment",
+    "trust_level": 3,
+    "source": "/* storage \n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "bad_char",
+    "trust_level": 1,
+    "source": "\n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n\n$",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "bad_char",
+    "trust_level": 2,
+    "source": "\n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n\n$",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "bad_char",
+    "trust_level": 3,
+    "source": "\n// 注释里的 storage / loop / @compute 不应触发审查\nstruct Params { tint: vec4<f32>, }\n@group(0) @binding(0) var<uniform> params: Params;\n\n@fragment\nfn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {\n  let c = mix(vec3<f32>(0.0), vec3<f32>(1.0), uv.x);\n  return vec4<f32>(c, 1.0);\n}\n\n$",
+    "ok": false,
+    "instruction_count": null
+  },
+  {
+    "name": "numbers",
+    "trust_level": 1,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { let a = 0x1Fu + 3u; let b = 1.5e-3f * .5 - 2.; let c = array<f32, 2>(1e4, 0.25h)[1] >> 1; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 11
+  },
+  {
+    "name": "numbers",
+    "trust_level": 2,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { let a = 0x1Fu + 3u; let b = 1.5e-3f * .5 - 2.; let c = array<f32, 2>(1e4, 0.25h)[1] >> 1; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 11
+  },
+  {
+    "name": "numbers",
+    "trust_level": 3,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { let a = 0x1Fu + 3u; let b = 1.5e-3f * .5 - 2.; let c = array<f32, 2>(1e4, 0.25h)[1] >> 1; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 11
+  },
+  {
+    "name": "long_ident",
+    "trust_level": 1,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { let vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv = 1.0; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 3
+  },
+  {
+    "name": "long_ident",
+    "trust_level": 2,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { let vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv = 1.0; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 3
+  },
+  {
+    "name": "long_ident",
+    "trust_level": 3,
+    "source": "\n@fragment fn m() -> @location(0) vec4<f32> { let vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv = 1.0; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 3
+  },
+  {
+    "name": "nested_comment",
+    "trust_level": 1,
+    "source": "/* a /* b */ c */\n\n@fragment fn m() -> @location(0) vec4<f32> { let k = select(1.0, 2.0, true) /* x */; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 4
+  },
+  {
+    "name": "nested_comment",
+    "trust_level": 2,
+    "source": "/* a /* b */ c */\n\n@fragment fn m() -> @location(0) vec4<f32> { let k = select(1.0, 2.0, true) /* x */; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 4
+  },
+  {
+    "name": "nested_comment",
+    "trust_level": 3,
+    "source": "/* a /* b */ c */\n\n@fragment fn m() -> @location(0) vec4<f32> { let k = select(1.0, 2.0, true) /* x */; return vec4<f32>(1.0); }",
+    "ok": true,
+    "instruction_count": 4
+  }
+]
