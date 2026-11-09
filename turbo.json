@@ -2,15 +2,32 @@
   "$schema": "https://turborepo.com/schema.json",
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"]
+      "dependsOn": [
+        "^build"
+      ]
     },
     "test": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**", "test/**", "../../tests/golden_vectors/**", "../../tests/rules/**", "../../tests/engine/**"]
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "src/**",
+        "test/**",
+        "../../tests/golden_vectors/**",
+        "../../tests/rules/**",
+        "../../tests/engine/**",
+        "../../docs/**",
+        "../../protocols/**",
+        "../../crates/rynvek-render/src/**"
+      ]
     }
   }
 }
