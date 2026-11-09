@@ -22,6 +22,7 @@ pub mod error;
 pub mod graph;
 pub mod ir;
 pub mod semantics;
+pub mod wgsl;
 
 pub use compiler::{CompileOptions, compile_rule_graph, compile_rule_graph_json};
 pub use cpu::{
@@ -30,3 +31,4 @@ pub use cpu::{
 pub use error::{RuleError, RuleResult};
 pub use graph::{ComponentDecl, GraphNode, RULE_GRAPH_FORMAT, UntypedRuleGraph};
 pub use ir::{ComponentSlot, Instr, Opcode, RuleModule, ValueType};
+pub use wgsl::emit_wgsl_compute_shader;
