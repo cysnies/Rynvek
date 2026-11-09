@@ -1,0 +1,32 @@
+{
+  "name": "@rynvek/arena",
+  "version": "0.1.0",
+  "description": "Rynvek Arena 游戏层：HUD 视图模型、选择与编队、建造预览、命令控制器、小地图、受控工具 Agent 与可自动测试的对局闭环",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rynvek/client": "workspace:*",
+    "@rynvek/core": "workspace:*",
+    "@rynvek/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
