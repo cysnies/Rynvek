@@ -1,0 +1,17 @@
+[package]
+name = "rynvek-field"
+description = "Rynvek Tier 2 连续环境场：260×260 Halo 分块、反应扩散 PDE 与 CFL 自动子步"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+blake3.workspace = true
+rynvek-core.workspace = true
+
+[lints]
+workspace = true

@@ -315,6 +315,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-field"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rynvek-core",
+]
+
+[[package]]
 name = "rynvek-journal"
 version = "0.1.0"
 dependencies = [
