@@ -31,6 +31,7 @@ pub mod fields;
 pub mod fog;
 pub mod genome;
 pub mod ids;
+pub mod lab;
 pub mod map_gen;
 pub mod math;
 pub mod modulators;

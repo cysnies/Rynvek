@@ -79,6 +79,11 @@ web-sys = "0.3.107"
 # 规范 07 §7.1 冻结：wgpu 30.0.1（精确锁定，严禁降级）
 wgpu = "=30.0.1"
 zstd = "0.13"
+# --- M8 科研接口 / 插件宿主（规范 1.1：Arrow 53+、PyO3 0.23+、Wasmtime 29.0）---
+arrow = { version = "54", default-features = false }
+parquet = { version = "54", default-features = false, features = ["arrow", "zstd"] }
+pyo3 = { version = "0.23", features = ["abi3-py312"] }
+wasmtime = { version = "29", default-features = false, features = ["cranelift", "component-model", "runtime", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

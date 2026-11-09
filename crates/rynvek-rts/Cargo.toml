@@ -9,14 +9,22 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Lab 结果的 Arrow RecordBatch / Parquet 编码（服务端 Lab 作业与 Python 绑定启用）
+arrow = ["dep:arrow", "dep:parquet"]
+
 [dependencies]
+arrow = { workspace = true, optional = true }
 blake3.workspace = true
+parquet = { workspace = true, optional = true }
 rynvek-core.workspace = true
 rynvek-field.workspace = true
 rynvek-neural.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
+# Parquet 读回测试（parquet 的 ChunkReader 由 bytes::Bytes 实现）
+bytes = "1"
 serde_json.workspace = true
 
 [lints]
