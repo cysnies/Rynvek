@@ -9,6 +9,7 @@
 //! - [`coord`]：统一权威坐标 `WorldPosition2D`；
 //! - [`error`]：跨语言统一错误码 `RynvekErrorCode` 与恢复策略；
 //! - [`fixed`]：确定性定点数 `Q32_32` / `Q8_8`；
+//! - [`units`]：编译期物理量纲 `Quantity<D>`；
 //!
 //! 本 crate 不依赖任何内部业务 crate，且禁止 `unsafe` 代码。
 
@@ -18,3 +19,4 @@ pub mod constants;
 pub mod coord;
 pub mod error;
 pub mod fixed;
+pub mod units;
