@@ -17,8 +17,12 @@
 
 #![deny(unsafe_code)]
 
+pub mod apm;
+pub mod control;
 pub mod error;
 pub mod schema;
 
+pub use apm::{APM_MAX_ACTIONS, APM_WINDOW_TICKS, ApmLimiter};
+pub use control::{ControlLease, ControlLevel, LeaseManager, Principal, PrincipalKind};
 pub use error::AgentError;
 pub use schema::{AGENT_TOOLS_V1_JSON, ToolRegistry, ToolSchema};
