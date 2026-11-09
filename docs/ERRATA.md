@@ -435,4 +435,4 @@
 - **已知玩法问题（不改规范数值）**：
   - 采集工蜂的神经脑会在 2.5 Tile 采集半径内游走，可能踏入相邻裂隙被灼烧致死。闭环场景因此选取 4 Tile 内无裂隙的沼泽作为采集目标。
   - 是否让采集工蜂的运动读出在 Harvest 指令下回避裂隙，留待平衡迭代裁决。
-- **许可证**：`@rynvek/client` 与 `@rynvek/arena` 为 `AGPL-3.0-only`；`protocols/agent-tools.v1.json` 随协议层采用 Apache-2.0 WITH LLVM-exception。
+- **许可证**：`@rynvek/client` 与 `@rynvek/arena` 为 `AGPL-3.0-only`；`protocols/schemas/agent-tools.v1.json` 随协议层采用 Apache-2.0 WITH LLVM-exception。
