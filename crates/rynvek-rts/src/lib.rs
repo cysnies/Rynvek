@@ -15,6 +15,7 @@
 #![deny(unsafe_code)]
 
 pub mod arena_map;
+pub mod brain;
 pub mod buildings;
 pub mod combat;
 pub mod genome;
