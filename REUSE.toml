@@ -46,3 +46,16 @@ path = ["docs/**", "README.md"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The Rynvek Contributors"
 SPDX-License-Identifier = "CC-BY-4.0"
+
+# Python `rynvek` 包的锁文件与类型标记、示例插件锁文件与编译出的插件夹具：Apache-2.0 WITH LLVM-exception（GAP-15）。
+# 原生扩展源码（python/native）在文件头单独声明 AGPL-3.0-only。
+[[annotations]]
+path = [
+    "python/uv.lock",
+    "python/rynvek/py.typed",
+    "examples/plugins/**/Cargo.lock",
+    "crates/rynvek-rules/tests/fixtures/plugin/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The Rynvek Contributors"
+SPDX-License-Identifier = "Apache-2.0 WITH LLVM-exception"

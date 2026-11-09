@@ -20,3 +20,9 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+.pytest_cache/
+# Maturin 开发安装产物（`maturin develop` 写入源码树的原生扩展）
+python/rynvek/*.so
+python/rynvek/*.pyd
+# 浸泡测试报告
+/target/soak/
