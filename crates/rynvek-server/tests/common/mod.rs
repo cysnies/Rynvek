@@ -165,3 +165,86 @@ impl StreamClient {
 pub fn control_body(f: &Frame) -> ControlBody {
     ControlMessage::from_bytes(&f.decoded_payload().unwrap()).unwrap()
 }
+
+/// 合法的片段着色器（社区 TrustLevel 2 预算内）
+pub const OK_SHADER: &str =
+    "@fragment fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> { return vec4<f32>(uv, 0.0, 1.0); }";
+
+fn pack(
+    kind: rynvek_world::PackageKind,
+    id: &str,
+    ver: &str,
+    license: &str,
+    entries: Vec<(&str, &str, &str, Vec<u8>)>,
+) -> Vec<u8> {
+    rynvek_world::write_package(&rynvek_world::PackageInput {
+        kind,
+        id: id.into(),
+        version: ver.into(),
+        name: format!("{id} 测试包"),
+        license: license.into(),
+        engine_compat: ">=1.0.0 <2.0.0".into(),
+        entries: entries
+            .into_iter()
+            .map(|(path, kind, media_type, data)| rynvek_world::PackageInputEntry {
+                path: path.into(),
+                kind: kind.into(),
+                media_type: media_type.into(),
+                data,
+            })
+            .collect(),
+    })
+    .expect("测试包可写出")
+}
+
+/// 含一个着色器的 `.rview`
+pub fn rview_pack(id: &str, ver: &str, shader: &str) -> Vec<u8> {
+    pack(
+        rynvek_world::PackageKind::Rview,
+        id,
+        ver,
+        "AGPL-3.0-only",
+        vec![
+            ("shaders/main.wgsl", "shader", "text/wgsl", shader.as_bytes().to_vec()),
+            (
+                "palette/p.json",
+                "palette",
+                "application/json",
+                b"{\"colors\":{}}".to_vec(),
+            ),
+        ],
+    )
+}
+
+/// 含一个 WASM 插件的 `.rpack`
+pub fn rpack_with_plugin(id: &str, ver: &str, component: &[u8]) -> Vec<u8> {
+    pack(
+        rynvek_world::PackageKind::Rpack,
+        id,
+        ver,
+        "Apache-2.0 WITH LLVM-exception",
+        vec![("plugins/main.wasm", "plugin", "application/wasm", component.to_vec())],
+    )
+}
+
+/// 探针插件夹具（`cargo xtask build-plugin-fixtures`）
+pub const PROBE_PLUGIN: &[u8] = include_bytes!("../../../rynvek-rules/tests/fixtures/plugin/probe.component.wasm");
+
+/// `.rworld` 世界包
+pub fn rworld_pack(id: &str, ver: &str, world_json: &str, lockfile: Option<&str>) -> Vec<u8> {
+    let mut entries = vec![(
+        "world.json",
+        "world_config",
+        "application/json",
+        world_json.as_bytes().to_vec(),
+    )];
+    if let Some(l) = lockfile {
+        entries.push((
+            "dependencies.lock",
+            "lockfile",
+            "application/json",
+            l.as_bytes().to_vec(),
+        ));
+    }
+    pack(rynvek_world::PackageKind::Rworld, id, ver, "CC0-1.0", entries)
+}

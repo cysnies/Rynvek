@@ -326,7 +326,7 @@ async fn hub_publish_lockfile_and_ranged_blob() {
     let alice = register(&base, "alice", "human", 1).await;
     let t = Some(alice.token.as_str());
     let org = alice.principal_id.to_string();
-    let artifact = b"rynvek visual pack 0123456789".to_vec();
+    let artifact = rview_pack("alice.theme", "1.0.0", OK_SHADER);
     let body = |sig: String, lock: Value, art: &[u8]| {
         json!({
             "org_id": org,
@@ -354,7 +354,12 @@ async fn hub_publish_lockfile_and_ranged_blob() {
     let sig = sign_package(&alice, "alice.theme", "1.0.0", &artifact);
     let r = send(&base, "PUT", path, t, body(sig.clone(), empty_lock.clone(), &artifact)).await;
     assert_eq!(r.status, 201, "{}", String::from_utf8_lossy(&r.body));
-    let cid = r.json().unwrap()["artifact_cid_blake3"].as_str().unwrap().to_owned();
+    let published = r.json().unwrap();
+    // 静态扫描通过：社区包授予 TrustLevel 2，报告着色器指令数
+    assert_eq!(published["verification"]["static_scan"], "passed");
+    assert_eq!(published["trust_level"], 2);
+    assert_eq!(published["verification"]["findings"][0]["budget"], 2048);
+    let cid = published["artifact_cid_blake3"].as_str().unwrap().to_owned();
     assert_eq!(cid, blake3::hash(&artifact).to_hex().to_string());
     // 版本不可覆盖 → 0x9003
     assert_error(
@@ -364,7 +369,7 @@ async fn hub_publish_lockfile_and_ranged_blob() {
     );
 
     // 依赖锁：引用不一致的哈希 → 0x9003；正确 → 201
-    let art2 = b"dependent".to_vec();
+    let art2 = rview_pack("alice.child", "0.1.0", OK_SHADER);
     let p2 = "/api/v1/hub/packages/alice.child/0.1.0";
     let sig2 = sign_package(&alice, "alice.child", "0.1.0", &art2);
     let bad_lock = json!({ "lockfile_version": 1, "packages": [
@@ -403,7 +408,7 @@ async fn hub_publish_lockfile_and_ranged_blob() {
         .unwrap();
     let pkgs = s["packages"].as_array().unwrap();
     assert_eq!(pkgs.len(), 1);
-    assert_eq!(pkgs[0]["trust_level"], 3);
+    assert_eq!(pkgs[0]["trust_level"], 2);
 
     // Blob 与 Range
     let blob = format!("/api/v1/hub/blobs/{cid}");
@@ -432,6 +437,19 @@ async fn hub_publish_lockfile_and_ranged_blob() {
         0x2002,
     );
     server.shutdown().await;
+}
+
+/// 轮询路由 18 直到产出就绪（未就绪时为 404 / 0x2002）
+async fn wait_parquet(base: &str, path: &str, token: Option<&str>) -> Vec<u8> {
+    for _ in 0..600 {
+        let r = get(base, path, token).await;
+        if r.status == 200 {
+            return r.body;
+        }
+        assert_error(&r, 404, 0x2002);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("实验 30 秒内未完成");
 }
 
 #[tokio::test]
@@ -464,9 +482,16 @@ async fn lab_and_account_lifecycle() {
         400,
         0x5001,
     );
-    // 未产出 → 0x2002；他人不可见
+    // 后台执行器完成后可下载三张表；他人不可见（与不存在同为 0x2002）
     let pq = format!("/api/v1/lab/experiments/{id}/parquet");
-    assert_error(&get(&base, &pq, t).await, 404, 0x2002);
+    let metrics = wait_parquet(&base, &pq, t).await;
+    assert_eq!(&metrics[..4], b"PAR1");
+    for table in ["runs", "lineage"] {
+        let r = get(&base, &format!("{pq}?table={table}"), t).await;
+        assert_eq!(r.status, 200);
+        assert_eq!(&r.body[..4], b"PAR1");
+    }
+    assert_error(&get(&base, &format!("{pq}?table=nope"), t).await, 400, 0x5001);
     let eve = register(&base, "eve", "human", 3).await;
     assert_error(&get(&base, &pq, Some(&eve.token)).await, 404, 0x2002);
 
