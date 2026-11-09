@@ -1002,6 +1002,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-rts"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rynvek-core",
+ "rynvek-field",
+ "rynvek-neural",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rynvek-rules"
 version = "0.1.0"
 dependencies = [

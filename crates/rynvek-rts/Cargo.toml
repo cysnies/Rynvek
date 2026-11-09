@@ -1,0 +1,23 @@
+[package]
+name = "rynvek-rts"
+description = "Rynvek Tier 3 RTS 领域包：3 资源、8 建筑、6 神经单位、9 科技、180° 对称地图生成、HPA*+流场+定点 ORCA 导航、战争迷雾、L3 调质广播与 PvE 演化虫潮"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+blake3.workspace = true
+rynvek-core.workspace = true
+rynvek-field.workspace = true
+rynvek-neural.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

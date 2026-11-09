@@ -35,6 +35,7 @@ rynvek-neural = { path = "crates/rynvek-neural" }
 rynvek-rules = { path = "crates/rynvek-rules", default-features = false }
 rynvek-wgpu = { path = "crates/rynvek-wgpu" }
 rynvek-render = { path = "crates/rynvek-render" }
+rynvek-rts = { path = "crates/rynvek-rts" }
 rynvek-engine = { path = "crates/rynvek-engine" }
 
 # --- 第三方依赖（版本统一在此锁定，成员 crate 通过 `workspace = true` 继承）---
