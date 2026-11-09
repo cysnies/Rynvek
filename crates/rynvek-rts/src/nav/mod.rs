@@ -7,7 +7,9 @@
 pub mod flow;
 pub mod grid;
 pub mod hpa;
+pub mod orca;
 
 pub use flow::FlowField;
 pub use grid::{NavGrid, Rect, astar, terrain_cost};
 pub use hpa::{HpaGraph, HpaPath, SECTOR_SIZE};
+pub use orca::{OrcaAgent, compute_velocity};
