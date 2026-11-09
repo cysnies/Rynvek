@@ -40,6 +40,19 @@ impl LinkSender {
     pub async fn send(&self, frame: Frame) -> Result<(), NetError> {
         self.tx.send(frame).await.map_err(|_| NetError::Closed)
     }
+
+    /// 非阻塞发送：缓冲已满即报错。实时宿主用它向慢消费者推送，满了就断开该连接而不是拖慢整局 Tick
+    pub fn try_send(&self, frame: Frame) -> Result<(), NetError> {
+        self.tx.try_send(frame).map_err(|e| match e {
+            mpsc::error::TrySendError::Full(_) => NetError::Transport("发送缓冲已满（慢消费者）".into()),
+            mpsc::error::TrySendError::Closed(_) => NetError::Closed,
+        })
+    }
+
+    /// 对端（或本地泵任务）是否已关闭
+    pub fn is_closed(&self) -> bool {
+        self.tx.is_closed()
+    }
 }
 
 /// 帧接收端
@@ -102,7 +115,8 @@ impl Link {
         }
     }
 
-    /// 消息型传输：`stream` 产出 `Ok(Some(bytes))` 为二进制消息，`Ok(None)` 为可忽略的控制消息（Ping/Pong 等）
+    /// 消息型传输：`stream` 产出 `Ok(Some(bytes))` 为二进制消息，`Ok(None)` 为可忽略的控制消息（Ping/Pong 等），
+    /// `Err(NetError::Closed)` 表示对端正常关闭
     pub fn from_messages<S, K>(kind: TransportKind, sink: K, stream: S) -> Link
     where
         S: Stream<Item = Result<Option<Vec<u8>>, NetError>> + Send + Unpin + 'static,
@@ -126,6 +140,8 @@ impl Link {
                 let checked = match item {
                     Ok(None) => continue,
                     Ok(Some(bytes)) => decode_message(&bytes).and_then(|f| seq.accept(&f.header).map(|()| f)),
+                    // 对端正常关闭（WebSocket Close 帧）：结束而不是上报违例
+                    Err(NetError::Closed) => break,
                     Err(e) => Err(e),
                 };
                 let stop = checked.is_err();
@@ -231,6 +247,21 @@ mod tests {
         for f in &frames {
             assert_eq!(&right.recv().await.unwrap().unwrap(), f);
         }
+    }
+
+    #[tokio::test]
+    async fn try_send_reports_backpressure_instead_of_blocking() {
+        let (a, _b) = Link::memory_pair();
+        let mut enc = FrameEncoder::new(false);
+        let mut full = false;
+        for i in 0..(LINK_BUFFER_FRAMES * 4) {
+            let f = enc.encode(WireChannelId::Event, i as u64, b"x", false).unwrap();
+            if a.sender.try_send(f).is_err() {
+                full = true;
+                break;
+            }
+        }
+        assert!(full, "对端不读时缓冲必然写满");
     }
 
     #[tokio::test]

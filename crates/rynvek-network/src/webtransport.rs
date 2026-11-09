@@ -80,9 +80,30 @@ impl WebTransportServer {
         self.certificate_hash
     }
 
-    /// 接受下一个会话；路径由调用方路由（不匹配时可直接丢弃 `AcceptedSession` 以关闭）
-    pub async fn accept(&self) -> Result<AcceptedSession, NetError> {
-        let request = self.endpoint.accept().await.await.map_err(transport_err)?;
+    /// 等待下一个入站会话请求。只做最轻量的等待，握手与开流放到 [`PendingSession::establish`]，
+    /// 以便调用方为每个会话单独派生任务，慢客户端不会阻塞后续会话的接入。
+    pub async fn accept(&self) -> PendingSession {
+        PendingSession {
+            incoming: self.endpoint.accept().await,
+        }
+    }
+}
+
+/// 尚未完成握手的入站会话
+pub struct PendingSession {
+    incoming: wtransport::endpoint::IncomingSession,
+}
+
+impl std::fmt::Debug for PendingSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PendingSession").finish_non_exhaustive()
+    }
+}
+
+impl PendingSession {
+    /// 完成 QUIC / HTTP3 握手、接受会话并等待客户端打开承载帧的双向流
+    pub async fn establish(self) -> Result<AcceptedSession, NetError> {
+        let request = self.incoming.await.map_err(transport_err)?;
         let path = request.path().to_owned();
         let connection = request.accept().await.map_err(transport_err)?;
         let (send, recv) = connection.accept_bi().await.map_err(transport_err)?;

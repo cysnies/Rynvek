@@ -110,7 +110,7 @@ async fn webtransport_loopback_preserves_frames() {
     let pin = server.certificate_hash();
     let path = "/api/v1/worlds/00000000-0000-7000-8000-000000000000/stream";
     let accept = tokio::spawn(async move {
-        let session = server.accept().await.unwrap();
+        let session = server.accept().await.establish().await.unwrap();
         assert_eq!(session.path, path);
         let _conn = session.connection;
         echo(session.link).await;
@@ -121,7 +121,6 @@ async fn webtransport_loopback_preserves_frames() {
         .unwrap();
     assert_eq!(client.link.kind, TransportKind::WebTransport);
     let _conn = client.connection.clone();
-    // 先发一帧让服务端 accept_bi 返回（QUIC 流在首次写入时才对端可见）
     roundtrip(client.link).await;
     accept.abort();
 }
@@ -132,7 +131,7 @@ async fn webtransport_rejects_unpinned_certificate() {
     let server = webtransport::WebTransportServer::bind(SocketAddr::from(([127, 0, 0, 1], 0)), identity).unwrap();
     let port = server.local_addr().unwrap().port();
     let _accept = tokio::spawn(async move {
-        let _ = server.accept().await;
+        let _ = server.accept().await.establish().await;
     });
     let wrong = [0u8; 32];
     let res = tokio::time::timeout(
