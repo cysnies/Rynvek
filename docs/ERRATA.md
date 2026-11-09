@@ -61,7 +61,7 @@
 
 - **位置**：规范 05 只给出 LIF + 四因子 STDP + Dale 律的冻结源码；`GatedMLP` / `Izhikevich` / `CTRNN` 与 `TopologyStorageClass` 三种布局仅有名称与适用范围（GAP-08）。
 - **裁决**（全部为 Q8.8 纯整数，中间量 `i32`，每个突触项先 `(w*x)>>8` 再求和，因此三种布局结果位级相同）：
-  - `GatedMLP`：`h = hard_tanh(W·x + b)`，`g = hard_sigmoid(G·x + c)`（`clamp(x/4 + 0.5, 0, 1)`），输出 `g ⊙ h`；
+  - `GatedMLP`：`h = hard_tanh(W_in·x)`，`g = hard_sigmoid(W_gate·x + b_gate)`（`clamp(z/4 + 0.5, 0, 1)`），隐藏层 `g ⊙ h`，读出 `hard_tanh(W_out·(g ⊙ h))`；
   - `Izhikevich`：RS 参数 `a=0.02, b=0.2, c=-65 mV, d=8`（Q8.8 原始值 `5 / 51 / -65·256 / 8·256`），每 Tick 两个半步积分，输入增益 16，峰值 30 mV 复位；
   - `CTRNN`：`s += inv_tau · (-s + W·σ(s) + I)`，`σ` 为 hard sigmoid，状态钳制在 `±8.0`；
   - 存储：`DenseTiledMatrix`（`16×16` 瓦片行主序，N ≤ 64）、`BlockSparseCSR`（`8×8` 块级 CSR，N ≤ 4096）、`PagedDynamicAdjacency`（每个突触后神经元固定 32 槽，空槽 `u16::MAX`），由 `select_storage_class` 按 GAP-08 阈值选择；超出容量报 `NeuralTopologyCapacityExceeded (0x4001)`。
