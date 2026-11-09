@@ -288,6 +288,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-compute-cpu"
+version = "0.1.0"
+dependencies = [
+ "rynvek-compute",
+ "rynvek-core",
+]
+
+[[package]]
 name = "rynvek-core"
 version = "0.1.0"
 dependencies = [

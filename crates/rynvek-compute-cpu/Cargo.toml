@@ -1,0 +1,17 @@
+[package]
+name = "rynvek-compute-cpu"
+description = "Rynvek Tier 2 CPU Reference 确定性计算后端（黄金参照）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+rynvek-compute.workspace = true
+rynvek-core.workspace = true
+
+[lints]
+workspace = true
