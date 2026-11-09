@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# 通过 `cargo xtask <子命令>` 调用仓库内的工程自动化任务（xtask 模式）。
+[alias]
+xtask = "run --quiet --package xtask --"

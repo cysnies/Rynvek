@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Rynvek Cargo 工作区根配置。
+# 成员 crate 严格遵循规范 01 的单向分层依赖 DAG（Tier 0 → Tier 4，严禁逆向或循环依赖）。
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85.0"
+authors = ["The Rynvek Contributors"]
+license = "AGPL-3.0-only"
+repository = "https://github.com/rynvek/rynvek"
+publish = false
+
+[workspace.dependencies]
+# --- 内部 crate（按 Tier 分层引用）---
+rynvek-core = { path = "crates/rynvek-core" }
+rynvek-schema = { path = "crates/rynvek-schema" }
+rynvek-protocol = { path = "crates/rynvek-protocol" }
+
+# --- 第三方依赖（版本统一在此锁定，成员 crate 通过 `workspace = true` 继承）---
+blake3 = "1.8"
+bytemuck = { version = "1.23", features = ["derive"] }
+half = "2.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

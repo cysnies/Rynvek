@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Rust 构建产物
+/target/
+
+# Node / pnpm / Turborepo
+node_modules/
+.turbo/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+.DS_Store
