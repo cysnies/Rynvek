@@ -24,5 +24,5 @@ pub use frame::{JournalFrame, JournalFrameHeader};
 pub use header::{JOURNAL_HEADER_LEN, JOURNAL_MAGIC, JOURNAL_VERSION, JournalFileHeader};
 pub use manifest::{CommitManifest, CommitSubRoots};
 pub use reader::JournalReader;
-pub use recovery::{CrashRecoveryState, CrashRecoveryStateMachine, RecoveryOutput};
+pub use recovery::{CrashRecoveryState, CrashRecoveryStateMachine, RecoveryInput, RecoveryOutput};
 pub use writer::JournalWriter;

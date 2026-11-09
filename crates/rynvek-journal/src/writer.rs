@@ -98,8 +98,7 @@ impl JournalWriter {
         Ok(())
     }
 
-    /// 故意写入截断的半帧（仅用于测试断电场景）
-    #[cfg(test)]
+    /// 故意写入截断的半帧（用于测试断电场景；生产路径不得调用）
     pub fn append_torn_bytes(&mut self, bytes: &[u8]) -> Result<(), RynvekErrorCode> {
         self.file
             .write_all(bytes)
