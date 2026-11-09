@@ -21,6 +21,7 @@ pub mod cpu;
 pub mod error;
 pub mod graph;
 pub mod ir;
+pub mod rir;
 pub mod semantics;
 pub mod wgsl;
 
@@ -31,4 +32,5 @@ pub use cpu::{
 pub use error::{RuleError, RuleResult};
 pub use graph::{ComponentDecl, GraphNode, RULE_GRAPH_FORMAT, UntypedRuleGraph};
 pub use ir::{ComponentSlot, Instr, Opcode, RuleModule, ValueType};
+pub use rir::{RIR_MAGIC, decode_rir, encode_rir};
 pub use wgsl::emit_wgsl_compute_shader;
