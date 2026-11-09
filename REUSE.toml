@@ -20,12 +20,21 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The Rynvek Contributors"
 SPDX-License-Identifier = "AGPL-3.0-only"
 
+# 平台前端包（引擎宿主、设计系统、音频、可视化、资产、Studio）的元数据与夹具：AGPL-3.0-only。
+# REUSE 中后出现的匹配项优先，故通用规则放在 SDK 例外规则之前。
+[[annotations]]
+path = ["packages/**/*.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The Rynvek Contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
 # 公开协议与客户端 SDK 包的元数据：Apache-2.0 WITH LLVM-exception（见项目文档 7.1）。
 [[annotations]]
 path = [
     "protocols/**",
     "packages/core/**/*.json",
     "packages/protocol/**/*.json",
+    "packages/rules/**/*.json",
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 The Rynvek Contributors"
