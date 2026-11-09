@@ -4,6 +4,7 @@
 //! 单 Chunk 五通道场世界：推进、守恒校验与状态根。
 
 use blake3::Hasher;
+use bytemuck;
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_core::hash::Blake3Hash;
 
@@ -69,16 +70,19 @@ impl FieldWorld {
     }
 
     /// 状态根：按通道顺序哈希内区 Q8.8 样本
+    ///
+    /// 按行整段 `update`（内区在每行中连续），避免逐格 `to_le_bytes` 调用开销。
     pub fn state_root(&self) -> Blake3Hash {
         let mut hasher = Hasher::new();
         for tile in &self.channels {
             let buf = tile.current_buf();
             for y in 0..TILE_DIM {
                 let py = y + HALO;
-                for x in 0..TILE_DIM {
-                    let px = x + HALO;
-                    hasher.update(&buf[py * STRIDE + px].to_le_bytes());
-                }
+                let start = py * STRIDE + HALO;
+                let row = &buf[start..start + TILE_DIM];
+                // i16 小端与平台一致（引擎锁定 little-endian 目标）
+                let bytes = bytemuck::cast_slice::<i16, u8>(row);
+                hasher.update(bytes);
             }
         }
         Blake3Hash(*hasher.finalize().as_bytes())

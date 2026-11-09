@@ -319,6 +319,7 @@ name = "rynvek-field"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "bytemuck",
  "rynvek-core",
 ]
 
@@ -355,6 +356,18 @@ dependencies = [
  "blake3",
  "half",
  "serde_json",
+]
+
+[[package]]
+name = "rynvek-simulation"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rynvek-compute",
+ "rynvek-compute-cpu",
+ "rynvek-core",
+ "rynvek-field",
+ "rynvek-spatial",
 ]
 
 [[package]]

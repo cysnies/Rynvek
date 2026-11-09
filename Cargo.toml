@@ -55,3 +55,6 @@ unimplemented = "deny"
 [profile.release]
 codegen-units = 1
 lto = "thin"
+
+[profile.test]
+opt-level = 1
