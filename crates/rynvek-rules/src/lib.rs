@@ -17,12 +17,16 @@
 #![deny(unsafe_code)]
 
 pub mod compiler;
+pub mod cpu;
 pub mod error;
 pub mod graph;
 pub mod ir;
 pub mod semantics;
 
 pub use compiler::{CompileOptions, compile_rule_graph, compile_rule_graph_json};
+pub use cpu::{
+    AlignedBytecode, DEFAULT_TICK_GAS_BUDGET, RuleTickOutput, RuleWorldState, emit_cpu_simd_bytecode, execute_rule_tick,
+};
 pub use error::{RuleError, RuleResult};
 pub use graph::{ComponentDecl, GraphNode, RULE_GRAPH_FORMAT, UntypedRuleGraph};
 pub use ir::{ComponentSlot, Instr, Opcode, RuleModule, ValueType};
