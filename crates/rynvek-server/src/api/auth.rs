@@ -105,7 +105,9 @@ mod opt_u64_text {
 pub async fn session(State(app): State<AppState>, headers: HeaderMap, body: Bytes) -> ApiResult<Response> {
     let req: SessionRequest = super::parse_json(&body)?;
     if req.oauth_token.is_some() {
-        return Err(ApiError::unauthenticated("本服务器未配置 OAuth 提供方，请使用 Ed25519 质询登录"));
+        return Err(ApiError::unauthenticated(
+            "本服务器未配置 OAuth 提供方，请使用 Ed25519 质询登录",
+        ));
     }
     let registering = req.principal_id.is_none() && req.handle.is_some();
     let principal_id = match req.principal_id {
@@ -138,9 +140,9 @@ pub async fn session(State(app): State<AppState>, headers: HeaderMap, body: Byte
                 parse_hex(&c).ok_or_else(|| ApiError::bad_request("challenge 必须是 32 字节十六进制"))?;
             let signature: [u8; 64] =
                 parse_hex(&s).ok_or_else(|| ApiError::bad_request("signature 必须是 64 字节十六进制"))?;
-            let redeemed = app
-                .challenges()
-                .redeem(principal_id, &challenge, &principal.ed25519_pubkey, &signature, now);
+            let redeemed =
+                app.challenges()
+                    .redeem(principal_id, &challenge, &principal.ed25519_pubkey, &signature, now);
             if let Err(e) = redeemed {
                 app.audit(
                     Some(principal_id),

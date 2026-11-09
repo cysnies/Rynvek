@@ -40,9 +40,10 @@ impl std::fmt::Debug for PostgresStore {
 fn db_err(e: tokio_postgres::Error) -> ApiError {
     use tokio_postgres::error::SqlState;
     match e.code() {
-        Some(c) if *c == SqlState::UNIQUE_VIOLATION => {
-            ApiError::new(RynvekErrorCode::StructuralMutationConflict, format!("唯一约束冲突：{e}"))
-        }
+        Some(c) if *c == SqlState::UNIQUE_VIOLATION => ApiError::new(
+            RynvekErrorCode::StructuralMutationConflict,
+            format!("唯一约束冲突：{e}"),
+        ),
         Some(c) if *c == SqlState::FOREIGN_KEY_VIOLATION => {
             ApiError::new(RynvekErrorCode::EntityNotFoundOrTombstoned, format!("外键约束：{e}"))
         }
@@ -411,7 +412,10 @@ impl PostgresStore {
             .map_err(db_err)?;
         if n == 0 {
             let exists = tx
-                .query_opt("SELECT 1 FROM worlds WHERE world_id = $1::text::uuid", &[&uuid_text(&commit.world_id)])
+                .query_opt(
+                    "SELECT 1 FROM worlds WHERE world_id = $1::text::uuid",
+                    &[&uuid_text(&commit.world_id)],
+                )
                 .await
                 .map_err(db_err)?
                 .is_some();
@@ -434,7 +438,13 @@ impl PostgresStore {
             "INSERT INTO packages (package_id, org_id, package_kind, trust_level, revoked) VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (package_id) DO UPDATE SET org_id = EXCLUDED.org_id, package_kind = EXCLUDED.package_kind, \
              trust_level = EXCLUDED.trust_level, revoked = EXCLUDED.revoked",
-            &[&row.package_id, &i(row.org_id), &row.package_kind, &row.trust_level, &row.revoked],
+            &[
+                &row.package_id,
+                &i(row.org_id),
+                &row.package_kind,
+                &row.trust_level,
+                &row.revoked,
+            ],
         )
         .await
         .map_err(db_err)?;
@@ -661,7 +671,9 @@ impl PostgresStore {
 
     pub async fn matches_of(&self, principal_id: u64) -> StoreResult<Vec<MatchRow>> {
         let c = self.client.lock().await;
-        let cols = MATCH_COLS.replace("match_id::text", "m.match_id::text").replace("world_id::text", "m.world_id::text");
+        let cols = MATCH_COLS
+            .replace("match_id::text", "m.match_id::text")
+            .replace("world_id::text", "m.world_id::text");
         let rows = c
             .query(
                 &format!(

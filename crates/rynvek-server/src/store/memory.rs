@@ -41,7 +41,10 @@ fn conflict(message: impl Into<String>) -> ApiError {
 }
 
 fn missing_fk(what: &str) -> ApiError {
-    ApiError::new(RynvekErrorCode::EntityNotFoundOrTombstoned, format!("外键约束：{what} 不存在"))
+    ApiError::new(
+        RynvekErrorCode::EntityNotFoundOrTombstoned,
+        format!("外键约束：{what} 不存在"),
+    )
 }
 
 impl MemoryStore {
@@ -130,7 +133,8 @@ impl MemoryStore {
                 format!("组织世界配额已满（{quota}）"),
             ));
         }
-        t.world_commits.insert((genesis.world_id, genesis.world_revision), genesis);
+        t.world_commits
+            .insert((genesis.world_id, genesis.world_revision), genesis);
         t.worlds.insert(row.world_id, row);
         Ok(())
     }

@@ -62,7 +62,9 @@ pub async fn data_export(State(app): State<AppState>, headers: HeaderMap) -> Api
     for org in &orgs {
         for p in store.search_packages(None, None).await? {
             if p.org_id == org.org_id {
-                packages.push(serde_json::json!({ "package": p, "versions": store.package_versions(&p.package_id).await? }));
+                packages.push(
+                    serde_json::json!({ "package": p, "versions": store.package_versions(&p.package_id).await? }),
+                );
             }
         }
     }
@@ -91,7 +93,13 @@ pub async fn data_export(State(app): State<AppState>, headers: HeaderMap) -> Api
         "experiments": experiments,
         "audit_logs": audit,
     });
-    app.audit(Some(pid), "account.data_export", format!("principal:{pid}"), serde_json::json!({})).await;
+    app.audit(
+        Some(pid),
+        "account.data_export",
+        format!("principal:{pid}"),
+        serde_json::json!({}),
+    )
+    .await;
     Ok((
         [(
             header::CONTENT_DISPOSITION,

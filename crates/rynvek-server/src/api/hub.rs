@@ -136,14 +136,18 @@ pub async fn publish(
 ) -> ApiResult<Response> {
     let subject = app.require(&headers, CapabilityScope::HubPublish).await?;
     if !valid_package_id(&id) {
-        return Err(ApiError::bad_request("包 ID 只允许以 `.` 分段的 [a-z0-9-]，长度 3..=128"));
+        return Err(ApiError::bad_request(
+            "包 ID 只允许以 `.` 分段的 [a-z0-9-]，长度 3..=128",
+        ));
     }
     if !valid_semver(&ver) {
         return Err(ApiError::bad_request("版本号必须是 SemVer 2.0（MAJOR.MINOR.PATCH）"));
     }
     let req: PublishRequest = super::parse_json(&body)?;
     if !PACKAGE_KINDS.contains(&req.package_kind.as_str()) {
-        return Err(ApiError::bad_request(format!("package_kind 必须是 {PACKAGE_KINDS:?} 之一")));
+        return Err(ApiError::bad_request(format!(
+            "package_kind 必须是 {PACKAGE_KINDS:?} 之一"
+        )));
     }
     let org_id: u64 = req
         .org_id
@@ -196,17 +200,25 @@ pub async fn publish(
     )
     .map_err(ApiError::from)?;
     // 依赖锁
-    let lock: Lockfile = serde_json::from_value(req.lockfile.clone())
-        .map_err(|e| ApiError::new(RynvekErrorCode::DependencyLockConflict, format!("dependencies.lock 非法：{e}")))?;
+    let lock: Lockfile = serde_json::from_value(req.lockfile.clone()).map_err(|e| {
+        ApiError::new(
+            RynvekErrorCode::DependencyLockConflict,
+            format!("dependencies.lock 非法：{e}"),
+        )
+    })?;
     if lock.lockfile_version != 1 {
-        return Err(ApiError::new(RynvekErrorCode::DependencyLockConflict, "lockfile_version 必须为 1"));
+        return Err(ApiError::new(
+            RynvekErrorCode::DependencyLockConflict,
+            "lockfile_version 必须为 1",
+        ));
     }
     for dep in &lock.packages {
-        let pkg = app
-            .store()
-            .get_package(&dep.id)
-            .await?
-            .ok_or_else(|| ApiError::new(RynvekErrorCode::DependencyLockConflict, format!("依赖 `{}` 未发布", dep.id)))?;
+        let pkg = app.store().get_package(&dep.id).await?.ok_or_else(|| {
+            ApiError::new(
+                RynvekErrorCode::DependencyLockConflict,
+                format!("依赖 `{}` 未发布", dep.id),
+            )
+        })?;
         if pkg.revoked {
             return Err(ApiError::new(
                 RynvekErrorCode::RevokedPackageBlocked,

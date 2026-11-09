@@ -119,7 +119,10 @@ impl MatchRegistry {
     }
 
     pub fn active_count(&self) -> usize {
-        self.by_match.values().filter(|h| !h.status().state.is_terminal()).count()
+        self.by_match
+            .values()
+            .filter(|h| !h.status().state.is_terminal())
+            .count()
     }
 }
 
@@ -240,7 +243,9 @@ impl AppState {
         ed25519_pubkey: [u8; 32],
     ) -> ApiResult<()> {
         if !(1..=64).contains(&handle.len())
-            || !handle.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            || !handle
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         {
             return Err(ApiError::bad_request("handle 只允许 1..=64 个 [A-Za-z0-9_-] 字符"));
         }
@@ -516,7 +521,11 @@ pub fn encode_token_text(token: &rynvek_protocol::CapabilityToken) -> String {
 async fn finalizer(state: AppState, mut rx: mpsc::UnboundedReceiver<HostEvent>) {
     while let Some(ev) = rx.recv().await {
         let r = match ev {
-            HostEvent::State { match_id, state: to, tick } => persist_state(&state, match_id, to, tick).await,
+            HostEvent::State {
+                match_id,
+                state: to,
+                tick,
+            } => persist_state(&state, match_id, to, tick).await,
             HostEvent::Audit(row) => state.store().append_audit(row).await,
             HostEvent::Completed(c) => persist_completion(&state, *c).await,
         };

@@ -16,9 +16,9 @@
 use std::time::Duration;
 
 use rynvek_core::error::RynvekErrorCode;
+use rynvek_network::FrameEncoder;
 use rynvek_network::control::{ControlBody, ControlMessage, Disconnect, WIRE_PROTOCOL};
 use rynvek_network::link::{Link, LinkSender};
-use rynvek_network::FrameEncoder;
 use rynvek_protocol::{CapabilityScope, WireChannelId, WireUuid};
 use rynvek_security::{Resource, authorize};
 
@@ -54,12 +54,14 @@ async fn handshake(
         return Err(violation("首帧必须在 Control 通道"));
     }
     let payload = first.decoded_payload().map_err(|e| violation(&e.to_string()))?;
-    let ControlBody::Hello(hello) = ControlMessage::from_bytes(&payload).map_err(|e| violation(&e.to_string()))?
-    else {
+    let ControlBody::Hello(hello) = ControlMessage::from_bytes(&payload).map_err(|e| violation(&e.to_string()))? else {
         return Err(violation("首帧必须是 ClientHello"));
     };
     if hello.protocol != WIRE_PROTOCOL {
-        return Err(violation(&format!("不支持的协议 `{}`，需要 `{WIRE_PROTOCOL}`", hello.protocol)));
+        return Err(violation(&format!(
+            "不支持的协议 `{}`，需要 `{WIRE_PROTOCOL}`",
+            hello.protocol
+        )));
     }
     if hello.world_id.as_slice() != world_id.0.as_slice() {
         return Err(violation("ClientHello.world_id 与连接路径不一致"));

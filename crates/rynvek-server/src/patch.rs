@@ -45,11 +45,29 @@ pub struct WorldPatch {
 /// 补丁操作
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum WorldPatchOp {
-    SetWorldParam { key_path: String, new_value_json: String },
-    PaintTerrainRect { x0: i32, y0: i32, width: u32, height: u32, tile_kind: u8 },
-    UpsertSeedGenome { genome_slug: String, genome_bytes_b64: String },
-    UpdateRuleModule { module_id: String, ts_source: String, compiled_rir_blake3: [u8; 32] },
-    RemoveEntityTemplate { template_id: String },
+    SetWorldParam {
+        key_path: String,
+        new_value_json: String,
+    },
+    PaintTerrainRect {
+        x0: i32,
+        y0: i32,
+        width: u32,
+        height: u32,
+        tile_kind: u8,
+    },
+    UpsertSeedGenome {
+        genome_slug: String,
+        genome_bytes_b64: String,
+    },
+    UpdateRuleModule {
+        module_id: String,
+        ts_source: String,
+        compiled_rir_blake3: [u8; 32],
+    },
+    RemoveEntityTemplate {
+        template_id: String,
+    },
 }
 
 /// 单个补丁的操作数上限
@@ -75,7 +93,8 @@ pub fn required_class(op: &WorldPatchOp) -> LiveEditSafetyClass {
 
 fn invalid(message: impl Into<String>) -> ApiError {
     // E-021：补丁格式错误复用 0x3003
-    ApiError::new(RynvekErrorCode::SimulationInvariantViolated, message).with_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY)
+    ApiError::new(RynvekErrorCode::SimulationInvariantViolated, message)
+        .with_status(axum::http::StatusCode::UNPROCESSABLE_ENTITY)
 }
 
 /// 整体校验（原子：任一操作不合格则整个补丁被拒绝）
@@ -89,7 +108,10 @@ pub fn validate(patch: &WorldPatch) -> Result<LiveEditSafetyClass, ApiError> {
     let mut required = LiveEditSafetyClass::HotSafePresentation;
     for (i, op) in patch.operations.iter().enumerate() {
         match op {
-            WorldPatchOp::SetWorldParam { key_path, new_value_json } => {
+            WorldPatchOp::SetWorldParam {
+                key_path,
+                new_value_json,
+            } => {
                 if key_path.is_empty() || key_path.split('.').any(str::is_empty) {
                     return Err(invalid(format!("第 {i} 条：key_path 非法")));
                 }
@@ -97,7 +119,9 @@ pub fn validate(patch: &WorldPatch) -> Result<LiveEditSafetyClass, ApiError> {
                     return Err(invalid(format!("第 {i} 条：new_value_json 不是合法 JSON")));
                 }
             }
-            WorldPatchOp::PaintTerrainRect { x0, y0, width, height, .. } => {
+            WorldPatchOp::PaintTerrainRect {
+                x0, y0, width, height, ..
+            } => {
                 if *x0 < 0 || *y0 < 0 || *width == 0 || *height == 0 {
                     return Err(invalid(format!("第 {i} 条：涂刷矩形越界")));
                 }
@@ -160,10 +184,20 @@ mod tests {
     #[test]
     fn declared_class_may_be_conservative_but_never_lower() {
         use LiveEditSafetyClass as C;
-        assert_eq!(validate(&patch(C::EpochBoundarySafe, vec![param("visual.tint")])).unwrap(), C::HotSafePresentation);
-        let e = validate(&patch(C::TickBoundarySafe, vec![param("economy.cost"), param("rules.x")])).unwrap_err();
+        assert_eq!(
+            validate(&patch(C::EpochBoundarySafe, vec![param("visual.tint")])).unwrap(),
+            C::HotSafePresentation
+        );
+        let e = validate(&patch(
+            C::TickBoundarySafe,
+            vec![param("economy.cost"), param("rules.x")],
+        ))
+        .unwrap_err();
         assert_eq!(e.code, RynvekErrorCode::SimulationInvariantViolated);
-        assert_eq!(validate(&patch(C::RequiresForkRestart, vec![param("world.size")])).unwrap(), C::RequiresForkRestart);
+        assert_eq!(
+            validate(&patch(C::RequiresForkRestart, vec![param("world.size")])).unwrap(),
+            C::RequiresForkRestart
+        );
     }
 
     #[test]

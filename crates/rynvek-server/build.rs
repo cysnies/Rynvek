@@ -42,7 +42,13 @@ fn json_str(s: &str) -> String {
 fn spdx_id(name: &str, version: &str) -> String {
     let raw = format!("SPDXRef-Package-{name}-{version}");
     raw.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect()
 }
 
@@ -110,7 +116,12 @@ fn sbom(packages: &[LockPackage], commit: &str, created: &str, repo: &str, versi
         let checksum = p
             .checksum
             .as_ref()
-            .map(|c| format!(",\"checksums\":[{{\"algorithm\":\"SHA256\",\"checksumValue\":{}}}]", json_str(c)))
+            .map(|c| {
+                format!(
+                    ",\"checksums\":[{{\"algorithm\":\"SHA256\",\"checksumValue\":{}}}]",
+                    json_str(c)
+                )
+            })
             .unwrap_or_default();
         pkgs.push(format!(
             "{{\"SPDXID\":{},\"name\":{},\"versionInfo\":{},\"downloadLocation\":{},\"filesAnalyzed\":false,\
@@ -122,7 +133,11 @@ fn sbom(packages: &[LockPackage], commit: &str, created: &str, repo: &str, versi
             json_str(&p.version),
             json_str(&download),
             json_str(license),
-            json_str(if local { "Organization: The Rynvek Contributors" } else { "NOASSERTION" }),
+            json_str(if local {
+                "Organization: The Rynvek Contributors"
+            } else {
+                "NOASSERTION"
+            }),
             json_str(&format!("pkg:cargo/{}@{}", p.name, p.version)),
         ));
         if id != root_id {

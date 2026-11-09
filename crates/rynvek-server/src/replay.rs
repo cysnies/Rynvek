@@ -27,7 +27,7 @@
 
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_rts::{ArenaWorld, MatchConfig, MatchOutcome, RecordedCommand};
-use rynvek_security::{Keyring, ServerSigningKey, League};
+use rynvek_security::{Keyring, League, ServerSigningKey};
 use serde::{Deserialize, Serialize};
 
 /// 魔数 `"RYRP"`
@@ -213,7 +213,8 @@ fn signed_region_len(payload_len: usize) -> usize {
 
 /// 编码并签名
 pub fn encode(body: &ReplayBody, world_id: [u8; 16], signer: &ServerSigningKey) -> Result<Vec<u8>, ReplayError> {
-    let json = serde_json::to_vec(body).map_err(|e| ReplayError::new(RynvekErrorCode::InvalidFileMagicOrVersion, e.to_string()))?;
+    let json = serde_json::to_vec(body)
+        .map_err(|e| ReplayError::new(RynvekErrorCode::InvalidFileMagicOrVersion, e.to_string()))?;
     let payload = zstd::bulk::compress(&json, 9)
         .map_err(|e| ReplayError::new(RynvekErrorCode::InvalidFileMagicOrVersion, e.to_string()))?;
     let header = ReplayHeader {
@@ -254,7 +255,10 @@ pub fn open(bytes: &[u8], keyring: Option<&Keyring>) -> Result<OpenedReplay, Rep
         .checked_add(64)
         .ok_or_else(|| bad("长度溢出".into()))?;
     if bytes.len() != expected_len {
-        return Err(bad(format!("文件长度 {} 与文件头声明的 {expected_len} 不符", bytes.len())));
+        return Err(bad(format!(
+            "文件长度 {} 与文件头声明的 {expected_len} 不符",
+            bytes.len()
+        )));
     }
     let body_end = REPLAY_HEADER_LEN + payload_len;
     let checksum = blake3::hash(&bytes[..body_end]);

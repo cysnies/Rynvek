@@ -9,7 +9,10 @@ use rynvek_protocol::WireUuid;
 
 /// 当前 Unix 秒
 pub fn unix_now_s() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// 当前 Unix 毫秒

@@ -138,7 +138,9 @@ pub async fn create(State(app): State<AppState>, headers: HeaderMap, body: Bytes
         return Err(ApiError::bad_request("title 长度必须在 1..=128"));
     }
     let org_id = match &req.org_id {
-        Some(s) => s.parse().map_err(|_| ApiError::bad_request("org_id 必须是十进制整数"))?,
+        Some(s) => s
+            .parse()
+            .map_err(|_| ApiError::bad_request("org_id 必须是十进制整数"))?,
         None => subject.principal_id,
     };
     authorize(&subject, CapabilityScope::WorldCreate, &Resource::Org { org_id }).map_err(ApiError::from)?;
@@ -314,8 +316,11 @@ pub async fn patches(
         return Err(ApiError::bad_request("WorldPatch 超过 1 MiB"));
     }
     let patch: WorldPatch = serde_json::from_slice(&body).map_err(|e| {
-        ApiError::new(RynvekErrorCode::SimulationInvariantViolated, format!("WorldPatch 格式错误：{e}"))
-            .with_status(StatusCode::UNPROCESSABLE_ENTITY)
+        ApiError::new(
+            RynvekErrorCode::SimulationInvariantViolated,
+            format!("WorldPatch 格式错误：{e}"),
+        )
+        .with_status(StatusCode::UNPROCESSABLE_ENTITY)
     })?;
     let required = crate::patch::validate(&patch)?;
     if patch.base_authoring_revision != world.latest_revision {

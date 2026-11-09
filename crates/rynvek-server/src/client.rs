@@ -48,17 +48,18 @@ fn split_url(url: &str) -> Result<(String, String), String> {
     if host.is_empty() {
         return Err("缺少主机名".to_owned());
     }
-    let host = if host.contains(':') { host.to_owned() } else { format!("{host}:80") };
+    let host = if host.contains(':') {
+        host.to_owned()
+    } else {
+        format!("{host}:80")
+    };
     Ok((host, path.to_owned()))
 }
 
 fn decode_chunked(mut data: &[u8]) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     loop {
-        let line_end = data
-            .windows(2)
-            .position(|w| w == b"\r\n")
-            .ok_or("chunked 编码截断")?;
+        let line_end = data.windows(2).position(|w| w == b"\r\n").ok_or("chunked 编码截断")?;
         let size_text = std::str::from_utf8(&data[..line_end]).map_err(|_| "chunk 长度非 UTF-8")?;
         let size_text = size_text.split(';').next().unwrap_or_default().trim();
         let size = usize::from_str_radix(size_text, 16).map_err(|_| "chunk 长度非法")?;

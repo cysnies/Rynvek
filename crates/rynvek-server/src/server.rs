@@ -74,9 +74,7 @@ pub async fn start(mut cfg: ServerConfig) -> ApiResult<RunningServer> {
     let listener = tokio::net::TcpListener::bind(cfg.http_addr)
         .await
         .map_err(|e| ApiError::internal(format!("HTTP 监听 {} 失败：{e}", cfg.http_addr)))?;
-    let http_addr = listener
-        .local_addr()
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let http_addr = listener.local_addr().map_err(|e| ApiError::internal(e.to_string()))?;
     if cfg.app.public_base_url.is_empty() {
         cfg.app.public_base_url = format!("http://{http_addr}");
     }
