@@ -27,6 +27,7 @@ pub mod map_gen;
 pub mod math;
 pub mod modulators;
 pub mod nav;
+pub mod pve;
 pub mod resources;
 pub mod tech;
 pub mod terrain;
