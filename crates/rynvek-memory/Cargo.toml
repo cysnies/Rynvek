@@ -1,0 +1,16 @@
+[package]
+name = "rynvek-memory"
+description = "Rynvek Tier 1 内存管理：32MiB Slab、64B/256B 对齐池与四级预算状态机"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+rynvek-core.workspace = true
+
+[lints]
+workspace = true
