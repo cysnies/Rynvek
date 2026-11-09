@@ -23,6 +23,7 @@ pub mod genome;
 pub mod ids;
 pub mod map_gen;
 pub mod math;
+pub mod modulators;
 pub mod resources;
 pub mod tech;
 pub mod terrain;
