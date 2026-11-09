@@ -19,6 +19,7 @@
       "footprint": 4,
       "hp_milli": 4000000,
       "kind": "bld.nexus_core",
+      "name_zh": "神经主脑核心",
       "vision_tiles": 24
     },
     {
@@ -40,6 +41,7 @@
       "footprint": 2,
       "hp_milli": 450000,
       "kind": "bld.biomass_harvester",
+      "name_zh": "生物质萃取器",
       "vision_tiles": 8
     },
     {
@@ -61,6 +63,7 @@
       "footprint": 3,
       "hp_milli": 750000,
       "kind": "bld.flux_reactor",
+      "name_zh": "通量反应堆",
       "vision_tiles": 8
     },
     {
@@ -82,6 +85,7 @@
       "footprint": 3,
       "hp_milli": 800000,
       "kind": "bld.synapse_refinery",
+      "name_zh": "突触精炼厂",
       "vision_tiles": 8
     },
     {
@@ -103,6 +107,7 @@
       "footprint": 3,
       "hp_milli": 900000,
       "kind": "bld.spawning_vat",
+      "name_zh": "神经孵化槽",
       "vision_tiles": 8
     },
     {
@@ -124,6 +129,7 @@
       "footprint": 2,
       "hp_milli": 400000,
       "kind": "bld.signal_beacon",
+      "name_zh": "神经调制信标",
       "vision_tiles": 8
     },
     {
@@ -145,6 +151,7 @@
       "footprint": 2,
       "hp_milli": 650000,
       "kind": "bld.pulse_turret",
+      "name_zh": "脉冲防御塔",
       "vision_tiles": 12
     },
     {
@@ -166,6 +173,7 @@
       "footprint": 3,
       "hp_milli": 1000000,
       "kind": "bld.mutation_crucible",
+      "name_zh": "演化坩埚",
       "vision_tiles": 8
     }
   ],
@@ -187,6 +195,7 @@
         "neurogel": 30000
       },
       "id": "tech.chemotaxis_amp",
+      "name_zh": "趋化受体增敏",
       "requires_buildings": [
         "bld.spawning_vat"
       ],
@@ -202,6 +211,7 @@
         "neurogel": 40000
       },
       "id": "tech.flux_capacitance",
+      "name_zh": "超导通量电容",
       "requires_buildings": [
         "bld.flux_reactor"
       ],
@@ -217,6 +227,7 @@
         "neurogel": 50000
       },
       "id": "tech.kinetic_resonance",
+      "name_zh": "高频脉冲聚焦",
       "requires_buildings": [
         "bld.pulse_turret"
       ],
@@ -232,6 +243,7 @@
         "neurogel": 80000
       },
       "id": "tech.multicellular_chitin",
+      "name_zh": "多细胞几丁质装甲",
       "requires_buildings": [
         "bld.mutation_crucible"
       ],
@@ -247,6 +259,7 @@
         "neurogel": 100000
       },
       "id": "tech.hebbian_plasticity",
+      "name_zh": "四因子可塑性激活",
       "requires_buildings": [
         "bld.mutation_crucible"
       ],
@@ -262,6 +275,7 @@
         "neurogel": 120000
       },
       "id": "tech.gap_junction_sync",
+      "name_zh": "间隙连接电耦合",
       "requires_buildings": [],
       "requires_techs": [
         "tech.hebbian_plasticity"
@@ -277,6 +291,7 @@
         "neurogel": 220000
       },
       "id": "tech.morphogenesis_apex",
+      "name_zh": "高阶形态发生学",
       "requires_buildings": [],
       "requires_techs": [
         "tech.gap_junction_sync"
@@ -292,6 +307,7 @@
         "neurogel": 180000
       },
       "id": "tech.metabolic_superconduct",
+      "name_zh": "超导代谢闭环",
       "requires_buildings": [
         "bld.mutation_crucible"
       ],
@@ -309,6 +325,7 @@
         "neurogel": 250000
       },
       "id": "tech.directed_speciation",
+      "name_zh": "定向物种跃迁",
       "requires_buildings": [],
       "requires_techs": [
         "tech.morphogenesis_apex"
@@ -329,6 +346,7 @@
       "hatch_ticks": 90,
       "hp_milli": 120000,
       "kind": "unit.forager",
+      "name_zh": "采集工蜂簇",
       "shield_milli": 0,
       "speed_milli_per_s": 4500,
       "supply": 1,
@@ -345,6 +363,7 @@
       "hatch_ticks": 120,
       "hp_milli": 200000,
       "kind": "unit.striker",
+      "name_zh": "突击刺胞簇",
       "shield_milli": 0,
       "speed_milli_per_s": 5200,
       "supply": 2,
@@ -361,6 +380,7 @@
       "hatch_ticks": 180,
       "hp_milli": 620000,
       "kind": "unit.carapace",
+      "name_zh": "重甲盾簇",
       "shield_milli": 200000,
       "speed_milli_per_s": 2800,
       "supply": 4,
@@ -377,6 +397,7 @@
       "hatch_ticks": 150,
       "hp_milli": 160000,
       "kind": "unit.spitter",
+      "name_zh": "腐蚀孢子簇",
       "shield_milli": 0,
       "speed_milli_per_s": 3600,
       "supply": 3,
@@ -393,6 +414,7 @@
       "hatch_ticks": 180,
       "hp_milli": 240000,
       "kind": "unit.weaver",
+      "name_zh": "突触编织者",
       "shield_milli": 80000,
       "speed_milli_per_s": 4000,
       "supply": 4,
@@ -409,6 +431,7 @@
       "hatch_ticks": 360,
       "hp_milli": 1500000,
       "kind": "unit.leviathan",
+      "name_zh": "巨型神经母体",
       "shield_milli": 400000,
       "speed_milli_per_s": 2200,
       "supply": 10,

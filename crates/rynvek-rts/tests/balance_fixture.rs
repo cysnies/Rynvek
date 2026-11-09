@@ -35,6 +35,7 @@ fn generate() -> Value {
         "vat_queue_limit": VAT_QUEUE_LIMIT,
         "buildings": BUILDING_SPECS.iter().map(|b| json!({
             "kind": b.kind.as_str(),
+            "name_zh": b.name_zh,
             "footprint": b.footprint,
             "cost": res(&b.cost),
             "build_ticks": b.build_ticks,
@@ -46,6 +47,7 @@ fn generate() -> Value {
         })).collect::<Vec<_>>(),
         "units": UNIT_SPECS.iter().map(|u| json!({
             "kind": u.kind.as_str(),
+            "name_zh": u.name_zh,
             "supply": u.supply,
             "cost": res(&u.cost),
             "hatch_ticks": u.hatch_ticks,
@@ -58,6 +60,7 @@ fn generate() -> Value {
         })).collect::<Vec<_>>(),
         "techs": TECH_SPECS.iter().map(|t| json!({
             "id": t.id.as_str(),
+            "name_zh": t.name_zh,
             "tier": t.tier,
             "research_site": t.research_site().as_str(),
             "requires_buildings": t.requires_buildings.iter().map(|b| b.as_str()).collect::<Vec<_>>(),
