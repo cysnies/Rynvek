@@ -144,3 +144,112 @@
   - **同层依赖**：`rynvek-engine`（T4）依赖 T0–T3；`rynvek-wasm`（T4）依赖 `rynvek-engine`（同层，单向）。wgpu 内核（T2）不依赖同为 T2 的 `rynvek-field / rynvek-neural`，CPU/GPU 差分测试放在组合二者的 `rynvek-engine` 中，DAG 保持严格单向。
   - **`rynvek-rules` 特性**：workspace 依赖改为 `default-features = false`，使引擎依赖树不引入 QuickJS（`rynvek-rules` 自身仍默认启用 `quickjs`，其测试不受影响）。
   - **wasm32 构建**：`rynvek-storage` 的 SQLite 适配（bundled libsqlite3，需要 libc）仅在非 wasm32 目标编译，浏览器持久化留待 OPFS。仅阻塞回读的测试辅助接口（`*_blocking`、规则 GPU 执行器）不在 wasm32 编译。`zstd-sys` 自带 wasm shim，但需要能产出 wasm32 的 C 编译器。本机没有 clang，验证时借用 `zig cc` 包装器（`CC_wasm32_unknown_unknown`），它不属于仓库依赖。
+
+## E-017：设计系统（`@rynvek/ui`）令牌取值、主题层与动作表归属
+
+- **位置**：项目文档 6.1 与 GAP-14 只冻结了品牌三色（`#090B0A / #303A34 / #A3D65C`）、Geist Sans/Mono 字体、三主题名称（Neutral Dark / Scientific Light / Okabe-Ito）与五层隔离优先级 `Accessibility > Visualization > Faction > World Biome > Application UI`，未给出完整令牌表。
+- **裁决（最佳实践补全）**：
+  - **令牌清单**：应用层 `--rv-color-*`（bg / surface / surface-raised / overlay / border / border-strong / text / text-muted / text-inverse / accent / accent-hover / accent-text / focus-ring / success / warning / danger / info）及版式、间距、圆角、动效、层级令牌；世界层 `--rv-world-bg/grid/outline/fog`；阵营层 `--rv-faction-1..7`；可视化层 `--rv-heat-low/mid/high` 与 `--rv-neural-excitatory/inhibitory/spike/sync`。中文回退字体为 Noto Sans SC。
+  - **取值**：品牌色以外的颜色按 WCAG 2.2 定（正文 ≥ 7:1，次要文字与强调文字 ≥ 4.5:1，强调色、焦点环与语义色 ≥ 3:1），单测逐主题审计。Scientific Light 中青柠在浅底上对比度不足，改用同色相深橄榄绿 `#4C7A1C`。阵营色在三主题中一致，取 Okabe-Ito 1..7，与 `rynvek-render::OKABE_ITO` 逐项相同（单测解析 Rust 源码比对）。
+  - **热力图中点**：`--rv-heat-mid` 在三主题中都取 `#0072B2 → #F0E442` 的 8 位 sRGB 线性中点 `#78AB7A`，与 GPU 着色器 `mix(heat_low, heat_high, 0.5)` 一致，只用作图例刻度。
+  - **层隔离**：低四层只能写本层命名空间的令牌，越界即抛错。无障碍层可以覆盖任意令牌，且总是最后应用。来自 `.rview` 等不可信来源的值经 `assertSafeCssValue` 校验，拒绝 `; { } < > \`、`/*`、`url(`、`expression(`、`@import`，长度上限 256。
+  - **动作表**：规范 12.1 的 36 项绑定表（键盘组合、指针手势、手柄、编队数字组）放在 `@rynvek/ui`，供工具栏 `Kbd` 提示、命令面板与 Studio 共用。运行时全局路由器 `@rynvek/client::InputActionRouter` 属于 M6，届时直接包装 `matchKeyboard`。
+
+## E-018：音频运行时（`@rynvek/audio`）中规范未给出的部分
+
+- **位置**：规范 12.2 冻结了 `ProceduralPlaceholderSynth` 与 24 类配方源码；项目文档 6.2 只描述了五大总线、`AudioManifest` 的 `status: "placeholder"` → `.ogg` 热替换，以及 120 BPM 六轨自适应音乐。
+- **逐字实现**：`placeholder_synth.ts` 只汉化了注释，代码逐字照搬规范。单测去掉注释后与规范代码块逐字比对，任何偏差都会失败。
+- **已知行为（不修改）**：规范粉红噪声的“白噪声”源以样本下标为 LCG 种子，相邻样本相差 `1664525 / 2^32`，实为周期约 2580 样本的锯齿波，不是白噪声。经三极点漏积分后，48 kHz 下峰值约 4.69，超过 ±1。混入后再经包络（峰值 ≤ 0.35）与总线增益衰减，Web Audio 浮点管线在 destination 之前不会削波。按“不改变算法”的要求保留原样，单测锁定该确定性峰值。若后续规范修订，可改为 `white = lcg(state)` 的递推形式。
+- **补全**：
+  - **混音**：总线拓扑为 `bus GainNode → master → destination`。缺省电平：sfx_ui 0.8、sfx_world 0.7、sfx_combat 0.75、voice_alert 1.0、neural_sonify 0.5。电平变化用时间常数 15 ms 的 `setTargetAtTime` 平滑，避免爆音。
+  - **静音循环**：`global.cycle_audio_mute`（动作 07）按 `none → sfx（仅保留 voice_alert）→ all → none` 循环，关键告警不会被一键静掉。
+  - **`AudioManifest` v1**（`protocols/schemas/audio-manifest.schema.json`，Apache-2.0 WITH LLVM-exception）：
+    - 结构为 `schema: "rynvek.audio-manifest.v1"`，`events` 由事件名映射到条目。
+    - 条目共有字段：`bus`，可选 `gain / cooldown_ms / max_voices`。
+    - `placeholder` 条目必须对应 24 类配方之一，且总线与配方一致。
+    - `asset` 条目须给出相对 `.ogg` 路径（禁止 `..`、绝对路径与 URL），许可证限 `CC0-1.0 / CC-BY-4.0`。
+  - **AudioDirector**：
+    - 同一事件按总线设缺省冷却：UI 25 ms、世界 40 ms、战斗 20 ms、告警 1500 ms、神经 30 ms。
+    - 同一事件最多 4 个并发发声；每条总线另有并发上限：8 / 16 / 24 / 2 / 12。
+    - `.ogg` 未加载或加载失败时，回退到同名占位合成；`unlock()` 在用户手势中恢复 AudioContext。
+  - **自适应音乐**：
+    - 节拍：4/4 拍，一小节 2 秒；状态切换在下一小节线开始，以一拍（0.5 秒）线性淡变；调度提前量 50 ms。
+    - 状态：项目文档列出的五个状态 `quiet_observation / base_building / mass_production / skirmish / final_alert` 逐级累加音轨：A → A B → A–D → A–E → A–F。
+    - 场景数：D617–D637 摘要写作“6 场景”，但正文只列出五个状态。实现以正文为准，留待规范澄清。
+- **测试**：`@rynvek/audio/testing` 提供录制型 `FakeAudioContext`，按 Web Audio 规范的线性、指数与 setTarget 插值公式求 AudioParam 值，包络与音乐淡变据此做确定性数值断言。
+
+## E-019：`.rview` 视觉包容器、WGSL 安全审查与资产错误码
+
+- **位置**：规范 10.1 只冻结了魔数 `RYVW`、Little-Endian 与 64 字节对齐文件头。项目文档只规定 TrustLevel 3 的 WGSL 片段着色器指令数 ≤ 512。规范 11 给出 `0x7001 / 0x7002 / 0x9003 / 0x9004`。
+- **容器**（`@rynvek/assets`）：
+  - **文件头**：沿用 `.rsnap` 的字段位置。
+    - `format_version = 1`；`flags` 在 v1 必须为 0；`header_bytes = 64`。
+    - `entry_count` 为 u16。
+    - `package_key` 取 BLAKE3(包 ID) 的前 16 字节。
+    - 三个 u64：`manifest_bytes`、`payload_bytes`、`total_bytes`。
+    - 保留字段必须为 0。
+  - **头后结构**：
+    - 文件头之后是 32 字节 `content_hash = BLAKE3(manifest ‖ payload)`。
+    - 然后是 UTF-8 清单 JSON，补零到 8 字节对齐，再接载荷区。
+    - 条目按路径升序、8 字节对齐紧密排布，各带一个 BLAKE3。
+  - **校验结果**：同一输入总是写出逐字节相同的文件。结构、边界、清单、截断或尾随数据错误报 0x7001；整包或条目摘要不符报 0x7002。
+- **清单**（`protocols/schemas/rview.schema.json`）：
+  - 字段：`schema: "rynvek.rview.v1"`、`id`（如 `rynvek.visual.industrial-default`）、`version`（semver）、`name`、`license`（`CC0-1.0 / CC-BY-4.0 / AGPL-3.0-only`）、`engine_compat`、`entries[]`。
+  - 条目类型 `palette / theme / shader / sprite_atlas`，各有允许的媒体类型。
+  - 内容格式：
+    - 色板为 `{colors: {name: "#RRGGBB"}}`。
+    - 主题为 `{tokens: {"--rv-*": value}}`。
+    - 着色器为 WGSL 文本。
+    - 图集为 PNG，或 `{image, frames}`。
+- **依赖锁**：给定 `dependencies.lock` 时，包必须恰好出现一次，`kind = "rview"`、版本相同，整文件 BLAKE3 等于 `blake3_256`，否则报 0x9003。锁冲突属于“不是锁定的那个包”，不是存储损坏，因此不用 0x7002。
+- **WGSL 审查**：浏览器端无法调用驱动编译器，改用可复现的保守估算，违规报 0x9004。
+  - **指令数**：运算符、函数或构造器调用、赋值、下标访问与控制流语句各计 1 条。自定义函数按调用点展开计入入口函数；递归视为违规。
+  - **结构要求**：源码 ≤ 64 KiB，恰好一个 `@fragment` 入口。
+  - **TrustLevel ≥ 2 的禁用项**：`@compute / @vertex / @workgroup_size`、存储缓冲、原子操作、工作组变量与屏障、`textureStore` 与存储纹理、`enable` 扩展。这些能力会越过只读表现层的边界。
+  - **预算**：TrustLevel 3 另外禁止一切循环（静态无法给出上界），预算 512；TrustLevel 2 预算 2048；TrustLevel 0/1 不限。
+
+## E-020：可视化（`@rynvek/visualization`）的色标、时间序列与 `.rview` 主题桥接
+
+- **神经 LOD**：阈值与可见图层沿用 E-015，TS 侧与 `rynvek-render::NeuralLod` 一致，单测解析 Rust 源码比对。UI 不加滞回，保证与 GPU 渲染层的判定逐帧一致。
+- **色标**：热力图与 GPU 相同，在 8 位 sRGB 空间线性插值。阵营 `index` 映射到 `OKABE_ITO[1 + index % 7]`。突触颜色按权重符号取兴奋或抑制色，`|w| / w_max` 作不透明度。同步环颜色按 Kuramoto 序参量 `r = |mean(e^{iθ})|` 在网格色与 `--rv-neural-sync` 之间插值。GPU 色板按 `Rgba8::packed` 的小端 RGBA 打包；迷雾取世界背景色叠 `0xC0` 不透明度。
+- **L4 时间序列**：定长环形缓冲按 Tick 追加，跳号以 NaN 补洞。降采样逐桶取 min/max，单个动作电位在任意缩放下都不会被抹掉，结果只取决于输入与桶数。
+- **`.rview` → 主题层**：
+  - 主题令牌按所属命名空间落到 world / faction / visualization 层；色板中名为令牌后缀的颜色（如 `faction-1`）同样落层。
+  - 应用层令牌只接受 TrustLevel 0/1（官方皮肤），社区包与临时包改写应用 UI 有仿冒风险。
+  - 未知令牌与不安全值逐个剔除并报告，不连累整层。
+
+## E-021：Studio 创作态补丁的 CRDT 合并、安全分级映射与可停靠工作区
+
+- **位置**：
+  - 规范 10.2 给出 `LiveEditSafetyClass / HlcTimestamp / WorldPatch / WorldPatchOp` 的 Rust 定义。
+  - 项目文档 GAP-25 所指的“规范 10.4（`AuthoringDocument`、三方语义合并器规则）”在开发规范中不存在。
+  - `LiveEditSafetyClass` 未派生 serde，但 `WorldPatch` 派生了 `Serialize`，按原文无法编译。
+- **裁决**：
+  - **serde 形态**：`LiveEditSafetyClass` 按 serde 对单元变体的缺省形态序列化为变体名字符串，例如 `"EpochBoundarySafe"`；Rust 侧实现时补上 `serde::Serialize / Deserialize` 派生即可。其余字段遵循 serde 缺省：`[u8; N]` 为整数数组，`WorldPatchOp` 为外部标记。TS 序列化与 serde_json 逐字节一致（夹具 `packages/studio/test/fixtures/world_patch.json`）。补丁格式错误复用 `0x3003`，与 E-016 中 Worker 协议违例一致。
+  - **AuthoringDocument（CRDT）**：
+    - 结构：文档 = 只读基线 + 按 `patch_id` 去重的补丁集合。
+    - 寄存器：世界参数键、地形格、基因组 slug、规则模块 ID、实体模板 ID 各为一个 LWW 寄存器。写入戳为 `(HLC, patch_id, 操作下标)`，戳大者胜。
+    - 一致性：整合满足交换律、结合律与幂等性，单测覆盖 6 个并发补丁的全部 720 种到达顺序和 200 个随机补丁的多种乱序，状态哈希完全一致。
+    - 原子性：补丁整合前整体校验，涂刷越界或分级声明不足时整个补丁被拒绝。不同作者写同一寄存器时给出胜者与败者，供 UI 提示。
+  - **语义约定**：
+    - `new_value_json == "null"` 表示删除参数。
+    - 实体模板只能删除；规范操作集没有恢复操作，因此删除不可逆。新建的基因组和规则模块同理，没有删除操作。
+  - **撤销 / 重做**：协作环境下不回滚历史，而是追加逆补丁。只回退仍由本人补丁胜出的寄存器，已被他人覆盖的跳过并报告；若某次编辑已被完全覆盖，就继续撤销更早的一次。地形逆操作压缩为行程矩形。撤销栈上限 256。
+  - **安全分级映射**：
+    - Class 0：`SetWorldParam` 顶层命名空间 `presentation / visual / ui / audio`。
+    - Class 1：`field / economy / buildings / units`，以及 `PaintTerrainRect`、`RemoveEntityTemplate`。
+    - Class 2：`neural / rules`，以及 `UpsertSeedGenome`、`UpdateRuleModule`（规范明确）。
+    - Class 3：`world.*` 与所有未登记的命名空间（最保守）。
+    - 补丁声明可以比所需更保守，不能更低。
+  - **生效时机**：Class 0 在下一渲染帧；Class 1 在下一 Tick 的 Phase 01；Class 2 在严格晚于当前 Tick 的下一个 `tick % 4 == 0`；Class 3 产生 WorldFork 请求。同批次按 HLC 全序输出。
+  - **HLC**：采用标准 Kulkarni 算法。远端时间领先本地 60 秒以上时拒绝；`logical_counter` 溢出 u32 时向墙钟借 1 毫秒，保持严格单调。
+  - **Dockable Workspace**：
+    - 布局模型：布局树由 split（row / column 加比例）与 tabs 组成，所有操作都是纯函数。规范化会删除空组、折叠单子分栏、合并同向嵌套分栏，并把比例归一（最小 0.1）。持久化 JSON 带版本号，并校验 ID 与面板唯一。
+    - 缺省布局：包含项目文档 3.1 的五个面板。
+    - React 视图交互：标签采用 roving tabindex，方向键切换、Delete 关闭；分隔条遵循 WAI-ARIA Window Splitter 模式，支持方向键与 Home/End；标签可拖放停靠到中心或四边。
+    - 拖放状态：保存在组件内而非 DataTransfer，既便于无头测试，也能阻止从外部窗口拖入伪造面板。
+  - **快捷键**：Studio 动作 30–36 由 `StudioCommands` 分派，播放频率缺省 30 Hz。在输入框内不带修饰键时不触发单字母快捷键。`Ctrl+S` 只在规则编辑器（`Code_Editor` 上下文）生效。
+- **构建与测试约定**：
+  - **测试**：依赖工作区包的 TS 包在 vitest 中把 `@rynvek/*` 别名到源码，`pnpm --filter <pkg> test` 无需预先构建。React 组件测试文件以 `// @vitest-environment jsdom` 声明环境。
+  - **typecheck**：在 turbo 中先构建依赖包（`dependsOn: ["^build"]`）。
+  - **许可证**：五个 M5 包均为 `AGPL-3.0-only`。`protocols/schemas/*.json` 随协议层采用 `Apache-2.0 WITH LLVM-exception`（REUSE.toml 批量声明）。
