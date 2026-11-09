@@ -1,0 +1,245 @@
+{
+  "format": "rynvek.rule-graph.v1",
+  "name": "forager.metabolism",
+  "reads": [
+    {
+      "component": "energy.value",
+      "ty": "Q8_8"
+    },
+    {
+      "component": "genome.metabolic_rate",
+      "ty": "Q8_8"
+    }
+  ],
+  "writes": [
+    {
+      "component": "energy.value",
+      "ty": "Q8_8"
+    },
+    {
+      "component": "field.nutrient",
+      "ty": "Q8_8"
+    }
+  ],
+  "nodes": [
+    {
+      "op": "LoadComponent",
+      "component": "energy.value"
+    },
+    {
+      "op": "LoadComponent",
+      "component": "genome.metabolic_rate"
+    },
+    {
+      "op": "SampleField",
+      "channel": "nutrient"
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "64"
+    },
+    {
+      "op": "Mul",
+      "args": [
+        2,
+        3
+      ]
+    },
+    {
+      "op": "NeighborCount"
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "16"
+    },
+    {
+      "op": "Mul",
+      "args": [
+        5,
+        6
+      ]
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "0"
+    },
+    {
+      "op": "BoundedForBegin",
+      "maxIters": 8
+    },
+    {
+      "op": "Phi",
+      "args": [
+        8,
+        12
+      ]
+    },
+    {
+      "op": "LoadNeighborComponent",
+      "args": [
+        9
+      ],
+      "component": "energy.value"
+    },
+    {
+      "op": "Add",
+      "args": [
+        10,
+        11
+      ]
+    },
+    {
+      "op": "BoundedForEnd"
+    },
+    {
+      "op": "ConstI32",
+      "imm": "0"
+    },
+    {
+      "op": "CmpGt",
+      "args": [
+        5,
+        14
+      ]
+    },
+    {
+      "op": "Div",
+      "args": [
+        10,
+        5
+      ]
+    },
+    {
+      "op": "Sub",
+      "args": [
+        16,
+        0
+      ]
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "32"
+    },
+    {
+      "op": "Mul",
+      "args": [
+        17,
+        18
+      ]
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "0"
+    },
+    {
+      "op": "Select",
+      "args": [
+        15,
+        19,
+        20
+      ]
+    },
+    {
+      "op": "RandomQ8_8",
+      "stream": 1
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "128"
+    },
+    {
+      "op": "CmpGt",
+      "args": [
+        22,
+        23
+      ]
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "4"
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "0"
+    },
+    {
+      "op": "Select",
+      "args": [
+        24,
+        25,
+        26
+      ]
+    },
+    {
+      "op": "Add",
+      "args": [
+        0,
+        4
+      ]
+    },
+    {
+      "op": "Add",
+      "args": [
+        28,
+        21
+      ]
+    },
+    {
+      "op": "Add",
+      "args": [
+        1,
+        7
+      ]
+    },
+    {
+      "op": "Add",
+      "args": [
+        30,
+        27
+      ]
+    },
+    {
+      "op": "Sub",
+      "args": [
+        29,
+        31
+      ]
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "0"
+    },
+    {
+      "op": "ConstQ8_8",
+      "imm": "25600"
+    },
+    {
+      "op": "Clamp",
+      "args": [
+        32,
+        33,
+        34
+      ]
+    },
+    {
+      "op": "EmitComponentWrite",
+      "args": [
+        35
+      ],
+      "component": "energy.value"
+    },
+    {
+      "op": "Neg",
+      "args": [
+        4
+      ]
+    },
+    {
+      "op": "EmitFieldDeposit",
+      "args": [
+        37
+      ],
+      "channel": "nutrient"
+    }
+  ]
+}
