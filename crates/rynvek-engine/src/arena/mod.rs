@@ -454,18 +454,38 @@ impl<C: MonotonicClock> ArenaSession<C> {
         Ok(ack)
     }
 
-    fn advance(&mut self, ticks: u32) -> Vec<Envelope> {
+    /// 推进权威世界 `ticks` 个 Tick，返回各阵营可见的事件（按阵营编号升序；全局事件每个阵营各一份）。
+    ///
+    /// 由 `advance` 消息（本地 / PvE / 测试）与 `rynvek-server` 的实时 Tick 驱动共用；
+    /// 调用方负责把事件与观测按自己的线上格式下发。
+    pub fn step_world(&mut self, ticks: u32) -> BTreeMap<u32, Vec<RtsEvent>> {
         self.world.run(ticks as u64);
         let events = self.world.drain_events();
-        let factions: Vec<u32> = (0..self.world.factions.len() as u32).collect();
-        for f in factions {
-            let q = self.pending_events.entry(f).or_default();
-            q.extend(
-                events
+        (0..self.world.factions.len() as u32)
+            .map(|f| {
+                let visible = events
                     .iter()
                     .filter(|e| event_visible_to(e, FactionId(f as u8)))
-                    .cloned(),
-            );
+                    .cloned()
+                    .collect();
+                (f, visible)
+            })
+            .collect()
+    }
+
+    /// 某连接身份入座的阵营
+    pub fn seat_faction(&self, id: &str) -> Option<u32> {
+        self.seats.get(id).map(|s| s.faction)
+    }
+
+    /// 离座（连接关闭）；其持有的租约保留到过期，以便断线重连（`ResumeToken`）后继续使用
+    pub fn leave(&mut self, id: &str) -> bool {
+        self.seats.remove(id).is_some()
+    }
+
+    fn advance(&mut self, ticks: u32) -> Vec<Envelope> {
+        for (f, events) in self.step_world(ticks) {
+            self.pending_events.entry(f).or_default().extend(events);
         }
         let mut out = Vec::new();
         for (id, seat) in &self.seats {
