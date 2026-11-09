@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rynvek.dev/schemas/audio-manifest.schema.json",
+  "title": "Rynvek AudioManifest",
+  "description": "语义音频事件到音源的映射。开发期 24 类事件均为程序化占位（status: placeholder），后期替换为 CC0 / 原创 .ogg 文件。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "events"
+  ],
+  "properties": {
+    "schema": {
+      "const": "rynvek.audio-manifest.v1"
+    },
+    "events": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "standardEventId": {
+      "enum": [
+        "ui.hover",
+        "ui.click",
+        "ui.confirm",
+        "ui.cancel",
+        "ui.error",
+        "ui.panel_toggle",
+        "building.placed",
+        "building.completed",
+        "building.destroyed",
+        "building.extractor_cycle",
+        "unit.spawned",
+        "unit.selected",
+        "unit.order_move",
+        "unit.order_attack",
+        "combat.weapon_pulse",
+        "combat.spore_launch",
+        "combat.impact_kinetic",
+        "combat.shield_hit",
+        "combat.explosion_large",
+        "neural.spike_cluster",
+        "neural.sync_lock",
+        "neural.mutation_epoch",
+        "field.beacon_pulse",
+        "alert.nexus_under_attack"
+      ],
+      "description": "规范 12.2 的 24 类标准语义事件（占位条目只能取这些值）"
+    },
+    "entry": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/placeholderEntry"
+        },
+        {
+          "$ref": "#/$defs/assetEntry"
+        }
+      ]
+    },
+    "placeholderEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "bus"
+      ],
+      "properties": {
+        "status": {
+          "const": "placeholder"
+        },
+        "bus": {
+          "enum": [
+            "sfx_ui",
+            "sfx_world",
+            "sfx_combat",
+            "voice_alert",
+            "neural_sonify"
+          ],
+          "description": "输出混音总线"
+        },
+        "gain": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "条目级增益，缺省 1"
+        },
+        "cooldown_ms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "同一事件最短重复触发间隔（毫秒）"
+        },
+        "max_voices": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "description": "同一事件最大并发发声数"
+        }
+      }
+    },
+    "assetEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "bus",
+        "src",
+        "license"
+      ],
+      "properties": {
+        "status": {
+          "const": "asset"
+        },
+        "bus": {
+          "enum": [
+            "sfx_ui",
+            "sfx_world",
+            "sfx_combat",
+            "voice_alert",
+            "neural_sonify"
+          ],
+          "description": "输出混音总线"
+        },
+        "gain": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "条目级增益，缺省 1"
+        },
+        "cooldown_ms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "同一事件最短重复触发间隔（毫秒）"
+        },
+        "max_voices": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64,
+          "description": "同一事件最大并发发声数"
+        },
+        "src": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![a-zA-Z][a-zA-Z0-9+.-]*:)[A-Za-z0-9_./-]+\\.ogg$",
+          "description": "相对清单目录的 .ogg 路径"
+        },
+        "license": {
+          "enum": [
+            "CC0-1.0",
+            "CC-BY-4.0"
+          ]
+        }
+      }
+    }
+  }
+}
