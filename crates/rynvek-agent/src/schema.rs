@@ -10,7 +10,7 @@
 //! `items`、`properties`、`required`、`additionalProperties`。对象 Schema 未声明 `additionalProperties`
 //! 时按**严格模式**拒绝未知字段（Draft 2020-12 缺省允许；LLM 幻觉字段应尽早暴露，ERRATA E-030）。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::AgentError;
@@ -19,7 +19,7 @@ use crate::error::AgentError;
 pub const AGENT_TOOLS_V1_JSON: &str = include_str!("../../../protocols/schemas/agent-tools.v1.json");
 
 /// 单个工具声明
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolSchema {
     pub name: String,
     pub description: String,
