@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Python `rynvek` 科研与 Gymnasium / PettingZoo 接口包（规范 1.1：Python >= 3.12、PyO3 0.23+、Arrow 53+，Maturin 构建）。
+# 依赖版本由同目录 `uv.lock` 精确锁定；本地环境用 `cargo xtask python-env` 在 `python/.venv` 内可复现地创建。
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "rynvek"
+version = "0.1.0"
+description = "Rynvek 科研接口：ArenaSim 仿真、Arrow 零拷贝观测、Gymnasium / PettingZoo 环境与 Lab 批量实验"
+readme = "README.md"
+requires-python = ">=3.12"
+# 纯 Python 层（rynvek/*.py）为 Apache-2.0 WITH LLVM-exception（GAP-15）；
+# 随 wheel 分发的原生扩展 rynvek._native 链接引擎代码，为 AGPL-3.0-only（见 docs/ERRATA.md）。
+license = "Apache-2.0 WITH LLVM-exception AND AGPL-3.0-only"
+authors = [{ name = "The Rynvek Contributors" }]
+dependencies = [
+    "gymnasium>=1.4,<2",
+    "numpy>=2.5,<3",
+    "pettingzoo>=1.27,<2",
+    "pyarrow>=26,<27",
+]
+
+[dependency-groups]
+dev = [
+    "maturin==1.16.0",
+    "pytest==9.2.0",
+]
+
+[tool.maturin]
+manifest-path = "native/Cargo.toml"
+module-name = "rynvek._native"
+python-source = "."
+python-packages = ["rynvek"]
+features = ["extension-module"]
+
+[tool.uv]
+# 项目本身由 `maturin develop` 安装（增量编译原生扩展），uv 只负责锁定与安装第三方依赖
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["error"]
