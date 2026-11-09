@@ -21,6 +21,7 @@ pub mod binding;
 pub mod device;
 pub mod error;
 pub mod kernel;
+pub mod kernels;
 pub mod profile;
 pub mod readback;
 pub mod recovery;
