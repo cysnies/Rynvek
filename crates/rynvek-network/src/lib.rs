@@ -17,10 +17,14 @@
 pub mod control;
 pub mod error;
 pub mod frame;
+pub mod link;
 pub mod replication;
 pub mod visibility;
+pub mod websocket;
+pub mod webtransport;
 
 pub use error::NetError;
 pub use frame::{Frame, FrameDecoder, FrameEncoder, SequenceTracker, decode_message};
+pub use link::{Link, TransportKind};
 pub use replication::{EntityRecord, GhostRecord, ReplicaState, Replicator, StatePacket};
 pub use visibility::VisibilityGrid;
