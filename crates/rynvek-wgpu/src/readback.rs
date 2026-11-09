@@ -218,6 +218,72 @@ impl ReadbackRing {
     }
 }
 
+/// 一次性非阻塞回读（恢复校验探针等低频场景）：录制拷贝 → 提交后 `map_async` → 轮询取回
+#[derive(Debug)]
+pub struct OneShotReadback {
+    staging: wgpu::Buffer,
+    bytes: u64,
+    flag: Arc<AtomicU8>,
+    requested: bool,
+}
+
+/// 一次性回读的轮询结果
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OneShotPoll {
+    Pending,
+    Ready(Vec<u8>),
+    Failed,
+}
+
+impl OneShotReadback {
+    /// 录制从 `src[0..bytes]` 到新暂存缓冲的拷贝
+    pub fn encode(device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, src: &wgpu::Buffer, bytes: u64) -> Self {
+        let size = bytes.div_ceil(wgpu::COPY_BUFFER_ALIGNMENT).max(1) * wgpu::COPY_BUFFER_ALIGNMENT;
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rynvek.readback.oneshot"),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        encoder.copy_buffer_to_buffer(src, 0, &staging, 0, size);
+        Self {
+            staging,
+            bytes,
+            flag: Arc::new(AtomicU8::new(FLAG_PENDING)),
+            requested: false,
+        }
+    }
+
+    /// `queue.submit` 之后调用
+    pub fn after_submit(&mut self) {
+        if !self.requested {
+            self.requested = true;
+            let flag = Arc::clone(&self.flag);
+            self.staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                flag.store(if r.is_ok() { FLAG_OK } else { FLAG_FAILED }, Ordering::Release);
+            });
+        }
+    }
+
+    /// 非阻塞轮询（调用方负责 `device.poll(PollType::Poll)`）
+    pub fn poll(&self) -> OneShotPoll {
+        match self.flag.load(Ordering::Acquire) {
+            FLAG_OK => {
+                let data = self
+                    .staging
+                    .slice(..)
+                    .get_mapped_range()
+                    .map(|v| v[..self.bytes as usize].to_vec());
+                self.staging.unmap();
+                self.flag.store(FLAG_FAILED, Ordering::Release);
+                data.map_or(OneShotPoll::Failed, OneShotPoll::Ready)
+            }
+            FLAG_FAILED => OneShotPoll::Failed,
+            _ => OneShotPoll::Pending,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

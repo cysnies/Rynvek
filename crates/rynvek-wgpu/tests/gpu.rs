@@ -277,3 +277,27 @@ fn work_on_lost_device_surfaces_as_error_not_panic() {
     }
     let _ = GpuDeviceOwner::request_blocking(Default::default());
 }
+
+#[test]
+fn oneshot_readback_is_non_blocking_until_mapped() {
+    use rynvek_wgpu::{OneShotPoll, OneShotReadback};
+    let Some(gpu) = common::gpu() else { return };
+    let device = gpu.device();
+    let src =
+        rynvek_wgpu::kernel::create_storage_buffer(device, "src", &[1, 2, 3, 4, 5, 6], wgpu::BufferUsages::empty())
+            .unwrap();
+    let mut enc = device.create_command_encoder(&Default::default());
+    let mut rb = OneShotReadback::encode(device, &mut enc, &src, 6);
+    gpu.queue().submit([enc.finish()]);
+    rb.after_submit();
+    let mut got = OneShotPoll::Pending;
+    for _ in 0..2000 {
+        gpu.poll_nonblocking();
+        got = rb.poll();
+        if got != OneShotPoll::Pending {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    assert_eq!(got, OneShotPoll::Ready(vec![1, 2, 3, 4, 5, 6]));
+}

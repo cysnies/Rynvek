@@ -32,7 +32,9 @@ pub use binding::{BindGroupSlot, BindingKind, BindingSpec, DIAGNOSTICS_BINDING};
 pub use device::{DeviceLostInfo, GpuDeviceOwner, GpuDeviceRequest};
 pub use error::{GpuError, GpuResult};
 pub use profile::{AdapterCapabilitySummary, ComputeCapabilityProfile, classify_compute_capability};
-pub use readback::{READBACK_RING_SLOTS, ReadbackRing, ReadbackRingState, ReadbackSlotState};
+pub use readback::{
+    OneShotPoll, OneShotReadback, READBACK_RING_SLOTS, ReadbackRing, ReadbackRingState, ReadbackSlotState,
+};
 pub use recovery::{
     DeviceLostRecovery, InvalidRecoveryTransition, RecoveryEvent, RecoveryOutcome, RecoveryPhase, RecoveryStep,
 };
