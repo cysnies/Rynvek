@@ -15,6 +15,7 @@
 #![deny(unsafe_code)]
 
 pub mod arena_map;
+pub mod combat;
 pub mod ids;
 pub mod map_gen;
 pub mod math;
