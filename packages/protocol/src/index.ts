@@ -6,4 +6,6 @@
  */
 
 export * from "./capability.js";
+export * from "./envelope.js";
+export * from "./ids.js";
 export * from "./wire.js";
