@@ -1,0 +1,22 @@
+[package]
+name = "rynvek-render"
+description = "Rynvek Tier 3 世界渲染器：VisualizationProvider、L0–L7 渲染层、GPU Instancing、GPU ID Picking 与 L0–L4 神经多尺度 LOD"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+rynvek-core.workspace = true
+rynvek-wgpu.workspace = true
+wgpu.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+pollster.workspace = true
+
+[lints]
+workspace = true

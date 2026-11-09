@@ -973,6 +973,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "pollster",
+ "rynvek-core",
+ "rynvek-wgpu",
+ "wgpu",
+]
+
+[[package]]
 name = "rynvek-rules"
 version = "0.1.0"
 dependencies = [
