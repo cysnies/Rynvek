@@ -1,0 +1,30 @@
+{
+  "$comment": "React 主线程 ⇄ Dedicated Engine Worker 协议的跨语言夹具：rynvek-engine（serde）与 @rynvek/engine（protocol.ts）各自断言逐字段往返一致。ENGINE_INIT 的 canvas 为 OffscreenCanvas，不可 JSON 化，夹具中省略。",
+  "commands": [
+    { "type": "ENGINE_INIT", "width": 1280, "height": 720, "devicePixelRatio": 2.0, "worldId": "00112233445566778899aabbccddeeff", "gpuMode": "auto" },
+    { "type": "RESIZE", "width": 640, "height": 360, "devicePixelRatio": 1.5 },
+    { "type": "STEP", "ticks": 3 },
+    { "type": "START", "tickRate": 30 },
+    { "type": "PAUSE" },
+    { "type": "SET_CAMERA", "centerX": 128.0, "centerY": 64.5, "pxPerCell": 8.0 },
+    { "type": "PICK_REQUEST", "requestId": 7, "x": 100, "y": 200 },
+    { "type": "SET_LAYER_MASK", "mask": 255 },
+    { "type": "SET_HEATMAP_CHANNEL", "channel": "signal_a" },
+    { "type": "SIMULATE_DEVICE_LOST" },
+    { "type": "SHUTDOWN" }
+  ],
+  "events": [
+    { "type": "ENGINE_READY", "backend": "webgpu", "profile": "TierC", "adapter": "llvmpipe (Gl)", "generation": 0 },
+    { "type": "ENGINE_READY", "backend": "cpu-reference", "profile": null, "adapter": null, "generation": 0 },
+    { "type": "TICK_COMMITTED", "tick": 42, "stateRoot": "aa00000000000000000000000000000000000000000000000000000000000001" },
+    { "type": "FRAME_RENDERED", "tick": 42 },
+    { "type": "PICK_RESULT", "requestId": 7, "denseIndex": 3 },
+    { "type": "PICK_RESULT", "requestId": 8, "denseIndex": null },
+    { "type": "DEVICE_LOST", "tick": 43, "reason": "Destroyed" },
+    { "type": "RECOVERY_PROGRESS", "step": 1, "phase": "Quarantined" },
+    { "type": "RECOVERED", "generation": 1, "resumeTick": 44 },
+    { "type": "BACKEND_DEGRADED", "reason": "重获设备连续失败" },
+    { "type": "GPU_DIVERGENCE", "tick": 45, "channel": "nutrient" },
+    { "type": "ENGINE_ERROR", "code": 24577, "message": "无适配器" }
+  ]
+}
