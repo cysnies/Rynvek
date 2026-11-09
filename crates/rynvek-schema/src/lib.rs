@@ -5,6 +5,7 @@
 //!
 //! Rynvek 的 Tier 0 Schema 基础设施：
 //!
+//! - [`canonical_cbor`]：RFC 8949 核心确定性 CBOR 编码；
 //! - [`canonical_json`]：RFC 8785 Canonical JSON 序列化；
 //! - [`migration`]：Schema 有向迁移图 `SchemaMigrationGraph` 与确定性 BFS 最短路径搜索。
 //!
@@ -12,5 +13,6 @@
 
 #![deny(unsafe_code)]
 
+pub mod canonical_cbor;
 pub mod canonical_json;
 pub mod migration;
