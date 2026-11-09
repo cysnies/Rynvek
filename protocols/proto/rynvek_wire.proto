@@ -1,0 +1,73 @@
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Rynvek 实时流控制信令（WireChannelId 0 = Control，GAP-16：网络控制信令用 Protobuf v3）。
+//
+// 每个 Control 通道帧的负载恰好是一条 ControlMessage。其他通道：
+//   1 Command / 2 Query / 3 Event —— UTF-8 JSON（见 rynvek-server 的 rynvek-arena/1 映射）；
+//   4 StateStream —— 16B 对齐列式二进制 + LZ4（rynvek-network::replication）；
+//   5 Telemetry —— UTF-8 JSON。
+syntax = "proto3";
+
+package rynvek.wire.v1;
+
+// 客户端在连接建立后发送的第一帧
+message ClientHello {
+  // 线上协议标识，当前为 "rynvek-wire/1"
+  string protocol = 1;
+  // 96 字节 CapabilityToken（须含 world.connect）
+  bytes capability_token = 2;
+  // 目标对局 / 世界的 16 字节 UUID
+  bytes world_id = 3;
+  // 申请入座的阵营
+  uint32 faction = 4;
+  // 断线重连令牌（32 字节；首次连接为空）
+  bytes resume_token = 5;
+  // 客户端版本（诊断用）
+  string client_version = 6;
+}
+
+// 握手成功应答
+message ServerHello {
+  bytes session_id = 1;
+  uint64 principal_id = 2;
+  uint32 faction = 3;
+  uint64 current_tick = 4;
+  bytes resume_token = 5;
+  uint32 tick_rate_hz = 6;
+  uint32 keyframe_interval_ticks = 7;
+  // 服务端构建对应的 Git Commit（AGPLv3 §13，与 /api/v1/meta/source-offer 一致）
+  string source_commit = 8;
+}
+
+message Heartbeat {
+  uint64 nonce = 1;
+  uint64 client_time_ms = 2;
+}
+
+message HeartbeatAck {
+  uint64 nonce = 1;
+  uint64 server_tick = 2;
+}
+
+// 任一方关闭会话前发送；error_code 为 RynvekErrorCode（0 表示正常关闭）
+message Disconnect {
+  uint32 error_code = 1;
+  string reason = 2;
+}
+
+// 客户端检测到状态缺口时请求下一帧为关键帧
+message KeyframeRequest {
+  uint64 last_applied_tick = 1;
+}
+
+message ControlMessage {
+  oneof body {
+    ClientHello hello = 1;
+    ServerHello welcome = 2;
+    Heartbeat heartbeat = 3;
+    HeartbeatAck heartbeat_ack = 4;
+    Disconnect disconnect = 5;
+    KeyframeRequest keyframe_request = 6;
+  }
+}
