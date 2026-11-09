@@ -11,7 +11,7 @@
 //! - [`fixed`]：确定性定点数 `Q32_32` / `Q8_8`；
 //! - [`hash`]：BLAKE3-256 内容哈希 `Blake3Hash`；
 //! - [`rng`]：无状态计数器式确定性随机数 `Philox4x32-10`；
-//! - [`units`]：编译期物理量纲 `Quantity<D>`；
+//! - [`units`]：编译期物理量纲 `Quantity<D>`。
 //!
 //! 本 crate 不依赖任何内部业务 crate，且禁止 `unsafe` 代码。
 
@@ -24,3 +24,10 @@ pub mod fixed;
 pub mod hash;
 pub mod rng;
 pub mod units;
+
+// 常用基础类型的根级重导出，便于上层 crate 直接 `use rynvek_core::Q32_32;`
+pub use coord::WorldPosition2D;
+pub use error::{ErrorRecoveryAction, RynvekErrorCode};
+pub use fixed::{Q8_8, Q32_32};
+pub use hash::Blake3Hash;
+pub use rng::RandomKey;
