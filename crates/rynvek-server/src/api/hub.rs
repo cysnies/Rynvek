@@ -6,6 +6,8 @@
 //! 发布签名消息（ERRATA）：`"rynvek-package/1\0" ‖ package_id ‖ "\0" ‖ semver ‖ "\0" ‖ BLAKE3(artifact)`，
 //! 用发布者 Principal 在 `principals.ed25519_pubkey` 登记的公钥验签（失败 `0x9001`）。
 //! `dependencies.lock`（规范 10.3.1）中的每个依赖都必须已在 Hub 发布、未吊销（`0x9002`）且产物哈希一致（`0x9003`）。
+//! 之后执行服务端静态扫描与 1,000 Tick 沙箱压力测试（[`crate::verify`]），拒绝时 `0x9004`；
+//! 通过的社区包授予 TrustLevel 2，官方组织保持 TrustLevel 1。
 
 use axum::Json;
 use axum::body::Bytes;
@@ -126,8 +128,7 @@ struct Lockfile {
 
 /// `15 PUT /api/v1/hub/packages/{id}/{ver}`（`hub.publish`）
 ///
-/// 已实现：签名验证、命名空间与组织授权、依赖锁校验、版本不可覆盖、产物入 CAS。
-/// 服务端静态扫描与沙箱验证（`.rview` 着色器 `0x9004` 等）属于 M8。
+/// 顺序：签名验证 → 命名空间与组织授权 → 依赖锁校验 → 静态扫描与沙箱 → 产物入 CAS（版本不可覆盖）。
 pub async fn publish(
     State(app): State<AppState>,
     headers: HeaderMap,
@@ -237,14 +238,50 @@ pub async fn publish(
             ));
         }
     }
+    // 静态扫描与沙箱（CPU 密集，移出异步运行时）
+    let plugins = app.plugin_runtime()?;
+    let report = {
+        let (kind, id, ver, license, lockfile) = (
+            req.package_kind.clone(),
+            id.clone(),
+            ver.clone(),
+            req.license_spdx.clone(),
+            req.lockfile.clone(),
+        );
+        let official = org.is_official();
+        let artifact = artifact.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::verify::verify(
+                &crate::verify::VerifyInput {
+                    kind: &kind,
+                    package_id: &id,
+                    semver: &ver,
+                    license_spdx: &license,
+                    lockfile: &lockfile,
+                    artifact: &artifact,
+                    official,
+                },
+                &plugins,
+            )
+        })
+        .await
+        .map_err(|e| ApiError::internal(format!("验证任务异常退出：{e}")))??
+    };
     let cid = app.inner.blobs.put(&artifact)?;
-    if existing.is_none() {
+    let granted = i16::from(report.trust_level);
+    let trust_level = match &existing {
+        None => Some(granted),
+        // 已有包：只会因新版本通过扫描而提升信任等级，不会降级
+        Some(p) if granted < p.trust_level => Some(granted),
+        Some(_) => None,
+    };
+    if let Some(trust_level) = trust_level {
         app.store()
             .upsert_package(PackageRow {
                 package_id: id.clone(),
                 org_id,
                 package_kind: req.package_kind.clone(),
-                trust_level: if org.is_official() { 1 } else { 3 },
+                trust_level,
                 revoked: false,
             })
             .await?;
@@ -275,7 +312,14 @@ pub async fn publish(
             "package_id": id,
             "semver": ver,
             "artifact_cid_blake3": cid.to_hex(),
-            "verification": { "signature": "ok", "lockfile": "ok", "static_scan": "pending" },
+            "trust_level": trust_level.or(existing.as_ref().map(|p| p.trust_level)).unwrap_or(granted),
+            "verification": {
+                "signature": "ok",
+                "lockfile": "ok",
+                "static_scan": report.static_scan,
+                "sandbox": report.sandbox,
+                "findings": report.findings,
+            },
         })),
     )
         .into_response())
