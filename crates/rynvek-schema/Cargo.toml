@@ -1,0 +1,16 @@
+[package]
+name = "rynvek-schema"
+description = "Rynvek Tier 0 Schema 基础设施：SchemaRegistry、Canonical JSON/CBOR 与 MigrationGraph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
