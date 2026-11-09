@@ -1066,6 +1066,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-wasm"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "rynvek-core",
+ "rynvek-engine",
+ "rynvek-wgpu",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
 name = "rynvek-wgpu"
 version = "0.1.0"
 dependencies = [

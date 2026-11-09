@@ -41,6 +41,8 @@ rynvek-engine = { path = "crates/rynvek-engine" }
 blake3 = "1.8"
 bytemuck = { version = "1.23", features = ["derive"] }
 half = "2.4"
+# 浏览器 Worker ABI（与 wgpu 30.0.1 的 WebGPU 后端所用版本一致）
+js-sys = "0.3.107"
 naga = { version = "30", features = ["wgsl-in"] }
 pollster = "0.4"
 rquickjs = { version = "0.11", default-features = false, features = ["std"] }
@@ -48,6 +50,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 tempfile = "3.20"
+wasm-bindgen = "0.2.130"
+wasm-bindgen-futures = "0.4.80"
+web-sys = "0.3.107"
 # 规范 07 §7.1 冻结：wgpu 30.0.1（精确锁定，严禁降级）
 wgpu = "=30.0.1"
 zstd = "0.13"
