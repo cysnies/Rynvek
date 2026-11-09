@@ -70,7 +70,7 @@ fn heap_bomb_hits_memory_limit_with_0x5005() {
         heap_limit_bytes: 8 * 1024 * 1024,
         ..QuickJsSandboxConfig::default()
     };
-    let src = "function tick() { const a = []; for (let i = 0; i < 1e7; i++) { a.push(new Array(1024).fill(i)); } return a.length; }";
+    let src = "function tick() { return 'x'.repeat(1 << 24).length; }";
     let sb = QuickJsSandbox::new(src, config).unwrap();
     let err = sb.run_tick("null").unwrap_err();
     assert_eq!(err.code, RynvekErrorCode::SandboxMemoryLimitExceeded, "{err:?}");
