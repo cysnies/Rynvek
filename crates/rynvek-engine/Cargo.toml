@@ -12,10 +12,12 @@ publish.workspace = true
 [dependencies]
 bytemuck.workspace = true
 rynvek-compute.workspace = true
+rynvek-agent.workspace = true
 rynvek-core.workspace = true
 rynvek-field.workspace = true
 rynvek-neural.workspace = true
 rynvek-render.workspace = true
+rynvek-rts.workspace = true
 rynvek-rules.workspace = true
 rynvek-simulation.workspace = true
 rynvek-wgpu.workspace = true

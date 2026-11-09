@@ -943,11 +943,13 @@ name = "rynvek-engine"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "rynvek-agent",
  "rynvek-compute",
  "rynvek-core",
  "rynvek-field",
  "rynvek-neural",
  "rynvek-render",
+ "rynvek-rts",
  "rynvek-rules",
  "rynvek-simulation",
  "rynvek-wgpu",
