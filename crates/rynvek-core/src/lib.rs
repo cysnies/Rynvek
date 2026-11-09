@@ -6,6 +6,7 @@
 //! Rynvek 的 Tier 0 内核基础类型库（K0 层），为所有上层 crate 提供：
 //!
 //! - [`constants`]：全局冻结的时钟与空间常数；
+//! - [`coord`]：统一权威坐标 `WorldPosition2D`；
 //! - [`error`]：跨语言统一错误码 `RynvekErrorCode` 与恢复策略；
 //! - [`fixed`]：确定性定点数 `Q32_32` / `Q8_8`；
 //!
@@ -14,5 +15,6 @@
 #![deny(unsafe_code)]
 
 pub mod constants;
+pub mod coord;
 pub mod error;
 pub mod fixed;
