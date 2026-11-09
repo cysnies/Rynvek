@@ -95,6 +95,8 @@ impl LifKernels {
 
 /// GPU 驻留的一批 LIF 脑实例
 #[derive(Debug)]
+// 状态缓冲仅由阻塞下载接口读取，浏览器目标下这些接口不编译
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub struct GpuLifBatch {
     brain_count: u32,
     n_hid: u32,
