@@ -10,8 +10,12 @@ use std::fmt;
 use std::path::Path;
 
 use rynvek_core::coord::WorldPosition2D;
-use rynvek_core::fixed::Q32_32;
+use rynvek_core::fixed::{Q8_8, Q32_32};
 use rynvek_core::rng::philox4x32_10;
+use rynvek_neural::{
+    LIF_INPUTS, LIF_LEAK_BETA_Q8, LIF_OUTPUTS, lif_membrane_candidate_q8, lif_theta_eff_q8,
+    step_lif_brain_deterministic,
+};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -268,39 +272,55 @@ struct LifExpected {
     refractory_ticks_set: u8,
 }
 
-/// 脉冲后进入的不应期 Tick 数（规范 05 §5.1）
-const LIF_REFRACTORY_TICKS: u8 = 2;
-/// 去甲肾上腺素阈值调制系数：0.30 × 256 ≈ 77（规范 05 §5.1）
-const LIF_NE_THRESHOLD_GAIN_Q8: i32 = 77;
-/// 基础发放阈值 1.0（Q8.8）
-const LIF_BASE_THRESHOLD_Q8: i32 = 256;
-/// 未发放时膜电位的钳制范围 [-2.0, +2.0]（Q8.8）
-const LIF_MEMBRANE_CLAMP_Q8: i32 = 512;
-
-/// 单个 LIF 神经元单步积分的参照计算。
+/// 单个 LIF 神经元单步积分：直接调用 `rynvek-neural` 的权威实现。
 ///
-/// 逐式对应规范 05 §5.1 `step_lif_brain_deterministic` 中单个隐藏神经元的整数运算；
-/// M0 尚无 `rynvek-neural`，待其在 M3 落地后，此处改为直接调用其权威实现。
-fn lif_reference_step(inputs: &LifInputs) -> LifExpected {
-    let theta_eff = LIF_BASE_THRESHOLD_Q8 - ((LIF_NE_THRESHOLD_GAIN_Q8 * inputs.m_ne_q8) >> 8);
-    let v_candidate = ((inputs.v_prev_q8 * inputs.leak_beta_q8) >> 8) + inputs.syn_in_q8;
-    let spiked = v_candidate >= theta_eff;
-    let (v_after, refractory) = if spiked {
-        (0, LIF_REFRACTORY_TICKS)
-    } else {
-        (v_candidate.clamp(-LIF_MEMBRANE_CLAMP_Q8, LIF_MEMBRANE_CLAMP_Q8), 0)
-    };
-    LifExpected {
-        theta_eff_q8: theta_eff,
-        v_candidate_q8: v_candidate,
-        spiked,
-        v_after_reset_q8: v_after,
-        refractory_ticks_set: refractory,
+/// - `theta_eff` / `v_candidate` 取自与内核逐位一致的公开辅助函数；
+/// - 发放、复位与不应期取自真实运行一次 `step_lif_brain_deterministic`（1 个隐藏神经元，
+///   通道 0 输入 `syn_in` × 权重 1.0，使突触电流恰为 `syn_in`）。
+fn lif_reference_step(inputs: &LifInputs) -> Result<LifExpected, String> {
+    if inputs.leak_beta_q8 != LIF_LEAK_BETA_Q8 {
+        return Err(format!(
+            "leak_beta_q8={} 与内核冻结常量 {LIF_LEAK_BETA_Q8} 不一致",
+            inputs.leak_beta_q8
+        ));
     }
+    let to_i16 = |field: &str, v: i32| i16::try_from(v).map_err(|_| format!("{field}={v} 超出 Q8.8 范围"));
+    let v_prev = to_i16("v_prev_q8", inputs.v_prev_q8)?;
+    let syn_in = to_i16("syn_in_q8", inputs.syn_in_q8)?;
+    let m_ne = to_i16("m_ne_q8", inputs.m_ne_q8)?;
+
+    let mut sensory = [Q8_8::ZERO; LIF_INPUTS];
+    sensory[0] = Q8_8(syn_in);
+    let mut membrane = [Q8_8(v_prev)];
+    let mut refractory = [0u8];
+    let mut ring = [0u64];
+    let mut weights_base = vec![0i16; LIF_INPUTS + LIF_OUTPUTS];
+    weights_base[0] = Q8_8::ONE.0;
+    let mut weights_delta = vec![0i16; LIF_INPUTS + LIF_OUTPUTS];
+    let mut eligibility = vec![0i16; LIF_INPUTS];
+    step_lif_brain_deterministic(
+        &sensory,
+        &mut membrane,
+        &mut refractory,
+        &mut ring,
+        &weights_base,
+        &mut weights_delta,
+        &mut eligibility,
+        [0, 0, m_ne, 0],
+        false,
+    );
+
+    Ok(LifExpected {
+        theta_eff_q8: lif_theta_eff_q8(inputs.m_ne_q8),
+        v_candidate_q8: lif_membrane_candidate_q8(inputs.v_prev_q8, inputs.leak_beta_q8, inputs.syn_in_q8),
+        spiked: ring[0] & 1 == 1,
+        v_after_reset_q8: membrane[0].0 as i32,
+        refractory_ticks_set: refractory[0],
+    })
 }
 
 fn verify_lif_step(inputs: LifInputs, expected: LifExpected) -> Result<(), String> {
-    expect_eq("lif_step", lif_reference_step(&inputs), expected)
+    expect_eq("lif_step", lif_reference_step(&inputs)?, expected)
 }
 
 #[cfg(test)]
@@ -347,7 +367,7 @@ mod tests {
             syn_in_q8: 10,
             m_ne_q8: 0,
         };
-        let outcome = lif_reference_step(&inputs);
+        let outcome = lif_reference_step(&inputs).unwrap();
         assert!(!outcome.spiked);
         assert_eq!(outcome.v_after_reset_q8, 10);
         assert_eq!(outcome.refractory_ticks_set, 0);

@@ -539,6 +539,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "rynvek-core",
+ "rynvek-neural",
  "serde",
  "serde_json",
 ]
