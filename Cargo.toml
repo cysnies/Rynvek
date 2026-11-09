@@ -26,6 +26,11 @@ rynvek-ecs = { path = "crates/rynvek-ecs" }
 rynvek-storage = { path = "crates/rynvek-storage" }
 rynvek-journal = { path = "crates/rynvek-journal" }
 rynvek-snapshot = { path = "crates/rynvek-snapshot" }
+rynvek-compute = { path = "crates/rynvek-compute" }
+rynvek-compute-cpu = { path = "crates/rynvek-compute-cpu" }
+rynvek-field = { path = "crates/rynvek-field" }
+rynvek-spatial = { path = "crates/rynvek-spatial" }
+rynvek-simulation = { path = "crates/rynvek-simulation" }
 
 # --- 第三方依赖（版本统一在此锁定，成员 crate 通过 `workspace = true` 继承）---
 blake3 = "1.8"

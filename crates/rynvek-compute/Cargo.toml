@@ -1,0 +1,16 @@
+[package]
+name = "rynvek-compute"
+description = "Rynvek Tier 2 计算抽象：ComputeBackend Trait、CapabilityProfile 与 KernelRegistry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+rynvek-core.workspace = true
+
+[lints]
+workspace = true

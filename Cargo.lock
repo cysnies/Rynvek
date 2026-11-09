@@ -281,6 +281,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-compute"
+version = "0.1.0"
+dependencies = [
+ "rynvek-core",
+]
+
+[[package]]
 name = "rynvek-core"
 version = "0.1.0"
 dependencies = [
