@@ -28,12 +28,11 @@ pub enum NetError {
 }
 
 impl NetError {
-    /// 映射到规范错误码：协议违例视为未授权帧（`0x8001`），负载 Schema 错误为 `0x5001`
+    /// 映射到规范错误码：一切线协议违例都视为未授权帧（`0x8001`，连接被关闭）。
+    ///
+    /// 规范 11.4 的 `0x5xxx` 属于规则编译器 / 沙箱，不复用于线协议负载错误（见 ERRATA）。
     pub const fn code(&self) -> RynvekErrorCode {
-        match self {
-            Self::Payload(_) => RynvekErrorCode::RuleStaticTypeCheckFailed,
-            _ => RynvekErrorCode::UnauthorizedCapabilityToken,
-        }
+        RynvekErrorCode::UnauthorizedCapabilityToken
     }
 }
 
