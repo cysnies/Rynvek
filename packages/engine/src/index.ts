@@ -9,4 +9,5 @@
  * - `worker`：Worker 侧胶水 `runEngineWorker`（转交 `rynvek-wasm` 的 `EngineWorker`）。
  */
 
+export * from "./host.js";
 export * from "./protocol.js";
