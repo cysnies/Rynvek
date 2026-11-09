@@ -1,0 +1,87 @@
+[
+  {
+    "name": "query_visible_clusters",
+    "description": "查询当前阵营可见视野内的友方与敌方单位集群摘要及主脑状态",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "region_chunk": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+        "include_enemy": { "type": "boolean" }
+      },
+      "required": ["include_enemy"]
+    }
+  },
+  {
+    "name": "sample_regional_fields",
+    "description": "采样指定 Chunk 区域的 5 通道环境场均值与峰值坐标 (Nutrient, Energy, SignalA, SignalB, Hazard)",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "chunk_x": { "type": "integer" },
+        "chunk_y": { "type": "integer" }
+      },
+      "required": ["chunk_x", "chunk_y"]
+    }
+  },
+  {
+    "name": "issue_strategic_intent",
+    "description": "向指定单位编队或区域下发高层战略意图 (移动集结、进攻推进、采集或防守主脑)",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "unit_archetype": { "type": "string", "enum": ["all", "unit.forager", "unit.striker", "unit.carapace", "unit.spitter", "unit.weaver", "unit.leviathan"] },
+        "order_kind": { "type": "string", "enum": ["Move", "AttackMove", "Harvest", "HoldPosition", "Patrol"] },
+        "target_world_x": { "type": "number" },
+        "target_world_y": { "type": "number" }
+      },
+      "required": ["unit_archetype", "order_kind", "target_world_x", "target_world_y"]
+    }
+  },
+  {
+    "name": "configure_signal_beacon",
+    "description": "调节指定神经调制信标的信息素场注入强度与四维神经调质广播向量 [DA, 5-HT, NE, ACh]",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "beacon_entity_id": { "type": "string" },
+        "signal_channel": { "type": "string", "enum": ["field.signal_a", "field.signal_b"] },
+        "signal_strength": { "type": "number", "minimum": -50.0, "maximum": 50.0 },
+        "neuromodulators": {
+          "type": "array",
+          "items": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      },
+      "required": ["beacon_entity_id", "signal_channel", "signal_strength", "neuromodulators"]
+    }
+  },
+  {
+    "name": "queue_vat_production",
+    "description": "在指定神经孵化槽排队生产指定基因组的单位簇，或发起建筑建造请求",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "vat_entity_id": { "type": "string" },
+        "unit_archetype": { "type": "string" },
+        "genome_slug": { "type": "string" },
+        "count": { "type": "integer", "minimum": 1, "maximum": 5 }
+      },
+      "required": ["vat_entity_id", "unit_archetype", "genome_slug", "count"]
+    }
+  },
+  {
+    "name": "trigger_crucible_breeding",
+    "description": "在演化坩埚中启动科技研发或提取战场高适应度精英基因执行定向突变繁育",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "crucible_entity_id": { "type": "string" },
+        "action": { "type": "string", "enum": ["research_tech", "breed_elite_genome"] },
+        "tech_or_archetype_id": { "type": "string" },
+        "mutation_rate": { "type": "number", "minimum": 0.01, "maximum": 0.25 }
+      },
+      "required": ["crucible_entity_id", "action", "tech_or_archetype_id"]
+    }
+  }
+]
