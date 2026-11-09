@@ -18,6 +18,7 @@
 #![deny(unsafe_code)]
 
 pub mod binding;
+pub mod device;
 pub mod error;
 pub mod profile;
 pub mod readback;
@@ -25,6 +26,7 @@ pub mod recovery;
 pub mod segment;
 
 pub use binding::{BindGroupSlot, BindingKind, BindingSpec, DIAGNOSTICS_BINDING};
+pub use device::{DeviceLostInfo, GpuDeviceOwner, GpuDeviceRequest};
 pub use error::{GpuError, GpuResult};
 pub use profile::{AdapterCapabilitySummary, ComputeCapabilityProfile, classify_compute_capability};
 pub use readback::{READBACK_RING_SLOTS, ReadbackRing, ReadbackRingState, ReadbackSlotState};
