@@ -17,5 +17,12 @@
 pub mod host;
 pub mod scheduler;
 
+// ABI 桥：wasm-bindgen 宏展开的导出符号需要放开 unsafe_code（见模块文档）
+#[cfg(target_arch = "wasm32")]
+#[allow(unsafe_code)]
+mod bridge;
+
+#[cfg(target_arch = "wasm32")]
+pub use bridge::EngineWorker;
 pub use host::{HostPhase, InitPlan, WorkerHost, events_to_json};
 pub use scheduler::TickScheduler;
