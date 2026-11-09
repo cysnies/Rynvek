@@ -1,0 +1,46 @@
+{
+  "name": "@rynvek/studio",
+  "version": "0.1.0",
+  "description": "Rynvek Studio 创作环境：Dockable Workspace、WorldPatch CRDT 实时编辑补丁、四级热更新调度与仿真控制",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "dependencies": {
+    "@rynvek/assets": "workspace:*",
+    "@rynvek/audio": "workspace:*",
+    "@rynvek/core": "workspace:*",
+    "@rynvek/engine": "workspace:*",
+    "@rynvek/ui": "workspace:*",
+    "@rynvek/visualization": "workspace:*"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "jsdom": "^26.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
