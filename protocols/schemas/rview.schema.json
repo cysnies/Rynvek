@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rynvek.dev/schemas/rview.schema.json",
+  "title": "Rynvek .rview 视觉包清单",
+  "description": ".rview（魔数 RYVW）容器内嵌的 UTF-8 清单 JSON。条目按 path 升序、在载荷区内 8 字节对齐紧密排布，每个条目带独立 BLAKE3-256。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "version",
+    "name",
+    "license",
+    "engine_compat",
+    "entries"
+  ],
+  "properties": {
+    "schema": {
+      "const": "rynvek.rview.v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:\\.[a-z0-9]+(?:-[a-z0-9]+)*)+$",
+      "examples": [
+        "rynvek.visual.industrial-default"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "license": {
+      "enum": [
+        "CC0-1.0",
+        "CC-BY-4.0",
+        "AGPL-3.0-only"
+      ]
+    },
+    "engine_compat": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": [
+        ">=0.1.0 <0.2.0"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 65535,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "kind",
+        "media_type",
+        "offset",
+        "length",
+        "blake3_256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^(?!.*(?:^|/)\\.\\.?(?:/|$))[a-z0-9_-]+(?:/[a-z0-9_.-]+)*\\.[a-z0-9]+$"
+        },
+        "kind": {
+          "enum": [
+            "palette",
+            "theme",
+            "shader",
+            "sprite_atlas"
+          ]
+        },
+        "media_type": {
+          "enum": [
+            "application/json",
+            "text/wgsl",
+            "image/png"
+          ]
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "multipleOf": 8
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blake3_256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}
