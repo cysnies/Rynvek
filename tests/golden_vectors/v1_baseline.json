@@ -1,0 +1,63 @@
+{
+  "suite": "rynvek.golden_vectors.v1",
+  "vectors": [
+    {
+      "id": "GV-001-Q32_32_ARITHMETIC",
+      "description": "Q32_32 定点乘法、安全除法与 Newton-Raphson 确定性整数平方根验证",
+      "inputs": {
+        "a_raw_i64": "10737418240",
+        "b_raw_i64": "6442450944",
+        "sqrt_target_raw_i64": "38654705664"
+      },
+      "expected": {
+        "mul_raw_i64": "16106127360",
+        "div_raw_i64": "7158278826",
+        "sqrt_raw_i64": "12884901888"
+      }
+    },
+    {
+      "id": "GV-002-WORLD_POS_CANONICALIZE",
+      "description": "跨 Chunk 负向与正向边界溢出的规范化坐标转换验证",
+      "inputs": {
+        "chunk_x": 3,
+        "chunk_y": -2,
+        "local_x_raw": "1108101562368",
+        "local_y_raw": "-4294967296"
+      },
+      "expected": {
+        "chunk_x": 4,
+        "chunk_y": -3,
+        "local_x_raw": "8589934592",
+        "local_y_raw": "1095216660480"
+      }
+    },
+    {
+      "id": "GV-003-PHILOX4X32_10_ORIGIN",
+      "description": "Philox4x32-10 全零计数器与全零密钥下的 10 轮标准输出向量 (与 D.E. Shaw Random123 官方标准严格一致)",
+      "inputs": {
+        "ctr_u32x4": [0, 0, 0, 0],
+        "key_u32x2": [0, 0]
+      },
+      "expected": {
+        "out_u32x4": [1713891541, 3781805453, 3159862348, 2600524760]
+      }
+    },
+    {
+      "id": "GV-004-Q8_8_LIF_STEP",
+      "description": "单步 Q8.8 LIF 神经元积分、去甲肾上腺素阈值调制与脉冲触发验证",
+      "inputs": {
+        "v_prev_q8": 180,
+        "leak_beta_q8": 230,
+        "syn_in_q8": 96,
+        "m_ne_q8": 128
+      },
+      "expected": {
+        "theta_eff_q8": 218,
+        "v_candidate_q8": 257,
+        "spiked": true,
+        "v_after_reset_q8": 0,
+        "refractory_ticks_set": 2
+      }
+    }
+  ]
+}
