@@ -12,7 +12,7 @@ Rynvek 是一个以确定性神经生态仿真（Neural Soup）为内核的原�
 
 | 工具 | 版本 |
 | :--- | :--- |
-| Rust | 1.85.0（由 `rust-toolchain.toml` 锁定，edition 2024） |
+| Rust | 1.87.0（由 `rust-toolchain.toml` 锁定，edition 2024；为编译 wgpu 30.0.1 自 1.85.0 上调，见 ERRATA E-013） |
 | Node.js | 22 LTS（≥ 22.14） |
 | pnpm | 10.x |
 | TypeScript | 5.8.x |
