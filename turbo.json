@@ -24,6 +24,7 @@
         "../../tests/golden_vectors/**",
         "../../tests/rules/**",
         "../../tests/engine/**",
+        "../../tests/arena/**",
         "../../docs/**",
         "../../protocols/**",
         "../../crates/rynvek-render/src/**"
