@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 
+pub mod arena;
+
 use std::net::SocketAddr;
 use std::time::Duration;
 
