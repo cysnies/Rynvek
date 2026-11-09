@@ -48,6 +48,18 @@ bytemuck = { version = "1.23", features = ["derive"] }
 # Ed25519 签名（规范 1.1 密码学冻结：BLAKE3-256 / Ed25519）
 ed25519-dalek = "2.2"
 getrandom = "0.2"
+# --- M7 服务端 / 网络栈 ---
+axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4.5", features = ["derive"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+# 实时流负载压缩：LZ4 Frame（规范 1.1）
+lz4_flex = "0.11"
+# 网络控制信令：Protobuf v3（GAP-16）
+prost = "0.13"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time", "io-util", "signal"] }
+tokio-postgres = "0.7"
+tokio-tungstenite = "0.26"
+wtransport = { version = "0.6", features = ["self-signed"] }
 half = "2.4"
 # 浏览器 Worker ABI（与 wgpu 30.0.1 的 WebGPU 后端所用版本一致）
 js-sys = "0.3.107"
