@@ -168,6 +168,12 @@ const STRUCTURE = {
   "--rv-z-palette": "1000",
 } as const;
 
+/**
+ * 热力图中点：`#0072B2` 与 `#F0E442` 在 8 位 sRGB 空间的线性中点（逐通道向下取整），
+ * 与 GPU 热力图着色器 `mix(heat_low, heat_high, v)` 在 v = 0.5 处的结果一致，只作图例刻度使用。
+ */
+const HEAT_MID = "#78AB7A";
+
 /** 阵营色在三主题中一致（阵营辨识不随应用主题变化） */
 const FACTIONS = {
   "--rv-faction-1": OKABE_ITO[1],
@@ -204,7 +210,7 @@ const NEUTRAL_DARK: TokenTable = {
   "--rv-world-outline": "#050605",
   "--rv-world-fog": "rgba(9, 11, 10, 0.75)",
   "--rv-heat-low": "#0072B2",
-  "--rv-heat-mid": "#7FAB7A",
+  "--rv-heat-mid": HEAT_MID,
   "--rv-heat-high": "#F0E442",
   "--rv-neural-excitatory": BRAND.accent,
   "--rv-neural-inhibitory": "#E5534B",
@@ -238,7 +244,7 @@ const SCIENTIFIC_LIGHT: TokenTable = {
   "--rv-world-outline": "#2A312D",
   "--rv-world-fog": "rgba(247, 248, 246, 0.75)",
   "--rv-heat-low": "#0072B2",
-  "--rv-heat-mid": "#7FAB7A",
+  "--rv-heat-mid": HEAT_MID,
   "--rv-heat-high": "#F0E442",
   "--rv-neural-excitatory": "#4C7A1C",
   "--rv-neural-inhibitory": "#B42318",
@@ -257,7 +263,7 @@ const OKABE_ITO_THEME: TokenTable = {
   "--rv-color-danger": OKABE_ITO[6],
   "--rv-color-info": OKABE_ITO[2],
   "--rv-heat-low": OKABE_ITO[5],
-  "--rv-heat-mid": OKABE_ITO[2],
+  "--rv-heat-mid": HEAT_MID,
   "--rv-heat-high": OKABE_ITO[4],
   "--rv-neural-excitatory": OKABE_ITO[3],
   "--rv-neural-inhibitory": OKABE_ITO[6],
