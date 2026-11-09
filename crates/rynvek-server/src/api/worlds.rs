@@ -118,52 +118,104 @@ struct CreateWorld {
     map_seed: Option<u64>,
 }
 
+/// `.rworld` 上传时通过查询串传递的元数据（请求体是二进制包）
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UploadQuery {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    org_id: Option<String>,
+    #[serde(default)]
+    visibility: Option<Visibility>,
+}
+
 /// `05 POST /api/v1/worlds`（`world.create`）
 ///
-/// 支持 JSON 预设模板；`.rworld` 初始包上传（`application/octet-stream`）需要 M8 的包导入管线，当前返回 `0x7001`。
-pub async fn create(State(app): State<AppState>, headers: HeaderMap, body: Bytes) -> ApiResult<Response> {
+/// 两种请求体：
+/// - `application/json`：预设模板 `{title, template, org_id?, visibility?, map_seed?}`；
+/// - `application/vnd.rynvek.rworld`（或 `application/octet-stream`）：`.rworld` 初始包，
+///   元数据走查询串 `?title=&org_id=&visibility=`（`title` 缺省取包清单 `name`）。
+///   包经完整校验（容器 `0x7001` / `0x7002`、`world.json`），原始字节写入 CAS 并记录在创世清单中。
+pub async fn create(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Query(upload): Query<UploadQuery>,
+    body: Bytes,
+) -> ApiResult<Response> {
     let subject = app.require(&headers, CapabilityScope::WorldCreate).await?;
-    let is_json = headers
+    let content_type = headers
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("application/json"));
-    if !is_json {
+        .unwrap_or_default()
+        .to_owned();
+    let (title, org, visibility, config, mode, manifest) = if content_type.starts_with("application/json") {
+        let req: CreateWorld = super::parse_json(&body)?;
+        let seed = req.map_seed.unwrap_or(1);
+        let (config, mode) = match req.template.as_str() {
+            "arena_duel" => (MatchConfig::duel(seed), "PvP_Custom"),
+            "arena_pve" => (MatchConfig::pve(seed, 1), "PvE_Survival"),
+            other => return Err(ApiError::bad_request(format!("未知模板 `{other}`"))),
+        };
+        let manifest = serde_json::json!({ "template": req.template, "config": config });
+        (req.title, req.org_id, req.visibility, config, mode, manifest)
+    } else if content_type.starts_with(rynvek_world::rworld::RWORLD_MEDIA_TYPE)
+        || content_type.starts_with("application/octet-stream")
+    {
+        let bundle = rynvek_world::WorldBundle::from_bytes(&body).map_err(|e| ApiError::new(e.code, e.detail))?;
+        let package_cid = app.inner.blobs.put(&body)?;
+        let m = &bundle.package.manifest;
+        let manifest = serde_json::json!({
+            "template": bundle.config.template,
+            "config": bundle.match_config,
+            "rworld": {
+                "id": m.id,
+                "version": m.version,
+                "license": m.license,
+                "content_hash": hex(&bundle.package.content_hash),
+                "package_cid": package_cid.to_hex(),
+            },
+        });
+        (
+            upload.title.unwrap_or_else(|| m.name.clone()),
+            upload.org_id,
+            upload.visibility,
+            bundle.match_config.clone(),
+            bundle.config.game_mode(),
+            manifest,
+        )
+    } else {
         return Err(ApiError::new(
             RynvekErrorCode::InvalidFileMagicOrVersion,
-            "暂不支持 .rworld 上传：请以 application/json 指定预设模板",
+            format!(
+                "不支持的 Content-Type `{content_type}`：请使用 application/json（预设模板）或 {}（.rworld 包）",
+                rynvek_world::rworld::RWORLD_MEDIA_TYPE
+            ),
         ));
-    }
-    let req: CreateWorld = super::parse_json(&body)?;
-    if req.title.is_empty() || req.title.chars().count() > 128 {
+    };
+    if title.is_empty() || title.chars().count() > 128 {
         return Err(ApiError::bad_request("title 长度必须在 1..=128"));
     }
-    let org_id = match &req.org_id {
+    let org_id = match &org {
         Some(s) => s
             .parse()
             .map_err(|_| ApiError::bad_request("org_id 必须是十进制整数"))?,
         None => subject.principal_id,
     };
     authorize(&subject, CapabilityScope::WorldCreate, &Resource::Org { org_id }).map_err(ApiError::from)?;
-    let seed = req.map_seed.unwrap_or(1);
-    let (config, mode) = match req.template.as_str() {
-        "arena_duel" => (MatchConfig::duel(seed), "PvP_Custom"),
-        "arena_pve" => (MatchConfig::pve(seed, 1), "PvE_Survival"),
-        other => return Err(ApiError::bad_request(format!("未知模板 `{other}`"))),
-    };
     let root = *ArenaWorld::new(config.clone()).state_hash().as_bytes();
-    let manifest =
-        serde_json::to_vec(&serde_json::json!({ "template": req.template, "config": config })).expect("可序列化");
+    let manifest = serde_json::to_vec(&manifest).expect("可序列化");
     let genesis = app.inner.blobs.put(&manifest)?;
     let world_id = new_uuid_v7();
     let row = WorldRow {
         world_id,
         org_id,
         owner_principal_id: subject.principal_id,
-        title: req.title,
+        title,
         world_profile: "RTS_Standard".to_owned(),
         game_mode: mode.to_owned(),
         execution_profile: "D0_Strict".to_owned(),
-        visibility: req.visibility.unwrap_or(Visibility::Private),
+        visibility: visibility.unwrap_or(Visibility::Private),
         parent_world_id: None,
         forked_at_revision: None,
         latest_tick: 0,
@@ -190,7 +242,7 @@ pub async fn create(State(app): State<AppState>, headers: HeaderMap, body: Bytes
         Some(subject.principal_id),
         "world.create",
         format!("world:{world_id}"),
-        serde_json::json!({ "template": req.template, "org_id": org_id }),
+        serde_json::json!({ "game_mode": mode, "org_id": org_id }),
     )
     .await;
     Ok((StatusCode::CREATED, Json(world_json(&row))).into_response())
