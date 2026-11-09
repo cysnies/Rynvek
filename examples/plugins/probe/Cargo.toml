@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# `rynvek:plugin@1.0.0` 示例插件（同时充当宿主测试夹具）。
+# 独立工作区：以 wasm32-unknown-unknown 编译后由 `cargo xtask build-plugin-fixtures`
+# 用 wit-component 封装为 Component，产物提交在 crates/rynvek-rules/tests/fixtures/。
+[package]
+name = "rynvek-plugin-probe"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.87"
+license = "Apache-2.0 WITH LLVM-exception"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "=0.36.0", default-features = false, features = ["macros", "realloc"] }
+
+[profile.release]
+codegen-units = 1
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true
+debug = false
+
+[workspace]

@@ -6,20 +6,31 @@
 #![deny(unsafe_code)]
 
 mod golden_vectors;
+mod plugin_fixtures;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// 可用子命令及其说明
-const COMMANDS: &[(&str, &str)] = &[(
-    "verify-golden-vectors",
-    "校验 tests/golden_vectors/v1_baseline.json 中的全部跨语言黄金向量",
-)];
+const COMMANDS: &[(&str, &str)] = &[
+    (
+        "verify-golden-vectors",
+        "校验 tests/golden_vectors/v1_baseline.json 中的全部跨语言黄金向量",
+    ),
+    (
+        "build-plugin-fixtures",
+        "重建示例插件 Component 夹具（--check：只比较不写入）",
+    ),
+];
 
 fn main() -> ExitCode {
     let command = std::env::args().nth(1);
     match command.as_deref() {
         Some("verify-golden-vectors") => run_verify_golden_vectors(),
+        Some("build-plugin-fixtures") => {
+            let check = std::env::args().skip(2).any(|a| a == "--check");
+            report(plugin_fixtures::run(&workspace_root(), check))
+        }
         Some("help" | "--help" | "-h") | None => {
             print_usage();
             ExitCode::SUCCESS
@@ -27,6 +38,17 @@ fn main() -> ExitCode {
         Some(unknown) => {
             eprintln!("未知子命令：{unknown}\n");
             print_usage();
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// 把子命令结果转为退出码
+fn report(result: Result<(), String>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("错误：{e}");
             ExitCode::FAILURE
         }
     }
