@@ -12,9 +12,11 @@
 
 #![deny(unsafe_code)]
 
+pub mod models;
 pub mod runtime;
 pub mod storage;
 
+pub use models::{CtrnnBrain, GatedMlpBrain, IzhikevichBrain};
 pub use runtime::{
     LIF_LEAK_BETA_Q8, LIF_REFRACTORY_TICKS, NeuronModelKind, TopologyStorageClass, lif_membrane_candidate_q8,
     lif_theta_eff_q8, step_lif_brain_deterministic,
