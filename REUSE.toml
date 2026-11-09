@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# REUSE 3.3 批量许可证声明：覆盖无法内嵌 SPDX 注释头的文件（JSON、锁文件、文档等）。
+# 源代码文件一律在文件头直接写入 SPDX 注释，不依赖本文件。
+version = 1
+
+# 仓库级工程配置与锁文件：随核心平台采用 AGPL-3.0-only。
+[[annotations]]
+path = [
+    "Cargo.lock",
+    "package.json",
+    "pnpm-lock.yaml",
+    "turbo.json",
+    "tsconfig.base.json",
+    "tests/**",
+    "crates/**/Cargo.toml",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The Rynvek Contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+# 公开协议与客户端 SDK 包的元数据：Apache-2.0 WITH LLVM-exception（见项目文档 7.1）。
+[[annotations]]
+path = [
+    "protocols/**",
+    "packages/core/**/*.json",
+    "packages/protocol/**/*.json",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The Rynvek Contributors"
+SPDX-License-Identifier = "Apache-2.0 WITH LLVM-exception"
+
+# 官方文档：CC-BY-4.0（ADR-L007）。
+[[annotations]]
+path = ["docs/**", "README.md"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 The Rynvek Contributors"
+SPDX-License-Identifier = "CC-BY-4.0"
