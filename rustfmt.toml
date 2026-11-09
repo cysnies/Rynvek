@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# 全仓库统一的 Rust 代码格式化规则。
+edition = "2024"
+max_width = 120
+use_field_init_shorthand = true
