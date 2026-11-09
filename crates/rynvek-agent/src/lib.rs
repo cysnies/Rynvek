@@ -20,11 +20,13 @@
 pub mod apm;
 pub mod control;
 pub mod error;
+pub mod memory;
 pub mod schema;
 pub mod tools;
 
 pub use apm::{APM_MAX_ACTIONS, APM_WINDOW_TICKS, ApmLimiter};
 pub use control::{ControlLease, ControlLevel, LeaseManager, Principal, PrincipalKind};
 pub use error::AgentError;
+pub use memory::{AGENT_MEMORY_CAPACITY, AgentEpisodicMemory, EpisodeOutcome, EpisodeRecord};
 pub use schema::{AGENT_TOOLS_V1_JSON, ToolRegistry, ToolSchema};
 pub use tools::{CrucibleToolAction, ToolCall, ToolName};
