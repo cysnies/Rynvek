@@ -142,7 +142,7 @@ describe("loadRview", () => {
     const load = (entries: Parameters<typeof samplePack>[0]) => () =>
       loadRview(samplePack(entries), { trustLevel: TrustLevel.OfficialSigned });
     expect(codeOf(load({ entries: [jsonEntry("p.json", "palette", { colors: { a: "red" } })] }))).toBe(E);
-    expect(codeOf(load({ entries: [jsonEntry("t.json", "theme", { tokens: { "--nv-bg": "#000000" } })] }))).toBe(E);
+    expect(codeOf(load({ entries: [jsonEntry("t.json", "theme", { tokens: { "--foreign-bg": "#000000" } })] }))).toBe(E);
     expect(codeOf(load({ entries: [jsonEntry("s.json", "sprite_atlas", { image: "missing.png", frames: {} })] }))).toBe(E);
     expect(
       codeOf(load({ entries: [{ path: "a.png", kind: "sprite_atlas", media_type: "image/png", data: new Uint8Array([1, 2, 3]) }] })),
