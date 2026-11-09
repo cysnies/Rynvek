@@ -19,6 +19,7 @@ pub mod error;
 pub mod glicko2;
 pub mod ids;
 pub mod matchmaking;
+pub mod patch;
 pub mod replay;
 pub mod source;
 pub mod store;
