@@ -141,6 +141,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-ecs"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytemuck",
+ "rynvek-core",
+ "rynvek-memory",
+]
+
+[[package]]
 name = "rynvek-memory"
 version = "0.1.0"
 dependencies = [
