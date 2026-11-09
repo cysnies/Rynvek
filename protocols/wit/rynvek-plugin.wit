@@ -1,0 +1,117 @@
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Rynvek Tier 2 沙箱插件 WIT 契约（规范 1.1：`rynvek:plugin@1.0.0`，Wasmtime 29.0 Component Model）。
+//
+// 设计约束（ERRATA E-048）：
+// - 插件只导入 `host` 接口，不导入任何 WASI 接口：零网络、零宿主文件系统、零时钟；
+// - 每次宿主调用（init / on-tick）的燃料预算为 500,000 Gas，线性内存上限 64 MiB；
+// - 插件只能看到自身阵营的迷雾裁剪视图，只能以 RTS 命令 JSON 的形式影响世界，
+//   且命令经与玩家完全相同的校验路径；
+// - 能力必须在 init 返回的清单中声明，未声明即调用（或提交命令）时宿主返回 0x5006。
+
+package rynvek:plugin@1.0.0;
+
+/// 共享数据类型
+interface types {
+    /// 插件错误：`code` 为规范 11 章错误码（例如 0x5006），`message` 为人类可读说明
+    record plugin-error {
+        code: u16,
+        message: string,
+    }
+
+    /// 插件可声明的能力
+    enum capability {
+        /// 读取本阵营的每 Tick 视图
+        observe,
+        /// 提交 RTS 命令
+        command,
+        /// 写宿主日志
+        log,
+    }
+
+    /// 插件清单（init 返回）
+    record plugin-manifest {
+        /// 反向域名包标识，例如 `community.probe`
+        id: string,
+        /// SemVer 版本
+        version: string,
+        capabilities: list<capability>,
+    }
+
+    /// 可见单位（坐标为 Q32.32 原始值；生命值为毫单位）
+    record unit-view {
+        id: u32,
+        faction: u8,
+        /// `rynvek-network::replication::unit_kind_code` 编码
+        kind: u8,
+        x-raw: s64,
+        y-raw: s64,
+        hp-milli: s64,
+    }
+
+    /// 可见建筑
+    record building-view {
+        id: u32,
+        faction: u8,
+        /// `rynvek-network::replication::building_kind_code` 编码
+        kind: u8,
+        origin-x: u32,
+        origin-y: u32,
+        hp-milli: s64,
+        complete: bool,
+    }
+
+    /// 本阵营的每 Tick 视图（已按战争迷雾裁剪）
+    record faction-view {
+        tick: u64,
+        faction: u8,
+        biomass-milli: s64,
+        flux-milli: s64,
+        neurogel-milli: s64,
+        supply-used: u32,
+        supply-cap: u32,
+        score-milli: s64,
+        units: list<unit-view>,
+        buildings: list<building-view>,
+    }
+
+    /// RTS 命令：与 `POST /api/v1/matches/{id}/commands` 相同的 JSON（`{"type": "...", ...}`）
+    record command {
+        payload-json: string,
+    }
+}
+
+/// 宿主提供给插件的函数
+interface host {
+    use types.{plugin-error};
+
+    enum log-level {
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    /// 写宿主日志（需要 `log` 能力；单条消息最多 1 KiB，每次调用最多 64 条）
+    log: func(level: log-level, message: string) -> result<_, plugin-error>;
+
+    /// 确定性随机数：Philox4x32-10（键 = 世界种子与插件标识派生，计数器由插件给出）
+    random: func(counter: u64) -> u32;
+}
+
+/// 插件导出的函数
+interface plugin {
+    use types.{plugin-error, plugin-manifest, faction-view, command};
+
+    /// 初始化；`config-json` 为宿主传入的插件配置
+    init: func(config-json: string) -> result<plugin-manifest, plugin-error>;
+
+    /// 每个决策 Tick 调用一次，返回要提交的命令（每次最多 64 条）
+    on-tick: func(view: faction-view) -> result<list<command>, plugin-error>;
+}
+
+world rynvek-plugin {
+    import host;
+    export plugin;
+}
