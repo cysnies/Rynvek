@@ -1,0 +1,16 @@
+[package]
+name = "rynvek-core"
+description = "Rynvek Tier 0 内核基础类型：定点数、坐标、量纲、Philox RNG、BLAKE3 与错误码"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+
+[lints]
+workspace = true
