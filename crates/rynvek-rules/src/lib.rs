@@ -21,6 +21,8 @@ pub mod cpu;
 pub mod error;
 pub mod graph;
 pub mod ir;
+#[cfg(feature = "wasmtime")]
+pub mod plugin;
 pub mod rir;
 #[cfg(feature = "quickjs")]
 pub mod sandbox;
