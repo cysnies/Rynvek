@@ -17,6 +17,8 @@
 pub mod control;
 pub mod error;
 pub mod frame;
+pub mod visibility;
 
 pub use error::NetError;
 pub use frame::{Frame, FrameDecoder, FrameEncoder, SequenceTracker, decode_message};
+pub use visibility::VisibilityGrid;
