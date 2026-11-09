@@ -1,0 +1,24 @@
+{
+  "name": "rynvek",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rynvek Monorepo 根工作区（TypeScript 包与应用由 Turborepo 统一编排）",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@10.21.0",
+  "engines": {
+    "node": ">=22.14.0 <23",
+    "pnpm": ">=10.0.0 <11"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "turbo": "^2.5.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
