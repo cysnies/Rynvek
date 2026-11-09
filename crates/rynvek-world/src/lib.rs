@@ -9,7 +9,8 @@
 //! - [`package`]：`.rworld`（RYWL）/ `.rpack`（RYPK）/ `.rview`（RYVW）共用的 64 字节头容器，
 //!   与 `@rynvek/assets` 的 E-019 实现逐字节兼容；
 //! - [`rworld`]：`.rworld` 世界包（`world.json` 世界配置 + 可选 `dependencies.lock`）解析为
-//!   [`rynvek_rts::MatchConfig`] 并创建权威世界。
+//!   [`rynvek_rts::MatchConfig`] 并创建权威世界；
+//! - [`wgsl_review`]：`.rview` 着色器静态审查（与 `@rynvek/assets` 同规则）与 naga 校验。
 //!
 //! Arena 对局的世界生命周期仍由 `rynvek-rts` 与 `rynvek-server` 承担；Partition/Halo 与 Fork/Merge
 //! 属于通用模拟世界，不在 M8 范围内。
@@ -18,6 +19,7 @@
 
 pub mod package;
 pub mod rworld;
+pub mod wgsl_review;
 
 pub use package::{
     Package, PackageEntry, PackageError, PackageInput, PackageInputEntry, PackageKind, PackageManifest, read_package,

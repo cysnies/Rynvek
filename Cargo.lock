@@ -3232,6 +3232,7 @@ name = "rynvek-world"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "naga",
  "rynvek-core",
  "rynvek-rts",
  "serde",
