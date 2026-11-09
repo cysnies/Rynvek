@@ -1,0 +1,27 @@
+[package]
+name = "rynvek-rules"
+description = "Rynvek Tier 2 规则编译器：36 条 Typed SSA Rule IR、静态分析、WGSL/CPU 双后端与 QuickJS-NG 确定性沙箱"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = ["quickjs"]
+# Tier-1 QuickJS-NG 确定性沙箱宿主（编译内嵌的 QuickJS-NG C 源码；wasm32 目标下随 rynvek-wasm 一并编译为 WASM）
+quickjs = ["dep:rquickjs"]
+
+[dependencies]
+rquickjs = { workspace = true, optional = true }
+rynvek-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+naga.workspace = true
+
+[lints]
+workspace = true
