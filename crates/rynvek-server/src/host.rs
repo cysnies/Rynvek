@@ -30,18 +30,14 @@ use std::time::Duration;
 use rynvek_agent::{AgentError, PrincipalKind, SystemClock};
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_engine::arena::{ARENA_PROTOCOL, ArenaClientMessage, ArenaServerMessage, ArenaSession, map_info};
-use rynvek_network::control::{
-    ControlBody, ControlMessage, Disconnect, HeartbeatAck, ServerHello,
-};
+use rynvek_network::control::{ControlBody, ControlMessage, Disconnect, HeartbeatAck, ServerHello};
+use rynvek_network::link::LinkSender;
 use rynvek_network::replication::{Replicator, visible_records};
 use rynvek_network::visibility::VisibilityGrid;
 use rynvek_network::{Frame, FrameEncoder, NetError};
-use rynvek_network::link::LinkSender;
 use rynvek_protocol::{CommandEnvelope, WireChannelId, WireUuid};
 use rynvek_rts::{FactionId, MatchConfig, MatchOutcome, RtsEvent};
-use rynvek_security::{
-    BehaviorMonitor, CommandGate, CommandGateConfig, League, PrincipalKindCode, ServerSigningKey,
-};
+use rynvek_security::{BehaviorMonitor, CommandGate, CommandGateConfig, League, PrincipalKindCode, ServerSigningKey};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -220,6 +216,8 @@ pub struct MatchHandle {
     pub match_id: WireUuid,
     pub world_id: WireUuid,
     pub league: League,
+    /// principal_id → 阵营（入场时客户端据此填写 `ClientHello.faction`）
+    pub seats: BTreeMap<u64, u8>,
     tx: mpsc::Sender<HostMsg>,
     status: watch::Receiver<HostStatus>,
 }
@@ -330,6 +328,7 @@ pub fn spawn_match(spec: MatchSpec, cfg: HostConfig, events: mpsc::UnboundedSend
         match_id: spec.match_id,
         world_id: spec.world_id,
         league: spec.league,
+        seats: spec.seats.iter().map(|s| (s.principal_id, s.faction)).collect(),
         tx,
         status,
     };
@@ -507,7 +506,11 @@ impl Host {
             HostMsg::Frame { conn, frame } => self.on_frame(conn, frame),
             HostMsg::Violation { conn, error } => {
                 let pid = self.conns.get(&conn).map(|c| c.principal_id);
-                self.audit(pid, "stream.protocol_violation", serde_json::json!({ "error": error.to_string() }));
+                self.audit(
+                    pid,
+                    "stream.protocol_violation",
+                    serde_json::json!({ "error": error.to_string() }),
+                );
                 self.disconnect(conn, error.code().code().into(), &error.to_string());
             }
             HostMsg::Leave { conn } => self.drop_conn(conn),
@@ -549,7 +552,10 @@ impl Host {
             .seat(principal_id)
             .ok_or_else(|| ApiError::forbidden("该 Principal 不是本局参赛者"))?;
         if faction != u32::from(seat.faction) {
-            return Err(ApiError::forbidden(format!("该 Principal 的席位是阵营 {}", seat.faction)));
+            return Err(ApiError::forbidden(format!(
+                "该 Principal 的席位是阵营 {}",
+                seat.faction
+            )));
         }
         let token = resume_token(&self.cfg.resume_secret, &self.spec.match_id, principal_id, seat.faction);
         if !resume.is_empty() && resume != token {
@@ -611,13 +617,26 @@ impl Host {
             ok &= send(&mut conn, WireChannelId::Command, tick, &body, false);
         }
         let packet = conn.replicator.next_packet(&self.session.world);
-        ok &= send(&mut conn, WireChannelId::StateStream, tick, &packet.encode(), packet.keyframe);
+        ok &= send(
+            &mut conn,
+            WireChannelId::StateStream,
+            tick,
+            &packet.encode(),
+            packet.keyframe,
+        );
         if !ok {
-            return Err(ApiError::new(RynvekErrorCode::UnauthorizedCapabilityToken, "连接在握手期间关闭"));
+            return Err(ApiError::new(
+                RynvekErrorCode::UnauthorizedCapabilityToken,
+                "连接在握手期间关闭",
+            ));
         }
         self.conns.insert(conn_id, conn);
         self.joined.insert(principal_id);
-        self.audit(Some(principal_id), "match.join", serde_json::json!({ "faction": seat.faction }));
+        self.audit(
+            Some(principal_id),
+            "match.join",
+            serde_json::json!({ "faction": seat.faction }),
+        );
         if self.state == MatchState::Lobby && self.spec.seats.iter().all(|s| self.joined.contains(&s.principal_id)) {
             self.transition(MatchState::Ready);
             self.transition(MatchState::Running);
@@ -916,7 +935,13 @@ impl Host {
             let packet = c.replicator.next_packet(&self.session.world);
             let mut ok = send(c, WireChannelId::StateStream, now, &packet.encode(), packet.keyframe);
             if let Some(ev) = events.get(&u32::from(c.faction)).filter(|e| !e.is_empty()) {
-                ok &= send(c, WireChannelId::Event, now, &serde_json::to_vec(ev).expect("可序列化"), false);
+                ok &= send(
+                    c,
+                    WireChannelId::Event,
+                    now,
+                    &serde_json::to_vec(ev).expect("可序列化"),
+                    false,
+                );
             }
             if !ok {
                 dead.push(*id);
@@ -970,7 +995,11 @@ impl Host {
             Ok(r) => r,
             Err(e) => {
                 // 录制自检失败意味着权威世界出现了不可重放的变更：判定无效局，绝不发布结果
-                self.audit(None, "replay.self_check_failed", serde_json::json!({ "error": e.to_string() }));
+                self.audit(
+                    None,
+                    "replay.self_check_failed",
+                    serde_json::json!({ "error": e.to_string() }),
+                );
                 return self.abort(&format!("回放自检失败：{e}"));
             }
         };

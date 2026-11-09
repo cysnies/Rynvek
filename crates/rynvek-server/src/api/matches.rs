@@ -31,10 +31,11 @@ struct QueueRequest {
     cancel: bool,
 }
 
-fn matched_json(app: &AppState, h: &MatchHandle) -> serde_json::Value {
+fn matched_json(app: &AppState, h: &MatchHandle, principal_id: u64) -> serde_json::Value {
     let status = h.status();
     serde_json::json!({
         "status": "matched",
+        "faction": h.seats.get(&principal_id),
         "match_id": h.match_id.to_string(),
         "world_id": h.world_id.to_string(),
         "league": h.league,
@@ -67,10 +68,12 @@ pub async fn queue(State(app): State<AppState>, headers: HeaderMap, body: Bytes)
     let pid = subject.principal_id;
     if req.cancel {
         let removed = app.matchmaker().cancel(pid);
-        return Ok(Json(serde_json::json!({ "status": if removed { "cancelled" } else { "not_queued" } })).into_response());
+        return Ok(
+            Json(serde_json::json!({ "status": if removed { "cancelled" } else { "not_queued" } })).into_response(),
+        );
     }
     if let Some(h) = app.registry().active_for(pid) {
-        return Ok(Json(matched_json(&app, &h)).into_response());
+        return Ok(Json(matched_json(&app, &h, pid)).into_response());
     }
     let rating = app.store().get_rating(pid, league).await?;
     let now = unix_now_s();
@@ -98,7 +101,7 @@ pub async fn queue(State(app): State<AppState>, headers: HeaderMap, body: Bytes)
         }
     }
     if let Some(h) = app.registry().active_for(pid) {
-        return Ok(Json(matched_json(&app, &h)).into_response());
+        return Ok(Json(matched_json(&app, &h, pid)).into_response());
     }
     Ok((
         StatusCode::ACCEPTED,
@@ -179,7 +182,10 @@ pub async fn replay(State(app): State<AppState>, Path(id): Path<String>) -> ApiR
         .get_match(match_id)
         .await?
         .ok_or_else(|| ApiError::not_found("对局不存在"))?;
-    let Some(cid) = row.replay_cid_blake3.filter(|_| row.match_state == MatchState::Completed) else {
+    let Some(cid) = row
+        .replay_cid_blake3
+        .filter(|_| row.match_state == MatchState::Completed)
+    else {
         return Err(ApiError::not_found("对局尚未结束，回放不可用"));
     };
     let bytes = app.inner.blobs.get(&rynvek_core::hash::Blake3Hash(cid))?;
