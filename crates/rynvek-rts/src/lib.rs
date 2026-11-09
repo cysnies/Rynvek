@@ -15,7 +15,7 @@
 //! - [`nav`]：HPA* + Eikonal 流场 + 定点 ORCA 三级导航；
 //! - [`fog`]：对称阴影投射战争迷雾；
 //! - [`pve`]：PvE 自适应演化虫潮；
-//! - [`commands`] / [`world`]：权威命令与 `ArenaWorld` 对局状态机；
+//! - [`commands`] / [`world`] / [`observation`]：权威命令、`ArenaWorld` 对局状态机与迷雾裁剪观测；
 //!
 //! 宏观权威层全部使用 `Q32_32` 定点与整数运算（D0 确定性），本 crate 只依赖 Tier 0..=2，且禁止 `unsafe`。
 
@@ -35,6 +35,7 @@ pub mod map_gen;
 pub mod math;
 pub mod modulators;
 pub mod nav;
+pub mod observation;
 pub mod pve;
 pub mod resources;
 pub mod tech;
