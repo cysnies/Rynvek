@@ -38,10 +38,16 @@ rynvek-render = { path = "crates/rynvek-render" }
 rynvek-rts = { path = "crates/rynvek-rts" }
 rynvek-agent = { path = "crates/rynvek-agent" }
 rynvek-engine = { path = "crates/rynvek-engine" }
+rynvek-security = { path = "crates/rynvek-security" }
+rynvek-network = { path = "crates/rynvek-network" }
+rynvek-server = { path = "crates/rynvek-server" }
 
 # --- 第三方依赖（版本统一在此锁定，成员 crate 通过 `workspace = true` 继承）---
 blake3 = "1.8"
 bytemuck = { version = "1.23", features = ["derive"] }
+# Ed25519 签名（规范 1.1 密码学冻结：BLAKE3-256 / Ed25519）
+ed25519-dalek = "2.2"
+getrandom = "0.2"
 half = "2.4"
 # 浏览器 Worker ABI（与 wgpu 30.0.1 的 WebGPU 后端所用版本一致）
 js-sys = "0.3.107"
