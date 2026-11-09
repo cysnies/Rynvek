@@ -4,3 +4,7 @@
 packages:
   - "packages/*"
   - "apps/*"
+
+# 仅允许以下依赖执行安装脚本（pnpm 10 默认禁止，防范供应链攻击）
+onlyBuiltDependencies:
+  - esbuild
