@@ -1,0 +1,421 @@
+{
+  "buildings": [
+    {
+      "allowed_terrain": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "armor": 15,
+      "build_ticks": 0,
+      "cost": {
+        "biomass": 0,
+        "flux": 0,
+        "neurogel": 0
+      },
+      "flux_per_s_milli": 30000,
+      "footprint": 4,
+      "hp_milli": 4000000,
+      "kind": "bld.nexus_core",
+      "vision_tiles": 24
+    },
+    {
+      "allowed_terrain": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "armor": 3,
+      "build_ticks": 150,
+      "cost": {
+        "biomass": 120000,
+        "flux": 0,
+        "neurogel": 0
+      },
+      "flux_per_s_milli": -6000,
+      "footprint": 2,
+      "hp_milli": 450000,
+      "kind": "bld.biomass_harvester",
+      "vision_tiles": 8
+    },
+    {
+      "allowed_terrain": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "armor": 5,
+      "build_ticks": 240,
+      "cost": {
+        "biomass": 200000,
+        "flux": 0,
+        "neurogel": 20000
+      },
+      "flux_per_s_milli": 60000,
+      "footprint": 3,
+      "hp_milli": 750000,
+      "kind": "bld.flux_reactor",
+      "vision_tiles": 8
+    },
+    {
+      "allowed_terrain": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "armor": 5,
+      "build_ticks": 300,
+      "cost": {
+        "biomass": 250000,
+        "flux": 0,
+        "neurogel": 0
+      },
+      "flux_per_s_milli": -25000,
+      "footprint": 3,
+      "hp_milli": 800000,
+      "kind": "bld.synapse_refinery",
+      "vision_tiles": 8
+    },
+    {
+      "allowed_terrain": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "armor": 6,
+      "build_ticks": 210,
+      "cost": {
+        "biomass": 180000,
+        "flux": 0,
+        "neurogel": 40000
+      },
+      "flux_per_s_milli": -15000,
+      "footprint": 3,
+      "hp_milli": 900000,
+      "kind": "bld.spawning_vat",
+      "vision_tiles": 8
+    },
+    {
+      "allowed_terrain": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "armor": 2,
+      "build_ticks": 120,
+      "cost": {
+        "biomass": 100000,
+        "flux": 0,
+        "neurogel": 30000
+      },
+      "flux_per_s_milli": -12000,
+      "footprint": 2,
+      "hp_milli": 400000,
+      "kind": "bld.signal_beacon",
+      "vision_tiles": 8
+    },
+    {
+      "allowed_terrain": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "armor": 8,
+      "build_ticks": 150,
+      "cost": {
+        "biomass": 150000,
+        "flux": 0,
+        "neurogel": 15000
+      },
+      "flux_per_s_milli": -10000,
+      "footprint": 2,
+      "hp_milli": 650000,
+      "kind": "bld.pulse_turret",
+      "vision_tiles": 12
+    },
+    {
+      "allowed_terrain": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "armor": 8,
+      "build_ticks": 360,
+      "cost": {
+        "biomass": 300000,
+        "flux": 0,
+        "neurogel": 120000
+      },
+      "flux_per_s_milli": -40000,
+      "footprint": 3,
+      "hp_milli": 1000000,
+      "kind": "bld.mutation_crucible",
+      "vision_tiles": 8
+    }
+  ],
+  "nexus_storage_cap": {
+    "biomass": 2000000,
+    "flux": 1000000,
+    "neurogel": 500000
+  },
+  "starter_resources": {
+    "biomass": 500000,
+    "flux": 300000,
+    "neurogel": 100000
+  },
+  "techs": [
+    {
+      "cost": {
+        "biomass": 150000,
+        "flux": 100000,
+        "neurogel": 30000
+      },
+      "id": "tech.chemotaxis_amp",
+      "requires_buildings": [
+        "bld.spawning_vat"
+      ],
+      "requires_techs": [],
+      "research_site": "bld.synapse_refinery",
+      "research_ticks": 450,
+      "tier": 1
+    },
+    {
+      "cost": {
+        "biomass": 200000,
+        "flux": 150000,
+        "neurogel": 40000
+      },
+      "id": "tech.flux_capacitance",
+      "requires_buildings": [
+        "bld.flux_reactor"
+      ],
+      "requires_techs": [],
+      "research_site": "bld.synapse_refinery",
+      "research_ticks": 600,
+      "tier": 1
+    },
+    {
+      "cost": {
+        "biomass": 180000,
+        "flux": 120000,
+        "neurogel": 50000
+      },
+      "id": "tech.kinetic_resonance",
+      "requires_buildings": [
+        "bld.pulse_turret"
+      ],
+      "requires_techs": [],
+      "research_site": "bld.synapse_refinery",
+      "research_ticks": 600,
+      "tier": 1
+    },
+    {
+      "cost": {
+        "biomass": 250000,
+        "flux": 200000,
+        "neurogel": 80000
+      },
+      "id": "tech.multicellular_chitin",
+      "requires_buildings": [
+        "bld.mutation_crucible"
+      ],
+      "requires_techs": [],
+      "research_site": "bld.mutation_crucible",
+      "research_ticks": 750,
+      "tier": 2
+    },
+    {
+      "cost": {
+        "biomass": 300000,
+        "flux": 250000,
+        "neurogel": 100000
+      },
+      "id": "tech.hebbian_plasticity",
+      "requires_buildings": [
+        "bld.mutation_crucible"
+      ],
+      "requires_techs": [],
+      "research_site": "bld.mutation_crucible",
+      "research_ticks": 900,
+      "tier": 2
+    },
+    {
+      "cost": {
+        "biomass": 320000,
+        "flux": 250000,
+        "neurogel": 120000
+      },
+      "id": "tech.gap_junction_sync",
+      "requires_buildings": [],
+      "requires_techs": [
+        "tech.hebbian_plasticity"
+      ],
+      "research_site": "bld.mutation_crucible",
+      "research_ticks": 900,
+      "tier": 2
+    },
+    {
+      "cost": {
+        "biomass": 500000,
+        "flux": 400000,
+        "neurogel": 220000
+      },
+      "id": "tech.morphogenesis_apex",
+      "requires_buildings": [],
+      "requires_techs": [
+        "tech.gap_junction_sync"
+      ],
+      "research_site": "bld.mutation_crucible",
+      "research_ticks": 1200,
+      "tier": 3
+    },
+    {
+      "cost": {
+        "biomass": 400000,
+        "flux": 350000,
+        "neurogel": 180000
+      },
+      "id": "tech.metabolic_superconduct",
+      "requires_buildings": [
+        "bld.mutation_crucible"
+      ],
+      "requires_techs": [
+        "tech.flux_capacitance"
+      ],
+      "research_site": "bld.mutation_crucible",
+      "research_ticks": 1050,
+      "tier": 3
+    },
+    {
+      "cost": {
+        "biomass": 450000,
+        "flux": 400000,
+        "neurogel": 250000
+      },
+      "id": "tech.directed_speciation",
+      "requires_buildings": [],
+      "requires_techs": [
+        "tech.morphogenesis_apex"
+      ],
+      "research_site": "bld.mutation_crucible",
+      "research_ticks": 1200,
+      "tier": 3
+    }
+  ],
+  "units": [
+    {
+      "armor": 1,
+      "cost": {
+        "biomass": 40000,
+        "flux": 20000,
+        "neurogel": 0
+      },
+      "hatch_ticks": 90,
+      "hp_milli": 120000,
+      "kind": "unit.forager",
+      "shield_milli": 0,
+      "speed_milli_per_s": 4500,
+      "supply": 1,
+      "unlocked_by": null,
+      "vision_tiles": 8
+    },
+    {
+      "armor": 3,
+      "cost": {
+        "biomass": 65000,
+        "flux": 30000,
+        "neurogel": 10000
+      },
+      "hatch_ticks": 120,
+      "hp_milli": 200000,
+      "kind": "unit.striker",
+      "shield_milli": 0,
+      "speed_milli_per_s": 5200,
+      "supply": 2,
+      "unlocked_by": null,
+      "vision_tiles": 10
+    },
+    {
+      "armor": 12,
+      "cost": {
+        "biomass": 130000,
+        "flux": 50000,
+        "neurogel": 25000
+      },
+      "hatch_ticks": 180,
+      "hp_milli": 620000,
+      "kind": "unit.carapace",
+      "shield_milli": 200000,
+      "speed_milli_per_s": 2800,
+      "supply": 4,
+      "unlocked_by": "tech.multicellular_chitin",
+      "vision_tiles": 9
+    },
+    {
+      "armor": 2,
+      "cost": {
+        "biomass": 90000,
+        "flux": 40000,
+        "neurogel": 30000
+      },
+      "hatch_ticks": 150,
+      "hp_milli": 160000,
+      "kind": "unit.spitter",
+      "shield_milli": 0,
+      "speed_milli_per_s": 3600,
+      "supply": 3,
+      "unlocked_by": "tech.multicellular_chitin",
+      "vision_tiles": 12
+    },
+    {
+      "armor": 4,
+      "cost": {
+        "biomass": 110000,
+        "flux": 60000,
+        "neurogel": 55000
+      },
+      "hatch_ticks": 180,
+      "hp_milli": 240000,
+      "kind": "unit.weaver",
+      "shield_milli": 80000,
+      "speed_milli_per_s": 4000,
+      "supply": 4,
+      "unlocked_by": "tech.gap_junction_sync",
+      "vision_tiles": 11
+    },
+    {
+      "armor": 16,
+      "cost": {
+        "biomass": 350000,
+        "flux": 150000,
+        "neurogel": 140000
+      },
+      "hatch_ticks": 360,
+      "hp_milli": 1500000,
+      "kind": "unit.leviathan",
+      "shield_milli": 400000,
+      "speed_milli_per_s": 2200,
+      "supply": 10,
+      "unlocked_by": "tech.morphogenesis_apex",
+      "vision_tiles": 15
+    }
+  ],
+  "vat_queue_limit": 5,
+  "vat_supply_bonus": 24
+}
