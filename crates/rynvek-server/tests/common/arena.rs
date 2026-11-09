@@ -172,7 +172,7 @@ pub async fn full_match(t: Transport, store: Store) {
     let parts = detail["participants"].as_array().unwrap();
     let bob_row = parts
         .iter()
-        .find(|p| p["principal_id"] == bob.principal_id.to_string())
+        .find(|p| p["principal_id"].as_str() == Some(bob.principal_id.to_string().as_str()))
         .unwrap();
     assert_eq!(bob_row["handle"], "bob");
     assert!(bob_row["rating_delta"].as_f64().unwrap() > 0.0, "{detail}");
@@ -203,7 +203,7 @@ pub async fn full_match(t: Transport, store: Store) {
     let rows = ranks["entries"].as_array().unwrap();
     let find = |pid: u64| {
         rows.iter()
-            .find(|r| r["principal_id"] == pid.to_string())
+            .find(|r| r["principal_id"].as_str() == Some(pid.to_string().as_str()))
             .unwrap()
             .clone()
     };
