@@ -19,6 +19,7 @@ pub mod brain;
 pub mod buildings;
 pub mod combat;
 pub mod fields;
+pub mod fog;
 pub mod genome;
 pub mod ids;
 pub mod map_gen;
