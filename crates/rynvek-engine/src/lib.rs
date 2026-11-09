@@ -1,0 +1,18 @@
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! # rynvek-engine
+//!
+//! Rynvek Engine 顶层门面（Tier 4）：组合 `rynvek-simulation`（CPU 权威）、`rynvek-wgpu`（独占设备与核心内核）
+//! 与 `rynvek-render`（世界渲染），对 `rynvek-wasm` / 原生宿主提供统一的 [`Engine`] 与 Worker 消息协议。
+//!
+//! - [`engine`]：主循环、GPU 驻留镜像核对与 DeviceLost 5 步恢复编排；
+//! - [`protocol`]：`ENGINE_INIT` 等主线程 ⇄ Worker 消息；
+//! - [`gpu_field`] / [`gpu_neural`] / [`gpu_rules`]：场、LIF 神经与规则 WGSL 后端的 GPU 宿主适配（CPU/GPU 差分测试对象）；
+//! - [`provider`]：内置只读可视化提供者。
+
+#![deny(unsafe_code)]
+
+pub mod protocol;
+
+pub use protocol::{ComputeBackendKind, EngineCommand, EngineEvent, GpuMode};

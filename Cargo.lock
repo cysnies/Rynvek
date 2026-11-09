@@ -929,6 +929,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-engine"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "rynvek-compute",
+ "rynvek-core",
+ "rynvek-field",
+ "rynvek-neural",
+ "rynvek-render",
+ "rynvek-rules",
+ "rynvek-simulation",
+ "rynvek-wgpu",
+ "serde",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
 name = "rynvek-field"
 version = "0.1.0"
 dependencies = [

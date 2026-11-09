@@ -1,0 +1,27 @@
+[package]
+name = "rynvek-engine"
+description = "Rynvek Tier 4 引擎顶层门面：CPU 权威仿真 + GPU 驻留镜像、CPU/GPU 差分校验、DeviceLost 恢复编排、世界渲染与 Worker 消息协议"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytemuck.workspace = true
+rynvek-compute.workspace = true
+rynvek-core.workspace = true
+rynvek-field.workspace = true
+rynvek-neural.workspace = true
+rynvek-render.workspace = true
+rynvek-rules.workspace = true
+rynvek-simulation.workspace = true
+rynvek-wgpu.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wgpu.workspace = true
+
+[lints]
+workspace = true
