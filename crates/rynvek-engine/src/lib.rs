@@ -10,7 +10,8 @@
 //! - [`engine`]：主循环、GPU 驻留镜像核对与 DeviceLost 5 步恢复编排；
 //! - [`protocol`]：`ENGINE_INIT` 等主线程 ⇄ Worker 消息；
 //! - [`gpu_field`] / [`gpu_neural`] / `gpu_rules`：场、LIF 神经与规则 WGSL 后端的 GPU 宿主适配（CPU/GPU 差分测试对象）；
-//! - [`provider`]：内置只读可视化提供者。
+//! - [`provider`]：内置只读可视化提供者；
+//! - `plugins`（特性 `plugins`）：RTS ⇄ `rynvek:plugin@1.0.0` WASM 插件适配层。
 
 #![deny(unsafe_code)]
 
@@ -21,6 +22,8 @@ pub mod gpu_neural;
 // 规则内核 GPU 执行器目前只提供阻塞回读（差分测试用），浏览器目标不编译
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_rules;
+#[cfg(all(feature = "plugins", not(target_arch = "wasm32")))]
+pub mod plugins;
 pub mod protocol;
 pub mod provider;
 

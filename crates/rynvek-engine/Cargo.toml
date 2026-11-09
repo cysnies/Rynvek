@@ -9,6 +9,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# WASM 插件宿主适配（Wasmtime 只在原生目标编译）
+plugins = ["rynvek-rules/wasmtime"]
+
 [dependencies]
 bytemuck.workspace = true
 rynvek-compute.workspace = true

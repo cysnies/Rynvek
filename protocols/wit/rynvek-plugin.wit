@@ -43,7 +43,7 @@ interface types {
     record unit-view {
         id: u32,
         faction: u8,
-        /// `rynvek-network::replication::unit_kind_code` 编码
+        /// 单位种类：`UnitKind` 声明顺序序号（0 = unit.forager … 5 = unit.leviathan）
         kind: u8,
         x-raw: s64,
         y-raw: s64,
@@ -54,7 +54,7 @@ interface types {
     record building-view {
         id: u32,
         faction: u8,
-        /// `rynvek-network::replication::building_kind_code` 编码
+        /// 建筑种类：`BuildingKind` 声明顺序序号（0 = bld.nexus_core … 7 = bld.mutation_crucible）
         kind: u8,
         origin-x: u32,
         origin-y: u32,
