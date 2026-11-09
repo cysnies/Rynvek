@@ -9,6 +9,7 @@
 //! - [`coord`]：统一权威坐标 `WorldPosition2D`；
 //! - [`error`]：跨语言统一错误码 `RynvekErrorCode` 与恢复策略；
 //! - [`fixed`]：确定性定点数 `Q32_32` / `Q8_8`；
+//! - [`hash`]：BLAKE3-256 内容哈希 `Blake3Hash`；
 //! - [`rng`]：无状态计数器式确定性随机数 `Philox4x32-10`；
 //! - [`units`]：编译期物理量纲 `Quantity<D>`；
 //!
@@ -20,5 +21,6 @@ pub mod constants;
 pub mod coord;
 pub mod error;
 pub mod fixed;
+pub mod hash;
 pub mod rng;
 pub mod units;
