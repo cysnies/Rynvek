@@ -20,5 +20,6 @@ pub mod glicko2;
 pub mod ids;
 pub mod replay;
 pub mod source;
+pub mod store;
 
 pub use error::{ApiError, ApiResult};
