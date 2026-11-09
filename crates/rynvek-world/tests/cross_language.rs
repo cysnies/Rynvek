@@ -59,3 +59,41 @@ fn json_schemas_match_container_rules() {
         }
     }
 }
+
+/// `tests/packages/sample.rworld`：Rust 写出的标准 `.rworld` 夹具（Python `ArenaSim.from_rworld` 测试读取）。
+/// 设置 `RYNVEK_UPDATE_FIXTURES=1` 重新生成；否则必须与仓库内文件逐字节一致。
+#[test]
+fn sample_rworld_fixture_is_reproducible() {
+    let world = br#"{"schema":"rynvek.world-config.v1","template":"arena_duel","map_seed":42}"#.to_vec();
+    let lock = br#"{"lockfile_version":1,"packages":[]}"#.to_vec();
+    let input = PackageInput {
+        kind: PackageKind::Rworld,
+        id: "rynvek.world.sample-duel".into(),
+        version: "1.0.0".into(),
+        name: "Sample Duel".into(),
+        license: "Apache-2.0".into(),
+        engine_compat: ">=1.0.0 <2.0.0".into(),
+        entries: vec![
+            PackageInputEntry {
+                path: "world.json".into(),
+                kind: "world_config".into(),
+                media_type: "application/json".into(),
+                data: world,
+            },
+            PackageInputEntry {
+                path: "dependencies.lock".into(),
+                kind: "lockfile".into(),
+                media_type: "application/json".into(),
+                data: lock,
+            },
+        ],
+    };
+    let bytes = write_package(&input).unwrap();
+    let bundle = rynvek_world::WorldBundle::from_bytes(&bytes).unwrap();
+    assert_eq!(bundle.config.game_mode(), "PvP_Custom");
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/packages/sample.rworld");
+    if std::env::var_os("RYNVEK_UPDATE_FIXTURES").is_some() {
+        std::fs::write(path, &bytes).unwrap();
+    }
+    assert_eq!(std::fs::read(path).expect("夹具存在（RYNVEK_UPDATE_FIXTURES=1 生成）"), bytes);
+}
