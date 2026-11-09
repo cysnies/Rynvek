@@ -16,11 +16,13 @@
 
 #![deny(unsafe_code)]
 
+pub mod compiler;
 pub mod error;
 pub mod graph;
 pub mod ir;
 pub mod semantics;
 
+pub use compiler::{CompileOptions, compile_rule_graph, compile_rule_graph_json};
 pub use error::{RuleError, RuleResult};
 pub use graph::{ComponentDecl, GraphNode, RULE_GRAPH_FORMAT, UntypedRuleGraph};
 pub use ir::{ComponentSlot, Instr, Opcode, RuleModule, ValueType};
