@@ -38,7 +38,7 @@ rynvek-rules = { path = "crates/rynvek-rules" }
 blake3 = "1.8"
 bytemuck = { version = "1.23", features = ["derive"] }
 half = "2.4"
-naga = { version = "28", features = ["wgsl-in"] }
+naga = { version = "30", features = ["wgsl-in"] }
 rquickjs = { version = "0.11", default-features = false, features = ["std"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
