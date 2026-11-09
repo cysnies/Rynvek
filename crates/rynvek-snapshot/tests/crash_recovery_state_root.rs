@@ -49,7 +49,8 @@ fn one_hundred_thousand_entities_snapshot_journal_crash_recovery() {
         rows: vec![NeurNeuronRow {
             dense_index: 0,
             spike_history_ring: 0xDEAD_BEEF,
-            weight_deltas: vec![(1, 3), (4, -1)],
+            weight_deltas: vec![0, 3, 0, 0, -1],
+            ..NeurNeuronRow::default()
         }],
     };
     let snap = SnapshotWriter::write_path(&snap_path, world_id, 20, 1, [0; 32], &registry, Some(&neur)).unwrap();

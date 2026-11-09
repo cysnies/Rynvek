@@ -13,6 +13,6 @@ pub mod reader;
 pub mod writer;
 
 pub use header::{SNAPSHOT_HEADER_LEN, SNAPSHOT_MAGIC, SNAPSHOT_VERSION, SnapshotFileHeader};
-pub use neur::{NEUR_TAG, NeurChunk, NeurNeuronRow};
+pub use neur::{NEUR_FORMAT_VERSION, NEUR_TAG, NeurChunk, NeurNeuronRow};
 pub use reader::{SnapshotReadResult, SnapshotReader};
 pub use writer::{SnapshotWriteOutput, SnapshotWriter};

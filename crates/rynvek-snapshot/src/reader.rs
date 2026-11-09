@@ -74,11 +74,9 @@ fn decode_payload(plain: &[u8], world_id: [u8; 16]) -> Result<(EntityRegistry, O
         if tag == ENTI_TAG {
             offset = decode_enti(&plain[offset..], &mut registry)?;
         } else if tag == crate::neur::NEUR_TAG {
-            // 需要知道块长度：decode 会消费完整块；这里对剩余字节尝试
-            let chunk = NeurChunk::decode(&plain[offset..])?;
-            // 估算消费长度：重新 encode
-            let encoded_len = chunk.encode().len();
-            offset += encoded_len;
+            // NEUR 块头自带 body_len，可直接得到消费长度
+            let (chunk, consumed) = NeurChunk::decode_prefix(&plain[offset..])?;
+            offset += consumed;
             neur = Some(chunk);
         } else {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
