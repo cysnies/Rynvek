@@ -16,6 +16,7 @@
 #![deny(unsafe_code)]
 
 pub mod error;
+pub mod glicko2;
 pub mod ids;
 pub mod source;
 
