@@ -40,6 +40,7 @@ rynvek-agent = { path = "crates/rynvek-agent" }
 rynvek-engine = { path = "crates/rynvek-engine" }
 rynvek-security = { path = "crates/rynvek-security" }
 rynvek-network = { path = "crates/rynvek-network" }
+rynvek-cli = { path = "crates/rynvek-cli" }
 rynvek-server = { path = "crates/rynvek-server" }
 
 # --- 第三方依赖（版本统一在此锁定，成员 crate 通过 `workspace = true` 继承）---
