@@ -141,6 +141,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "rynvek-schema"
 version = "0.1.0"
 dependencies = [

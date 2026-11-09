@@ -1,0 +1,16 @@
+[package]
+name = "rynvek-protocol"
+description = "Rynvek Tier 0 公开协议：Command/Observation/Event 信封、WireFrameHeader 与 CapabilityToken"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+# 公开协议层采用 Apache-2.0 WITH LLVM-exception（ADR-L013），不受 AGPL 传染
+license = "Apache-2.0 WITH LLVM-exception"
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true
