@@ -1,0 +1,25 @@
+{
+  "name": "@rynvek/protocol",
+  "version": "0.1.0",
+  "description": "Rynvek 公开协议 SDK：与 rynvek-protocol 逐字节对齐的 WireFrameHeader、CapabilityToken 与协议信封",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
