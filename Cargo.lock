@@ -371,6 +371,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-spatial"
+version = "0.1.0"
+dependencies = [
+ "rynvek-core",
+]
+
+[[package]]
 name = "rynvek-storage"
 version = "0.1.0"
 dependencies = [
