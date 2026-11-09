@@ -1,0 +1,40 @@
+[package]
+name = "rynvek-server"
+description = "Rynvek Tier 4 服务端：权威世界宿主、双栈实时流、Matchmaking、Glicko-2、.rreplay、Hub Registry 与 HTTP API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+blake3.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+rynvek-agent.workspace = true
+rynvek-core.workspace = true
+rynvek-engine.workspace = true
+rynvek-network.workspace = true
+rynvek-protocol.workspace = true
+rynvek-rts.workspace = true
+rynvek-security.workspace = true
+rynvek-storage.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+wtransport.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+ed25519-dalek.workspace = true
+tempfile.workspace = true
+tokio-tungstenite.workspace = true
+
+[lints]
+workspace = true
