@@ -10,7 +10,7 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "test/**", "../../tests/golden_vectors/**", "../../tests/rules/**"]
+      "inputs": ["src/**", "test/**", "../../tests/golden_vectors/**", "../../tests/rules/**", "../../tests/engine/**"]
     }
   }
 }
