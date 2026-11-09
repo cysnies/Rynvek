@@ -17,6 +17,7 @@
 pub mod arena_map;
 pub mod buildings;
 pub mod combat;
+pub mod genome;
 pub mod ids;
 pub mod map_gen;
 pub mod math;
