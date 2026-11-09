@@ -1,0 +1,30 @@
+{
+  "name": "@rynvek/rules",
+  "version": "0.1.0",
+  "description": "Rynvek 规则创作 SDK：Kernel.define 声明式 AST Builder（生成 rynvek.rule-graph.v1）与 QuickJS-NG WASM 确定性沙箱",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@jitl/quickjs-ng-wasmfile-release-sync": "0.32.0",
+    "@rynvek/core": "workspace:*",
+    "quickjs-emscripten-core": "0.32.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
