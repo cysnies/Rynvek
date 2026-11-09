@@ -48,4 +48,4 @@ pub use ids::{BuildingKind, DamageType, EntitySerial, FactionId, FieldId, OrderK
 pub use map_gen::{TerrainTileKind, generate_symmetric_arena_map};
 pub use math::Vec2;
 pub use resources::{ResourceAmounts, ResourceLedger};
-pub use world::{ArenaWorld, MatchConfig, MatchMode, MatchOutcome, RtsEvent};
+pub use world::{ArenaWorld, MatchConfig, MatchMode, MatchOutcome, RecordedCommand, RtsEvent};

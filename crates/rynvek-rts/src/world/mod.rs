@@ -351,6 +351,16 @@ pub struct ArenaWorld {
     pub outcome: Option<MatchOutcome>,
     pub sudden_death_until: Option<u64>,
     events: Vec<RtsEvent>,
+    /// 已被接受的命令日志（`.rreplay` 录制；默认关闭，不参与状态根）
+    command_log: Option<Vec<RecordedCommand>>,
+}
+
+/// 一条被权威层接受的命令：在 `tick` 的 Tick 边界（`step` 之前）对 `faction` 生效
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedCommand {
+    pub tick: u64,
+    pub faction: FactionId,
+    pub command: RtsCommand,
 }
 
 impl ArenaWorld {
@@ -387,6 +397,7 @@ impl ArenaWorld {
             outcome: None,
             sudden_death_until: None,
             events: Vec::new(),
+            command_log: None,
             map,
         };
         let genomes: BTreeMap<String, Genome> = SEED_GENOMES
@@ -644,8 +655,57 @@ impl ArenaWorld {
 
     // ------------------------------------------------------------------ 命令
 
-    /// 在 Tick 边界执行一条命令
+    /// 开启命令录制（之后每条成功的命令都追加到日志）
+    pub fn enable_command_log(&mut self) {
+        self.command_log.get_or_insert_with(Vec::new);
+    }
+
+    /// 已录制的命令（未开启时为空）
+    pub fn command_log(&self) -> &[RecordedCommand] {
+        self.command_log.as_deref().unwrap_or(&[])
+    }
+
+    /// 按录制日志从同一配置重放到 `until_tick`（或对局提前结束）。
+    ///
+    /// D0 确定性保证：同一 `MatchConfig` + 同一命令序列 ⇒ 逐位相同的 [`Self::state_hash`]。
+    /// `on_tick` 在每个 Tick 边界（命令生效之前）回调，供回放校验器比对检查点。
+    pub fn replay(
+        config: MatchConfig,
+        log: &[RecordedCommand],
+        until_tick: u64,
+        mut on_tick: impl FnMut(&ArenaWorld),
+    ) -> Result<ArenaWorld, (usize, RtsError)> {
+        let mut world = ArenaWorld::new(config);
+        world.enable_command_log();
+        let mut next = 0;
+        loop {
+            on_tick(&world);
+            while let Some(rec) = log.get(next).filter(|r| r.tick == world.tick) {
+                world.apply_command(rec.faction, &rec.command).map_err(|e| (next, e))?;
+                next += 1;
+            }
+            if world.tick >= until_tick || world.outcome.is_some() {
+                break;
+            }
+            world.step();
+        }
+        Ok(world)
+    }
+
+    /// 在 Tick 边界执行一条命令（成功时若开启录制则写入命令日志）
     pub fn apply_command(&mut self, faction: FactionId, cmd: &RtsCommand) -> Result<CommandAck, RtsError> {
+        let ack = self.execute_command(faction, cmd)?;
+        if let Some(log) = self.command_log.as_mut() {
+            log.push(RecordedCommand {
+                tick: self.tick,
+                faction,
+                command: cmd.clone(),
+            });
+        }
+        Ok(ack)
+    }
+
+    fn execute_command(&mut self, faction: FactionId, cmd: &RtsCommand) -> Result<CommandAck, RtsError> {
         if self.outcome.is_some() {
             return Err(RtsError::MatchOver);
         }
