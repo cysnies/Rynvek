@@ -20,11 +20,13 @@
 pub mod binding;
 pub mod error;
 pub mod profile;
+pub mod readback;
 pub mod segment;
 
 pub use binding::{BindGroupSlot, BindingKind, BindingSpec, DIAGNOSTICS_BINDING};
 pub use error::{GpuError, GpuResult};
 pub use profile::{AdapterCapabilitySummary, ComputeCapabilityProfile, classify_compute_capability};
+pub use readback::{READBACK_RING_SLOTS, ReadbackRing, ReadbackRingState, ReadbackSlotState};
 pub use segment::{MAX_MONOLITHIC_STORAGE_BUFFER_BYTES, SEGMENT_SIZE_BYTES, SegmentPlan, SegmentedBufferPool};
 
 /// 线性 Workgroup 尺寸（规范 01 §1.1：`128×1×1`）
