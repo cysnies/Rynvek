@@ -96,3 +96,51 @@
 - **位置**：技术栈冻结 `wgpu 30.0.1`；工具链锁定 Rust 1.85.0。
 - **问题**：`naga 30` 要求 Rust ≥ 1.87，无法在锁定工具链下编译；M3 环境也没有可用 GPU。
 - **裁决**：`rynvek-rules` 仅以 dev-dependency 引入 `naga 28`（`wgsl-in`）对生成的 WGSL 做解析 + 全量校验（入口、工作组大小均断言）；GPU 端数值等价性由 `wgsl.rs` 中逐行移植的 `vec2<u32>` Q32 辅助函数与 CPU 精确语义的逐位比对测试保证。M4 引入 `wgpu 30` 时需先解决工具链版本冲突（升级到 1.87+ 或选用兼容版本），届时再补 GPU 实跑测试。
+
+## E-013：工具链由 Rust 1.85.0 上调至 1.87.0，WGSL 校验升级到 `naga 30`
+
+- **位置**：技术栈冻结 `wgpu 30.0.1`（规范 07 §7.1）；工作区原锁定 Rust 1.85.0（`rust-toolchain.toml`、`rust-version`）。
+- **问题**：`wgpu 30.0.1` 及其依赖 `wgpu-core / wgpu-hal / naga 30` 声明 MSRV 1.87，在 1.85.0 下无法编译。规范同时要求 wgpu 精确为 30.0.1、严禁降级。
+- **裁决**：
+  - 选择能编译 `wgpu 30.0.1` 的**最低**稳定版本 **Rust 1.87.0**（`rust-toolchain.toml` 的 `channel` 与 workspace `rust-version` 同步），edition 仍为 2024；不使用更高版本，避免引入 1.88+ 的语言特性（如 `let` 链），已有代码按 1.87 语法改写。
+  - workspace 依赖 `wgpu = "=30.0.1"` 精确锁定；`rynvek-rules` 的 dev 依赖 `naga` 由 28 升级为 30（与 wgpu 同一版本线，WGSL 前端行为一致）。
+  - 原 E-002（`Ord::clamp` 非 `const fn`）的变通实现保持不变：1.87 下仍不可在 `const fn` 中调用 `clamp`。
+  - E-012 由本条取代。
+
+## E-014：GPU 计算层（`rynvek-wgpu`）中规范未给出的约定
+
+- **位置**：规范 07 §7.1–7.2 只冻结了初始化序列、`Tier A–D` 名称、`32 MiB` 分段、`128 MiB` 上限、`3-Slot Readback Ring` 与错误码 `0x6001–0x6004`，以及目录树中的「BindGroup 0-3」。
+- **裁决（最佳实践补全）**：
+  - **档位判定阈值**：不满足计算最低要求（4 个绑定组、每阶段 ≥8 个存储缓冲、工作组 ≥128×1 与 8×8、存储绑定 ≥ 32 MiB）→ `TierD`；软件适配器（`DeviceType::Cpu/Other`）或 `max_buffer_size < 256 MiB` → `TierC`；独显且缓冲与存储绑定 ≥ 1 GiB、单工作组调用 ≥1024 → `TierA`；其余 `TierB`。
+  - **BindGroup 职责**：0 `Frame`（Uniform 参数 + 帧常量，`@binding(15)` 固定为 `s_diagnostics` 4×`atomic<u32>` 诊断计数器）；1 `StateIn`（只读，`Committed[t-1]`）；2 `StateOut`（读写，`CandidateState[t]`）；3 `Auxiliary`（场采样/沉积、CSR 邻居、统计摘要）。`KernelLayout::validate` 在构建期拒绝越组的绑定类型。与 M3 规则 WGSL 的绑定一致。
+  - **工作组尺寸**：线性内核 `128×1×1`，二维内核 `8×8×1`（规范值），由 `linear_workgroups / grid_workgroups` 统一计算派发数。
+  - **原生后端回退**：规范要求 `BROWSER_WEBGPU | PRIMARY`；原生环境若 PRIMARY 无适配器（如无 Vulkan 驱动的 CI 容器），再以 `GL` 后端重试一次（浏览器目标不回退）。`WGPU_BACKEND` 环境变量可覆盖，空字符串视为未设置。
+  - **软件适配器与测试跳过策略**：GPU 集成测试在无适配器时打印原因并跳过（保持验收绿色）；设置 `RYNVEK_REQUIRE_GPU=1` 时无适配器即失败。llvmpipe / SwiftShader 等软件适配器被判定为 `TierC`，但仍真实执行全部内核。
+  - **非阻塞回读**：`ReadbackRing` 严格使用 `Slot[tick % 3]`；槽忙时**跳过**本 Tick 的回读（计数 `skipped`），已就绪未取走即被覆盖计 `dropped`，从不等待 Fence。DeviceLost 恢复第 5 步的校验使用独立的一次性回读 `OneShotReadback`（同样只轮询不阻塞），以 Philox 探针结果逐位比对 CPU 期望值。
+  - **单体缓冲上限**：`create_storage_buffer` 对超过 `128 MiB` 的请求返回 `0x6003`；大于一个 Segment 的数据由 `SegmentedBufferPool` 以 `33,554,432 B` 切分。
+  - **恢复状态机**：DeviceLost 后按 5 步执行——① 隔离（停止提交）② 释放旧资源 ③ 在**同一** `wgpu::Instance` 上重获设备（代数 +1）④ 重建管线并从 CPU 权威状态上传 ⑤ 校验并恢复；失败次数达到上限（缺省 3）即降级为 CPU Reference 并上报 `BACKEND_DEGRADED`。
+
+## E-015：渲染层（`rynvek-render`）L0–L7 图层与神经 LOD 阈值
+
+- **位置**：项目文档描述了世界视图的图层与「缩放决定神经细节」，但未给出图层编号与阈值。
+- **裁决**：
+  - **图层**：L0 Terrain、L1 FieldHeatmap、L2 Structures、L3 Organisms、L4 Bonds、L5 NeuralOverlay、L6 FogOfWar（不可拾取）、L7 Overlay；`RenderLayerMask(u8)` 位 `1 << n` 对应 Ln，`@rynvek/engine` 的 `RenderLayer` 与之一致。
+  - **神经 LOD**（按 `px_per_cell`）：L0 `< 2`、L1 `[2, 8)`、L2 `[8, 32)`、L3 `[32, 128)`、L4 `≥ 128`；32×32 像素网格下 `px_per_cell = 32` 为 1:1。
+  - **拾取**：额外渲染到 `R32Uint` ID 目标，`PickId = dense_index + 1`（0 表示未命中），经单像素非阻塞回读返回。
+  - **色板**：背景 `#090B0A`、网格 `#303A34`、强调色 `#A3D65C`；阵营色采用色盲友好的 Okabe-Ito 色板；热力图由 `#0072B2` 渐变到 `#F0E442`。
+
+## E-016：引擎门面、Worker 协议、许可证与依赖调整
+
+- **位置**：规范 07 §7.1 第 1 条只给出 `ENGINE_INIT` 的 `postMessage` 形态；目录树列出 `rynvek-engine`、`rynvek-wasm` 与 `@rynvek/engine`，未给出消息清单与许可证归属。
+- **裁决**：
+  - **CPU 权威 / GPU 镜像**：`rynvek-simulation` 的 CPU Reference 是 D0 确定性权威，状态根只由 CPU 产生。GPU 维护五通道场的驻留镜像，每 Tick 推进后把行和摘要经回读环异步送回，与 CPU 摘要逐位比对；不一致即上报 `GPU_DIVERGENCE` 并从 CPU 重新上传。GPU 结果从不写回权威状态，因此 DeviceLost、跳过回读与降级均不改变状态根（测试逐 Tick 断言）。CPU 摘要历史保留 64 Tick，送达时已过期的回读计为 `stale_readbacks`。
+  - **恢复起点**：在两个 Tick 之间侦测到的 DeviceLost，恢复后从 `last_tick + 1` 继续（`RECOVERED.resumeTick`）。
+  - **消息协议**：`type` 为 SCREAMING_SNAKE_CASE、字段为 camelCase。命令 11 种：`ENGINE_INIT / RESIZE / STEP / START / PAUSE / SET_CAMERA / PICK_REQUEST / SET_LAYER_MASK / SET_HEATMAP_CHANNEL / SIMULATE_DEVICE_LOST / SHUTDOWN`；事件 10 种：`ENGINE_READY / TICK_COMMITTED / FRAME_RENDERED / PICK_RESULT / DEVICE_LOST / RECOVERY_PROGRESS / RECOVERED / BACKEND_DEGRADED / GPU_DIVERGENCE / ENGINE_ERROR`。共享夹具 `tests/engine/protocol_messages.json` 由 Rust（serde 往返）与 TS（运行时校验）双端断言。
+  - **Worker 宿主语义**：`ENGINE_INIT` 在 Worker 生命周期内只允许一次（主线程 `EngineHost` 与 Worker `WorkerHost` 双端拒绝二次移交）；异步初始化期间到达的命令按序缓存（上限 256）并在 `ENGINE_READY` 后回放；协议违例与无法解析的消息以 `0x3003 SimulationInvariantViolated` 上报（规范未定义协议错误码，复用宿主不变量违例），非法尺寸 / `worldId` 用 `0x1004`。`gpuMode`：`auto` 无设备即 CPU 运行，`required` 无设备即 `0x6001` 并终止，`disabled` 不请求设备。
+  - **帧调度**：Tick 只以整数推进，帧时间经固定步长累加器折算，单帧最多追赶 4 Tick，积压整体丢弃。
+  - **浏览器重获设备**：`requestDevice` 在浏览器中只能异步完成。引擎在第 3 步挂起（`awaiting_external_reacquire`），由 `rynvek-wasm` 取出设备所有者、`await reacquire()` 后归还；Surface 由同一 Instance 创建，按设备代数重新配置。
+  - **`unsafe_code`**：全工作区 `deny`；仅 `rynvek-wasm::bridge`（wasm-bindgen 导出符号）`allow`，模块内无手写 `unsafe`。
+  - **许可证**：`@rynvek/engine` 与 `rynvek-wasm` 均为 `AGPL-3.0-only`。GAP-15 的 Apache-2.0 WITH LLVM-exception 客户端 SDK 清单不含二者，它们分发的是引擎本体。
+  - **同层依赖**：`rynvek-engine`（T4）依赖 T0–T3；`rynvek-wasm`（T4）依赖 `rynvek-engine`（同层，单向）。wgpu 内核（T2）不依赖同为 T2 的 `rynvek-field / rynvek-neural`，CPU/GPU 差分测试放在组合二者的 `rynvek-engine` 中，DAG 保持严格单向。
+  - **`rynvek-rules` 特性**：workspace 依赖改为 `default-features = false`，使引擎依赖树不引入 QuickJS（`rynvek-rules` 自身仍默认启用 `quickjs`，其测试不受影响）。
+  - **wasm32 构建**：`rynvek-storage` 的 SQLite 适配（bundled libsqlite3，需要 libc）仅在非 wasm32 目标编译，浏览器持久化留待 OPFS。仅阻塞回读的测试辅助接口（`*_blocking`、规则 GPU 执行器）不在 wasm32 编译。`zstd-sys` 自带 wasm shim，但需要能产出 wasm32 的 C 编译器。本机没有 clang，验证时借用 `zig cc` 包装器（`CC_wasm32_unknown_unknown`），它不属于仓库依赖。
