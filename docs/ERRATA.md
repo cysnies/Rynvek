@@ -436,3 +436,132 @@
   - 采集工蜂的神经脑会在 2.5 Tile 采集半径内游走，可能踏入相邻裂隙被灼烧致死。闭环场景因此选取 4 Tile 内无裂隙的沼泽作为采集目标。
   - 是否让采集工蜂的运动读出在 Harvest 指令下回避裂隙，留待平衡迭代裁决。
 - **许可证**：`@rynvek/client` 与 `@rynvek/arena` 为 `AGPL-3.0-only`；`protocols/schemas/agent-tools.v1.json` 随协议层采用 Apache-2.0 WITH LLVM-exception。
+
+## E-037：`rynvek-wire/1` 通道负载与状态包布局
+
+- **帧头**：严格按规范 16 字节 `WireFrameHeader`，不改动。规范只给出帧头与六个通道，未定义各通道负载：
+  - `0 Control`：Protobuf v3（`ClientHello` / `ServerHello` / `Heartbeat(Ack)` / `KeyframeRequest` / `Disconnect`），协议名 `rynvek-wire/1`；
+  - `1 Command`：上行 JSON `CommandEnvelope<ArenaClientMessage>`（沿用 E-035 的 `rynvek-arena/1` 负载），下行 `{idempotency_key, message}`；
+  - `2 Query`：JSON `QueryRequest` / `QueryReply`；
+  - `3 Event`：下行 JSON `RtsEvent` 数组（已按阵营过滤，同 E-036）；
+  - `4 StateStream`：下行二进制状态包；
+  - `5 Telemetry`：上行，只计数不解析。
+  - `Event` / `StateStream` 上行即违例。
+- **状态包（GAP-16）**：48 字节包头 + 列式区段，每列补齐到 16 字节边界，`≥ 256 B` 时整帧 LZ4。版本 1，布局见 `crates/rynvek-network/src/replication.rs` 模块注释。
+  - 关键帧每 `300 Ticks` 一次，客户端也可用 `KeyframeRequest` 索取。
+  - 坐标为 `Q32.32` 原始值。
+- **幽灵规则（GAP-12 细化）**：
+  - 敌方实体在**仍可见的位置**消失（视野内死亡）时下发 `remove`；
+  - 只有真正离开视野才下发一次 `EntityVisibilityLost` 幽灵；
+  - 幽灵位置重新可见而实体不在时，以 `remove` 清除。
+- **非干扰性**：迷雾中敌方状态变化不改变下发字节。集成测试每 25 Tick 扰动隐藏敌方，比对字节完全一致。
+- **违例错误码**：一切线协议违例（帧头、序号、LZ4、文本帧、上行到只读通道）统一映射 `0x8001` 并断开。规范 11.4 的 `0x5xxx` 属于规则编译器 / 沙箱，不复用。
+- **背压**：每连接发送缓冲 256 帧。缓冲满时视为慢消费者，断开该连接，不阻塞对局 Actor。
+- **WebTransport**：开发 / 测试使用自签名证书，客户端按 `serverCertificateHashes` 语义钉住 SHA-256 指纹，指纹经匹配响应下发。生产部署应换成 CA 证书。
+
+## E-038：认证、注册与权限
+
+- **两步登录**（路由 03）：
+  1. `{principal_id}` → 32 字节挑战（60 s，一次性）；
+  2. 签名 `"rynvek-auth/1\0" ‖ challenge ‖ principal_id(u64 LE)` → 96 字节 `CapabilityToken`。
+  - 缺省返回 Base64url 文本；`Accept: application/octet-stream` 时返回原始 96 字节。
+  - 令牌缺省 1 小时有效，上限 24 小时。
+- **自注册**：规范 11.3 无注册路由，在路由 03 第 0 步补充 `{handle, kind, ed25519_pubkey, registration_signature}`。
+  - 签名 `"rynvek-register/1\0" ‖ handle ‖ "\0" ‖ pubkey` 作为持有证明；
+  - `kind` 只能是 `human` / `agent`，`service` 由运营方离线开通（`0x8001`）。
+  - `principal_id` 为 63 bit 时间有序随机值。
+- **令牌承载**：HTTP 为 `Authorization: Bearer <base64url>`，也接受标准 Base64。浏览器的 WS / WT API 不能自定义请求头，因此实时流的令牌放在首帧 `ClientHello` 中。
+- **令牌验签错误**：令牌验签失败对外一律报 `0x8001`，不暴露签名细节。
+- **登录签名错误**：登录挑战的签名错误报 `0x9001`。
+- **缺省权限**：Human / Service 拥有全部 11 个 scope。Agent 只有对战与只读（无 `hub.publish`、`account.owner`、创作类）。
+- **个人组织**：DDL 无组织成员表。注册时自动创建个人组织（`org_id = principal_id`，slug `u-{handle}`）。"所有者即 Owner" 是唯一的组织角色来源；slug `rynvek` 为官方组织（信任等级 1）。
+- **防枚举**：对无权访问的私有世界 / 实验，与 "不存在" 一样返回 `0x2002` / 404。
+
+## E-039：HTTP 状态码映射与请求体错误
+
+- **以 `code` 为准**：响应体为 `{code, code_hex, name, message}`，HTTP 状态只是传输提示。
+- **状态码映射**：
+
+  | 状态码 | 错误码 |
+  | --- | --- |
+  | 401 | 未认证（`0x8001`） |
+  | 403 | 无权限（`0x8001`） |
+  | 404 | `0x2002` |
+  | 409 | `0x8002` / `0x9003` / `0x2005` |
+  | 410 | `0x9002` |
+  | 422 | `0x8003` / `0x8005` / `0x8006` / `0x9004` / `0x3003`（补丁） |
+  | 429 | `0x8004` |
+  | 400 | `0x9001` / `0x7001` / `0x7002` / `0x5001` |
+  | 507 | `0x2004` |
+  | 500 | 其余 |
+
+- **请求体错误**：JSON 请求体不符合契约时沿用 M6 惯例 `0x5001`（`AgentError::invalid_arguments`）。规范没有通用的 "请求格式错误" 码。
+
+## E-040：`.rreplay` 布局与验证
+
+- **布局**：规范只给出魔数 `RYRP`。实际布局为：
+  - 64 字节文件头（与 `.rsnap` `SnapshotFileHeader` 同构，`world_revision` 字段复用为回放等级，0 = Bit-Exact）；
+  - Zstd 压缩的 JSON 正文 `rynvek-replay/1`：配置、参赛者、被接受的命令日志、每 300 Tick 检查点、终局状态根与胜负；
+  - 112 字节尾部：BLAKE3 32 B、`signer_key_id` u16、14 B 保留、Ed25519 签名 64 B（覆盖之前全部字节）。
+- **验证顺序**：结构 `0x7001` → 校验和 `0x7002` → 签名 `0x9001` → 解析 `0x7001` → 重新仿真 `0x3003`。
+- **录制自检**：录制时先重放一次自检，不一致则拒绝产出。
+- **下载**：只有 `Completed` 的对局提供回放，`Aborted` 返回 `0x2002`。服务端签名公钥在 `GET /api/v1/matches/{id}` 的 `replay_signer` 中公布，`rynvek replay verify --match` 据此验证。
+- **存储**：M7 的 CAS 为进程内 `MemoryBlobStore`（回放、包产物、补丁日志段）。对象存储后端属于部署配置，不在本阶段。
+
+## E-041：天梯与匹配
+
+- **Glicko-2**：采用 Glickman 论文算法，τ = `0.5`（规范未定）。
+  - 波动率用 Illinois 割线法求根，ε = `1e-6`；
+  - 新玩家 1500 / 350 / 0.06，RD 上限 350；
+  - 每局结束即作为单场评分期更新双方，平局记 0.5。
+- **匹配**：按 `(league, ruleset_hash)` 分桶。
+  - 评分窗口 `100 + 25/s`，上限 600，取双方窗口较大者；
+  - 先到者优先，再取评分最近者。
+  - 排队接口幂等，已在对局中的主体直接得到该对局。
+- **规则集**：本服务器只运行 `rynvek.ruleset.arena-duel@1`（`ruleset_hash` = BLAKE3(该 ID)），其他哈希返回 `0x9003`。
+- **`win_reason`**：取值为 `Elimination` / `Surrender` / `TieBreakerScore`，另加 E-033 的 `SuddenDeath` 与 PvE `WavesCleared`（DDL 为 VARCHAR，无枚举约束）。
+- **客户端 `advance`**：排位对局中客户端的 `advance` 一律以 `0x8001` 拒绝，对局只由服务器计时（缺省 30 Hz）。
+
+## E-042：世界补丁、Hub 与 Lab
+
+- **`WorldPatch`**（路由 08）：
+  - 按 E-021 的命名空间规则计算所需等级；声明等级低于所需时报 `0x3003`；
+  - `base_authoring_revision` 过期报 `0x2005`；
+  - Class 3 `RequiresForkRestart` 自动分叉出新世界再提交，响应带 `forked_from`；
+  - 补丁原文入 CAS，作为提交的 `journal_segment_cid`。
+- **Hub 发布**（路由 15）：JSON 体携带 Base64 产物。
+  - 签名消息 `"rynvek-package/1\0" ‖ id ‖ "\0" ‖ semver ‖ "\0" ‖ BLAKE3(artifact)`，用发布者 Principal 的公钥验签（`0x9001`）；
+  - `dependencies.lock` 中每个依赖必须已发布、未吊销（`0x9002`），且版本与哈希一致（`0x9003`）；
+  - 同版本不可覆盖（`0x9003`）；信任等级为官方组织 1、其他 3。
+  - 服务端静态扫描与沙箱验证（`0x9004`）留给 M8。
+- **Blob 下载**（路由 16）：支持单段 `Range`（RFC 9110），返回 206 / 416，带 `ETag` 与 `immutable` 缓存头。
+- **Lab**（路由 17–18）：M7 只登记任务（种子 ≤ 256、Tick ≤ 108,000、每人排队 ≤ 8）。批量执行与 Parquet 产出属于 M8，产出前 `parquet` 返回 `0x2002`。
+- **账户**：
+  - 数据导出返回 JSON 归档 `rynvek-data-export/1`；
+  - 注销时立即匿名化、吊销全部令牌并离队，返回 24 h 热库与 30 d 冷备两个抹除时限。
+- **世界创建**：`POST /api/v1/worlds` 在 M7 只接受 JSON 模板（`arena_duel` / `arena_pve`）。`.rworld` 二进制上传返回 `0x7001`，留给 M8。
+
+## E-043：AGPL 源码要约与 SBOM
+
+- **源码要约**（路由 02）：返回许可证、§13 说明、版本、仓库、构建时的精确提交（40 位）与提交时间、工作树是否脏、源码包 URL（`{repo}/archive/{commit}.tar.gz`，修改版部署用 `--source-tarball` 覆盖）、SBOM 地址。
+- **SBOM 路由**：补充一条规范外路由 `GET /api/v1/meta/sbom.spdx.json`，返回构建期由 `Cargo.lock` 生成的 SPDX 2.3 文档（purl、SHA-256、许可证声明）。`rynvek sbom` 离线输出同一文档。
+- **`gpu_tier`**：服务端权威仿真只走 CPU 参考后端，`health.gpu_tier` 恒为 `"cpu_reference"`。
+
+## E-044：PostgreSQL 测试方式
+
+- **规范 DDL**：`PostgresStore::migrate` 在空库上执行规范 11.1 DDL 原文（`include_str!`），重复调用为空操作。
+- **测试实例**：`rynvek-server/tests/postgres_store.rs` 不依赖外部实例。
+  - 优先用 `RYNVEK_TEST_POSTGRES_URL`；
+  - 否则在 `RYNVEK_PG_BIN` / `PATH` / `/usr/lib/postgresql/*/bin` 中找 `initdb`，在临时目录拉起一次性实例（随机端口，关闭 fsync），测试结束立即停机删除；
+  - 找不到时跳过，设置 `RYNVEK_REQUIRE_POSTGRES=1` 则改为失败。
+  - 同一组一致性断言同时跑内存与 PostgreSQL 两种后端，并在 PostgreSQL 上跑一局完整的端到端对局。
+- **本机二进制**：本机 apt 源不可用，使用 Maven Central 的 zonky `embedded-postgres-binaries` 17.11 解包到 `/workspace/pg17`，并软链到 `/usr/local/bin`。
+
+## E-045：`rynvek` 命令行与依赖层级
+
+- **依赖层级**：`rynvek-cli` 与 `rynvek-server` 同为 Tier 4，CLI 依赖 server（单向）：`rynvek server` 子命令直接嵌入服务端，`replay verify` 复用服务端的验证实现。server 不依赖 CLI，无环。
+- **子命令**：`server`、`keygen`、`login`、`replay verify|inspect`、`frame decode`、`source-offer`、`sbom`、`health`。
+- **失败输出**：失败时退出码为 1，stderr 打印 `错误 0xXXXX 名称：…`。
+- **`server` 就绪行**：首行 stdout 为 JSON（实际端口、证书指纹、回放签名公钥）。收到 SIGTERM / Ctrl-C 时优雅停机。
+- **种子文件**：一行 64 位十六进制，`create_new` 创建，权限 0600，绝不覆盖。
+- **HTTP 客户端**：内置极简 HTTP/1.1 客户端，仅 `http://`，供 CLI 与测试使用。生产环境经 TLS 反向代理访问。
