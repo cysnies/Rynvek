@@ -20,6 +20,8 @@ pub mod migrations;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sqlite;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use blob::FsBlobStore;
 pub use blob::{BlobId, BlobStore, MemoryBlobStore};
 pub use engine::{MemoryStorageEngine, StorageEngine, WorldCommitRecord, WorldMeta};
 #[cfg(not(target_arch = "wasm32"))]
