@@ -22,6 +22,7 @@ pub mod map_gen;
 pub mod math;
 pub mod resources;
 pub mod terrain;
+pub mod units;
 
 pub use arena_map::{ArenaMap, ArenaMapSize, ConnectivityReport};
 pub use ids::{BuildingKind, DamageType, EntitySerial, FactionId, FieldId, OrderKind, ResourceKind, TechId, UnitKind};
