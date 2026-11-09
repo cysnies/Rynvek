@@ -15,8 +15,25 @@ rynvek-core.workspace = true
 rynvek-neural.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# --- 浸泡测试执行体 `rynvek-soak`（src/bin/rynvek-soak.rs）---
+rynvek-engine = { workspace = true, features = ["plugins"] }
+rynvek-rts = { workspace = true, features = ["arrow"] }
+rynvek-rules = { workspace = true, features = ["wasmtime"] }
+rynvek-security.workspace = true
+rynvek-server.workspace = true
+rynvek-storage.workspace = true
+rynvek-world.workspace = true
+tokio.workspace = true
 # 插件夹具封装（与 wasmtime 29 所用 wasmparser / wit-parser 0.221 对齐）
 wit-component = "0.221"
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[[bin]]
+name = "rynvek-soak"
+path = "src/bin/rynvek-soak.rs"
 
 [lints]
 workspace = true
