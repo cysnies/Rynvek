@@ -5,7 +5,7 @@
 # 成员 crate 严格遵循规范 01 的单向分层依赖 DAG（Tier 0 → Tier 4，严禁逆向或循环依赖）。
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "python/native"]
 
 [workspace.package]
 version = "0.1.0"
@@ -102,3 +102,11 @@ lto = "thin"
 
 [profile.test]
 opt-level = 1
+
+# 需要接近 release 仿真速度、又要求增量重建足够快的本地工具构建：
+# Python 原生扩展（`maturin develop --profile opt-dev`）与浸泡测试（`cargo xtask soak`）
+[profile.opt-dev]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

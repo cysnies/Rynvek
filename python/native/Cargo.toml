@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Python `rynvek` 包的原生扩展 `rynvek._native`（PyO3 + Arrow C Data Interface 零拷贝）。
+# 由 Maturin 依据 `python/pyproject.toml` 构建；以 abi3-py312 稳定 ABI 产出单一 wheel。
+[package]
+name = "rynvek-python"
+description = "Rynvek Python 科研接口原生扩展：ArenaSim 仿真句柄、Arrow 零拷贝观测与 Lab 批量实验"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "_native"
+crate-type = ["cdylib", "rlib"]
+# 扩展模块不链接 libpython，无法作为独立测试二进制运行；行为由 `python/tests` 覆盖
+test = false
+doctest = false
+
+[features]
+# Maturin 构建 wheel 时启用（不链接 libpython，由解释器在加载时提供符号）
+extension-module = ["pyo3/extension-module"]
+
+[dependencies]
+arrow = { workspace = true, features = ["pyarrow"] }
+pyo3.workspace = true
+rynvek-core.workspace = true
+rynvek-rts = { workspace = true, features = ["arrow"] }
+rynvek-world.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
