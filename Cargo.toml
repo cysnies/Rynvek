@@ -33,17 +33,21 @@ rynvek-spatial = { path = "crates/rynvek-spatial" }
 rynvek-simulation = { path = "crates/rynvek-simulation" }
 rynvek-neural = { path = "crates/rynvek-neural" }
 rynvek-rules = { path = "crates/rynvek-rules" }
+rynvek-wgpu = { path = "crates/rynvek-wgpu" }
 
 # --- 第三方依赖（版本统一在此锁定，成员 crate 通过 `workspace = true` 继承）---
 blake3 = "1.8"
 bytemuck = { version = "1.23", features = ["derive"] }
 half = "2.4"
 naga = { version = "30", features = ["wgsl-in"] }
+pollster = "0.4"
 rquickjs = { version = "0.11", default-features = false, features = ["std"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 tempfile = "3.20"
+# 规范 07 §7.1 冻结：wgpu 30.0.1（精确锁定，严禁降级）
+wgpu = "=30.0.1"
 zstd = "0.13"
 
 [workspace.lints.rust]
