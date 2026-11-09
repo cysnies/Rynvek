@@ -17,8 +17,10 @@
 pub mod control;
 pub mod error;
 pub mod frame;
+pub mod replication;
 pub mod visibility;
 
 pub use error::NetError;
 pub use frame::{Frame, FrameDecoder, FrameEncoder, SequenceTracker, decode_message};
+pub use replication::{EntityRecord, GhostRecord, ReplicaState, Replicator, StatePacket};
 pub use visibility::VisibilityGrid;
