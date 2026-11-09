@@ -16,12 +16,14 @@
 
 #![deny(unsafe_code)]
 
+pub mod anticheat;
 pub mod authz;
 pub mod challenge;
 pub mod error;
 pub mod keys;
 pub mod token;
 
+pub use anticheat::{BehaviorMonitor, CommandGate, CommandGateConfig, GateDecision, Suspicion, SuspicionKind};
 pub use authz::{League, OrgRole, PrincipalKindCode, PrincipalStatus, Resource, Subject, Visibility, authorize};
 pub use challenge::{AUTH_CHALLENGE_TTL_S, AuthChallenges, challenge_message};
 pub use error::SecurityError;
