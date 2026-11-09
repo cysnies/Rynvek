@@ -23,6 +23,9 @@ pub async fn serve(a: ServerArgs) -> CliResult {
     if a.tick_rate == 0 || a.tick_rate > 240 {
         return Err(CliError::new("--tick-rate 必须在 1..=240"));
     }
+    if a.lab_max_concurrent == 0 || a.lab_max_concurrent > 64 {
+        return Err(CliError::new("--lab-max-concurrent 必须在 1..=64"));
+    }
     let store = match &a.postgres {
         Some(url) => {
             let pg = PostgresStore::connect(url).await.map_err(api)?;
@@ -51,6 +54,8 @@ pub async fn serve(a: ServerArgs) -> CliResult {
             public_base_url: a.public_url.unwrap_or_default(),
             source_tarball_override: a.source_tarball,
             tick_driver: TickDriver::RealTime { hz: a.tick_rate },
+            blob_dir: a.blob_dir,
+            lab_max_concurrent: a.lab_max_concurrent,
             ..AppConfig::default()
         },
         store,

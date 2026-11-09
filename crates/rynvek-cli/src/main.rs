@@ -130,6 +130,12 @@ struct ServerArgs {
     /// 权威 Tick 频率
     #[arg(long, default_value_t = 30)]
     tick_rate: u32,
+    /// 内容寻址 Blob 目录（文件系统 CAS，持久化包与 Parquet）；缺省使用进程内 Blob 存储
+    #[arg(long, env = "RYNVEK_BLOB_DIR")]
+    blob_dir: Option<PathBuf>,
+    /// Lab 实验最大并发执行数
+    #[arg(long, default_value_t = 2)]
+    lab_max_concurrent: usize,
 }
 
 #[derive(Debug, Args)]
