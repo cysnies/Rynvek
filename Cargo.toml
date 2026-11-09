@@ -36,6 +36,7 @@ rynvek-rules = { path = "crates/rynvek-rules", default-features = false }
 rynvek-wgpu = { path = "crates/rynvek-wgpu" }
 rynvek-render = { path = "crates/rynvek-render" }
 rynvek-rts = { path = "crates/rynvek-rts" }
+rynvek-world = { path = "crates/rynvek-world" }
 rynvek-agent = { path = "crates/rynvek-agent" }
 rynvek-engine = { path = "crates/rynvek-engine" }
 rynvek-security = { path = "crates/rynvek-security" }
