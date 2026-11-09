@@ -82,7 +82,11 @@ pub fn orca_line(me: &OrcaAgent, other: &OrcaAgent, tau_ticks: i32) -> OrcaLine 
         // 已重叠：以 1 Tick 为时间步把相对位置推开
         let w = rel_vel - rel_pos;
         let w_len = w.length();
-        let unit_w = if w_len.0 == 0 { Vec2::new(Q32_32::ONE, Q32_32::ZERO) } else { w.normalized() };
+        let unit_w = if w_len.0 == 0 {
+            Vec2::new(Q32_32::ONE, Q32_32::ZERO)
+        } else {
+            w.normalized()
+        };
         direction = Vec2::new(unit_w.y, Q32_32(-unit_w.x.0));
         u = unit_w.scale(r.saturating_sub(w_len));
     }
@@ -99,7 +103,10 @@ pub fn compute_velocity(me: &OrcaAgent, neighbors: &[OrcaAgent], preferred: Vec2
     let mut sorted: Vec<&OrcaAgent> = neighbors.iter().filter(|n| n.id != me.id).collect();
     sorted.sort_by_key(|n| (me.position.distance_sq(n.position), n.id));
     sorted.truncate(ORCA_MAX_NEIGHBORS);
-    let lines: Vec<OrcaLine> = sorted.iter().map(|n| orca_line(me, n, ORCA_TIME_HORIZON_TICKS)).collect();
+    let lines: Vec<OrcaLine> = sorted
+        .iter()
+        .map(|n| orca_line(me, n, ORCA_TIME_HORIZON_TICKS))
+        .collect();
     let mut v = preferred.clamp_length(max_speed);
     for _ in 0..ORCA_ITERATIONS {
         for line in &lines {
@@ -157,7 +164,10 @@ mod tests {
                     agent(i, side, 1000 * i as i64, 0, 0)
                 })
                 .collect();
-            let goals: Vec<Vec2> = agents.iter().map(|a| Vec2::new(Q32_32::from_int(12).saturating_sub(a.position.x), a.position.y)).collect();
+            let goals: Vec<Vec2> = agents
+                .iter()
+                .map(|a| Vec2::new(Q32_32::from_int(12).saturating_sub(a.position.x), a.position.y))
+                .collect();
             let speed = Q32_32::from_milli(100);
             let mut min_gap = i64::MAX;
             for _ in 0..240 {
@@ -176,12 +186,22 @@ mod tests {
                     }
                 }
             }
-            (agents.iter().map(|a| (a.position.x.0, a.position.y.0)).collect::<Vec<_>>(), min_gap)
+            (
+                agents
+                    .iter()
+                    .map(|a| (a.position.x.0, a.position.y.0))
+                    .collect::<Vec<_>>(),
+                min_gap,
+            )
         };
         let (a, gap) = run();
         let (b, _) = run();
         assert_eq!(a, b, "ORCA 必须位级确定");
         // 允许 Q32 截断带来的轻微侵入（≤ 5% 半径和）
-        assert!(gap >= Q32_32::from_milli(950).0, "最小间距 {}", gap as f64 / 4_294_967_296.0);
+        assert!(
+            gap >= Q32_32::from_milli(950).0,
+            "最小间距 {}",
+            gap as f64 / 4_294_967_296.0
+        );
     }
 }

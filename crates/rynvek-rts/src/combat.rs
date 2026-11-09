@@ -185,9 +185,15 @@ mod tests {
     #[test]
     fn corrosive_halves_armor_and_is_weak_vs_shields() {
         let mut t = def(160, 0, 8);
-        assert_eq!(apply_damage(&mut t, DamageType::Corrosive, 22_000).hp_damage_milli, 18_000);
+        assert_eq!(
+            apply_damage(&mut t, DamageType::Corrosive, 22_000).hp_damage_milli,
+            18_000
+        );
         let mut s = def(240, 80, 4);
-        assert_eq!(apply_damage(&mut s, DamageType::Corrosive, 22_000).shield_damage_milli, 11_000);
+        assert_eq!(
+            apply_damage(&mut s, DamageType::Corrosive, 22_000).shield_damage_milli,
+            11_000
+        );
     }
 
     #[test]

@@ -143,7 +143,11 @@ impl PveDirector {
             for _ in 0..count {
                 let idx = pool.len();
                 let mut g = Genome::seed(kind);
-                mutate(&mut g, DEFAULT_MUTATION_RATE_PERMILLE, &mut EvolutionRng::new(world_seed, 0, idx as u64));
+                mutate(
+                    &mut g,
+                    DEFAULT_MUTATION_RATE_PERMILLE,
+                    &mut EvolutionRng::new(world_seed, 0, idx as u64),
+                );
                 g.slug = format!("wild.w0.{idx}");
                 pool.push(g);
             }
@@ -159,7 +163,12 @@ impl PveDirector {
     pub fn plan_wave(&self, w: u32) -> Vec<usize> {
         let mut budget = wave_budget(w) as i64 * 1000;
         let mut out = Vec::new();
-        let cheapest = self.pool.iter().map(|g| unit_spec(g.unit).cost.biomass).min().unwrap_or(i64::MAX);
+        let cheapest = self
+            .pool
+            .iter()
+            .map(|g| unit_spec(g.unit).cost.biomass)
+            .min()
+            .unwrap_or(i64::MAX);
         let mut i = 0usize;
         while budget >= cheapest && !self.pool.is_empty() {
             let g = &self.pool[i % self.pool.len()];
@@ -197,7 +206,10 @@ impl PveDirector {
             let (fitter, other) = if fa >= fb { (a, b) } else { (b, a) };
             let slug = format!("wild.w{next_wave}.{i}");
             let child = if rng.chance_permille(PVE_ARCHETYPE_JUMP_PERMILLE) {
-                let others: Vec<UnitKind> = PVE_ARCHETYPES.into_iter().filter(|u| *u != records[fitter].1.unit).collect();
+                let others: Vec<UnitKind> = PVE_ARCHETYPES
+                    .into_iter()
+                    .filter(|u| *u != records[fitter].1.unit)
+                    .collect();
                 let jump = others[rng.below(others.len() as u32) as usize];
                 let mut g = Genome::seed(jump);
                 mutate(&mut g, DEFAULT_MUTATION_RATE_PERMILLE, &mut rng);
@@ -205,7 +217,13 @@ impl PveDirector {
                 g.slug = slug;
                 g
             } else {
-                breed(&records[fitter].1, &records[other].1, DEFAULT_MUTATION_RATE_PERMILLE, &mut rng, slug)
+                breed(
+                    &records[fitter].1,
+                    &records[other].1,
+                    DEFAULT_MUTATION_RATE_PERMILLE,
+                    &mut rng,
+                    slug,
+                )
             };
             pool.push(child);
         }
@@ -276,10 +294,14 @@ mod tests {
                 .enumerate()
                 .map(|(i, g)| {
                     let dmg = if g.unit == UnitKind::Spitter { 500_000 } else { 10_000 };
-                    (i as u32, g.clone(), FitnessRecord {
-                        damage_dealt_milli: dmg,
-                        survival_ticks: 100,
-                    })
+                    (
+                        i as u32,
+                        g.clone(),
+                        FitnessRecord {
+                            damage_dealt_milli: dmg,
+                            survival_ticks: 100,
+                        },
+                    )
                 })
                 .collect();
             d.evolve(&records, wave_spawn_tick(wave) + 1);

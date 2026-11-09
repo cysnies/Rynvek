@@ -167,7 +167,9 @@ impl TechSet {
 
     /// 单位是否已解锁
     pub fn unit_unlocked(self, kind: UnitKind) -> bool {
-        crate::units::unit_spec(kind).unlocked_by.is_none_or(|t| self.contains(t))
+        crate::units::unit_spec(kind)
+            .unlocked_by
+            .is_none_or(|t| self.contains(t))
     }
 }
 
@@ -238,7 +240,11 @@ impl TechModifiers {
             } else {
                 crate::buildings::BEACON_RADIUS_TILES
             },
-            max_brain_neurons: if has(TechId::MorphogenesisApex) { 256 } else { BASE_MAX_BRAIN_NEURONS },
+            max_brain_neurons: if has(TechId::MorphogenesisApex) {
+                256
+            } else {
+                BASE_MAX_BRAIN_NEURONS
+            },
             spike_cost_micro_energy: if has(TechId::MetabolicSuperconduct) { 480 } else { 800 },
             corpse_recycle_percent: if has(TechId::MetabolicSuperconduct) { 90 } else { 75 },
             breeding_time_percent: if has(TechId::DirectedSpeciation) { 50 } else { 100 },
@@ -277,7 +283,10 @@ mod tests {
         assert_eq!(none.forager_harvest_milli_per_s, 4_000);
         assert_eq!(none.beacon_radius_tiles, 16);
         assert_eq!(none.corpse_recycle_percent, 75);
-        let all = TechId::ALL.iter().fold(TechSet::default(), |s, t| s.with(*t)).modifiers();
+        let all = TechId::ALL
+            .iter()
+            .fold(TechSet::default(), |s, t| s.with(*t))
+            .modifiers();
         assert_eq!(all.forager_harvest_milli_per_s, 5_200);
         // 60 Flux/s × 1.15 = 69 Flux/s
         assert_eq!(60_000 * all.reactor_output_permille / 1000, 69_000);

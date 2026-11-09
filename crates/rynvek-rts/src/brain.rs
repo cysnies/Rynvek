@@ -151,7 +151,12 @@ mod tests {
 
     #[test]
     fn forager_climbs_nutrient_gradient_and_avoids_enemies() {
-        let y = run(UnitKind::Forager, &[(sensor::NUTRIENT_GRAD_X, 200), (sensor::NUTRIENT, 128)], [0; 4], 1);
+        let y = run(
+            UnitKind::Forager,
+            &[(sensor::NUTRIENT_GRAD_X, 200), (sensor::NUTRIENT, 128)],
+            [0; 4],
+            1,
+        );
         assert!(y[action::MOVE_X] > 100, "{y:?}");
         assert!(y[action::HARVEST] > 100, "{y:?}");
         let y = run(UnitKind::Forager, &[(sensor::ENEMY_DIR_Y, 200)], [0; 4], 1);
@@ -167,7 +172,9 @@ mod tests {
             let mut brain = UnitBrain::from_genome(&Genome::seed(UnitKind::Striker)).unwrap();
             let mut x = [0i16; GENOME_INPUTS];
             x[sensor::ENEMY_IN_RANGE] = 15;
-            (0..8).map(|_| brain.step_epoch(&x, m, false)[action::ATTACK] as i32).sum::<i32>()
+            (0..8)
+                .map(|_| brain.step_epoch(&x, m, false)[action::ATTACK] as i32)
+                .sum::<i32>()
         };
         let (quiet, aroused) = (total_attack([0; 4]), total_attack([0, 0, 256, 0]));
         assert!(aroused > quiet, "{quiet} vs {aroused}");

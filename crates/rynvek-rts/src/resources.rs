@@ -35,7 +35,11 @@ impl ResourceAmounts {
 
     /// 由毫单位构造
     pub const fn new(biomass: i64, flux: i64, neurogel: i64) -> Self {
-        Self { biomass, flux, neurogel }
+        Self {
+            biomass,
+            flux,
+            neurogel,
+        }
     }
 
     /// 由整数资源单位构造（`× 1000`）

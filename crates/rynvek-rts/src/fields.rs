@@ -14,7 +14,9 @@
 
 use blake3::Hasher;
 use rynvek_core::Blake3Hash;
-use rynvek_field::{FieldChannelId, FieldChannelParams, FieldTileQ8, HALO, STRIDE, TILE_DIM, solve_reaction_diffusion_tile_q8};
+use rynvek_field::{
+    FieldChannelId, FieldChannelParams, FieldTileQ8, HALO, STRIDE, TILE_DIM, solve_reaction_diffusion_tile_q8,
+};
 
 use crate::ids::FieldId;
 use crate::map_gen::TerrainTileKind;
@@ -85,7 +87,9 @@ impl FieldGrid {
     pub fn new(width: u32, height: u32) -> Self {
         let chunks_x = width.div_ceil(TILE_DIM as u32);
         let chunks_y = height.div_ceil(TILE_DIM as u32);
-        let chunks = (0..chunks_x * chunks_y).map(|_| ARENA_FIELD_CHANNELS.map(FieldTileQ8::new)).collect();
+        let chunks = (0..chunks_x * chunks_y)
+            .map(|_| ARENA_FIELD_CHANNELS.map(FieldTileQ8::new))
+            .collect();
         Self {
             width,
             height,
@@ -101,7 +105,12 @@ impl FieldGrid {
         let mut g = Self::new(width, height);
         for y in 0..height {
             for x in 0..width {
-                g.set(FieldId::Nutrient, x, y, initial_nutrient_q8(tiles[(y * width + x) as usize]));
+                g.set(
+                    FieldId::Nutrient,
+                    x,
+                    y,
+                    initial_nutrient_q8(tiles[(y * width + x) as usize]),
+                );
             }
         }
         g
@@ -200,7 +209,12 @@ impl FieldGrid {
                 }
                 let v = self.get(FieldId::Nutrient, x as i64, y as i64);
                 if v < MARSH_REGEN_CAP_Q8 {
-                    self.set(FieldId::Nutrient, x, y, (v as i32 + share).min(MARSH_REGEN_CAP_Q8 as i32) as i16);
+                    self.set(
+                        FieldId::Nutrient,
+                        x,
+                        y,
+                        (v as i32 + share).min(MARSH_REGEN_CAP_Q8 as i32) as i16,
+                    );
                 }
             }
         }
@@ -372,7 +386,9 @@ mod tests {
         g2.step(&t);
         assert!(g2.get(FieldId::Nutrient, 0, 0) <= MARSH_REGEN_CAP_Q8);
         // 五个场步（15 Tick）精确再生 15 × 12.8 = 192 Q8.8
-        let total: i64 = (0..5).map(|s| fractional_share(MARSH_REGEN_Q8_PER_STEP_NUMER, 5, s)).sum();
+        let total: i64 = (0..5)
+            .map(|s| fractional_share(MARSH_REGEN_Q8_PER_STEP_NUMER, 5, s))
+            .sum();
         assert_eq!(total, 192);
     }
 

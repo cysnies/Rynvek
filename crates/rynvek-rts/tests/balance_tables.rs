@@ -13,8 +13,11 @@ use rynvek_rts::tech::{TECH_SPECS, tech_spec};
 use rynvek_rts::units::{UNIT_SPECS, unit_spec};
 
 fn bible() -> String {
-    std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/Rynvek_Project_Documentation_v1.0.md"))
-        .expect("缺少项目文档")
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/Rynvek_Project_Documentation_v1.0.md"
+    ))
+    .expect("缺少项目文档")
 }
 
 /// 取某个标题之后第一张表格的数据行（去掉表头与分隔行），每行拆为去反引号的单元格
@@ -24,7 +27,13 @@ fn table_after(doc: &str, heading: &str) -> Vec<Vec<String>> {
         .lines()
         .skip_while(|l| !l.starts_with('|'))
         .take_while(|l| l.starts_with('|'))
-        .map(|l| l.trim().trim_matches('|').split('|').map(|c| c.trim().replace('`', "")).collect())
+        .map(|l| {
+            l.trim()
+                .trim_matches('|')
+                .split('|')
+                .map(|c| c.trim().replace('`', ""))
+                .collect()
+        })
         .collect();
     rows.into_iter().skip(2).collect()
 }
@@ -75,18 +84,28 @@ fn building_table_matches() {
         assert_eq!(row[1], s.name_zh);
         assert_eq!(row[2], format!("{0}×{0}", s.footprint), "{kind} 尺寸");
         if *kind != BuildingKind::NexusCore {
-            assert_eq!(numbers(&row[3]), [s.cost.biomass as f64 / 1000.0, s.cost.neurogel as f64 / 1000.0], "{kind} 造价");
+            assert_eq!(
+                numbers(&row[3]),
+                [s.cost.biomass as f64 / 1000.0, s.cost.neurogel as f64 / 1000.0],
+                "{kind} 造价"
+            );
         } else {
             assert_eq!(row[3], "开局自带");
         }
         assert_eq!(numbers(&row[4])[0] as u32, s.build_ticks, "{kind} 建造耗时");
-        assert_eq!(numbers(&row[5]), [s.hp_milli as f64 / 1000.0, s.armor as f64], "{kind} HP/Armor");
+        assert_eq!(
+            numbers(&row[5]),
+            [s.hp_milli as f64 / 1000.0, s.armor as f64],
+            "{kind} HP/Armor"
+        );
         assert_eq!(milli(numbers(&row[6])[0]), s.flux_per_s_milli, "{kind} Flux 收支");
     }
     // 战术参数列中的关键常量
     let tactical: Vec<f64> = numbers(&rows[0][7]);
     assert_eq!(&tactical[..3], &[2000.0, 1000.0, 500.0]);
-    assert!(rows[6][7].contains("射程 12 Tiles") && rows[6][7].contains("单发消耗 4 Flux") && rows[6][7].contains("28"));
+    assert!(
+        rows[6][7].contains("射程 12 Tiles") && rows[6][7].contains("单发消耗 4 Flux") && rows[6][7].contains("28")
+    );
     assert!(rows[4][7].contains("生产队列上限 5") && rows[4][7].contains("+24 Supply"));
     assert!(rows[5][7].contains("作用半径 16 Tiles") && rows[5][7].contains("14 Tiles"));
 }
@@ -108,15 +127,27 @@ fn unit_table_matches() {
         );
         assert_eq!(numbers(&row[4])[0] as u32, s.hatch_ticks, "{kind} 孵化");
         let d = numbers(&row[5]);
-        assert_eq!((milli(d[0]), milli(d[1]), d[2] as i64), (s.hp_milli, s.shield_milli, s.armor), "{kind} 防御");
+        assert_eq!(
+            (milli(d[0]), milli(d[1]), d[2] as i64),
+            (s.hp_milli, s.shield_milli, s.armor),
+            "{kind} 防御"
+        );
         let m = numbers(&row[6]);
-        assert_eq!((milli(m[0]), milli(m[1])), (s.radius_milli, s.speed_milli_per_s), "{kind} 半径/移速");
+        assert_eq!(
+            (milli(m[0]), milli(m[1])),
+            (s.radius_milli, s.speed_milli_per_s),
+            "{kind} 半径/移速"
+        );
         assert_eq!(numbers(&row[7])[0] as u32, s.vision_tiles, "{kind} 视野");
         match s.weapon {
             Some(w) => {
                 let cell = &row[8];
                 assert!(cell.starts_with(w.damage_type.as_str()), "{kind} 伤害类型");
-                let n: Vec<f64> = cell.split('/').skip(1).flat_map(|p| numbers(p).into_iter().take(1)).collect();
+                let n: Vec<f64> = cell
+                    .split('/')
+                    .skip(1)
+                    .flat_map(|p| numbers(p).into_iter().take(1))
+                    .collect();
                 assert_eq!(
                     (milli(n[0]), milli(n[1]), n[2] as u32),
                     (w.damage_milli, w.range_milli, w.cooldown_ticks),
@@ -131,7 +162,10 @@ fn unit_table_matches() {
     assert!(rows[3][8].contains("沉积 15.0 Hazard"));
     assert!(rows[4][8].contains("半径 5.0") && rows[4][8].contains("+12 HP/s") && rows[4][8].contains("+15%"));
     assert!(rows[5][8].contains("半径 8.0"));
-    assert_eq!(unit_spec(UnitKind::Carapace).weapon.unwrap().damage_type, DamageType::BioElectric);
+    assert_eq!(
+        unit_spec(UnitKind::Carapace).weapon.unwrap().damage_type,
+        DamageType::BioElectric
+    );
 }
 
 #[test]

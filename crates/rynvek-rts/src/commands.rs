@@ -166,7 +166,10 @@ mod tests {
     #[test]
     fn error_codes_follow_mapping_table() {
         assert_eq!(RtsError::InsufficientResources.code().code(), 0x8005);
-        assert_eq!(RtsError::InvalidPlacement { detail: String::new() }.code().code(), 0x8006);
+        assert_eq!(
+            RtsError::InvalidPlacement { detail: String::new() }.code().code(),
+            0x8006
+        );
         assert_eq!(RtsError::QueueFull { id: EntitySerial(1) }.code().code(), 0x8004);
         assert_eq!(RtsError::NotOwner { id: EntitySerial(1) }.code().code(), 0x8001);
         assert_eq!(RtsError::UnknownEntity { id: EntitySerial(1) }.code().code(), 0x2002);
@@ -203,6 +206,9 @@ mod tests {
             origin: (1, 2),
         })
         .unwrap();
-        assert_eq!(json, r#"{"type":"place_building","kind":"bld.nexus_core","origin":[1,2]}"#);
+        assert_eq!(
+            json,
+            r#"{"type":"place_building","kind":"bld.nexus_core","origin":[1,2]}"#
+        );
     }
 }

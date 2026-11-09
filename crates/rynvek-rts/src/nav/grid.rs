@@ -116,11 +116,18 @@ impl NavGrid {
         if !self.passable(nx, ny) {
             return None;
         }
-        if dx != 0 && dy != 0 && (!self.passable(x as i64 + dx as i64, y as i64) || !self.passable(x as i64, y as i64 + dy as i64)) {
+        if dx != 0
+            && dy != 0
+            && (!self.passable(x as i64 + dx as i64, y as i64) || !self.passable(x as i64, y as i64 + dy as i64))
+        {
             return None;
         }
         let c = (self.cost(x, y) as u64 + self.cost(nx as u32, ny as u32) as u64) / 2;
-        Some(if dx != 0 && dy != 0 { c * DIAGONAL / 1000 } else { c * STRAIGHT / 1000 })
+        Some(if dx != 0 && dy != 0 {
+            c * DIAGONAL / 1000
+        } else {
+            c * STRAIGHT / 1000
+        })
     }
 
     /// 整图矩形
@@ -177,7 +184,9 @@ pub fn astar(grid: &NavGrid, start: (u32, u32), goal: (u32, u32), bounds: Rect) 
             if !bounds.contains(nx, ny) {
                 continue;
             }
-            let Some(c) = grid.step_cost(x, y, dx, dy) else { continue };
+            let Some(c) = grid.step_cost(x, y, dx, dy) else {
+                continue;
+            };
             let ni = grid.index(nx as u32, ny as u32);
             let ng = g[i] + c;
             if ng < g[ni] {
@@ -216,7 +225,9 @@ pub fn dijkstra_to(grid: &NavGrid, start: (u32, u32), targets: &[(u32, u32)], bo
             if !bounds.contains(nx, ny) {
                 continue;
             }
-            let Some(c) = grid.step_cost(x, y, dx, dy) else { continue };
+            let Some(c) = grid.step_cost(x, y, dx, dy) else {
+                continue;
+            };
             let ni = grid.index(nx as u32, ny as u32) as u32;
             let nd = d + c;
             if dist.get(&ni).is_none_or(|&best| nd < best) {
@@ -225,7 +236,10 @@ pub fn dijkstra_to(grid: &NavGrid, start: (u32, u32), targets: &[(u32, u32)], bo
             }
         }
     }
-    targets.iter().map(|t| dist.get(&(grid.index(t.0, t.1) as u32)).copied()).collect()
+    targets
+        .iter()
+        .map(|t| dist.get(&(grid.index(t.0, t.1) as u32)).copied())
+        .collect()
 }
 
 #[cfg(test)]

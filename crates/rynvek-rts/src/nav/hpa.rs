@@ -33,9 +33,15 @@ impl HpaPath {
     /// 路径经过的扇区（流场走廊）
     pub fn sectors(&self, grid_width: u32) -> BTreeSet<u32> {
         let sx = grid_width.div_ceil(SECTOR_SIZE);
-        self.tiles.iter().map(|(x, y)| (y / SECTOR_SIZE) * sx + x / SECTOR_SIZE).collect()
+        self.tiles
+            .iter()
+            .map(|(x, y)| (y / SECTOR_SIZE) * sx + x / SECTOR_SIZE)
+            .collect()
     }
 }
+
+/// 一对过渡点（扇区内侧 Tile, 邻扇区内侧 Tile）
+pub type Transition = ((u32, u32), (u32, u32));
 
 /// HPA* 抽象图
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,9 +51,9 @@ pub struct HpaGraph {
     sectors_x: u32,
     sectors_y: u32,
     /// 扇区 `s` 与 `+x` 邻居之间的过渡点对
-    east: Vec<Vec<((u32, u32), (u32, u32))>>,
+    east: Vec<Vec<Transition>>,
     /// 扇区 `s` 与 `+y` 邻居之间的过渡点对
-    north: Vec<Vec<((u32, u32), (u32, u32))>>,
+    north: Vec<Vec<Transition>>,
     /// 扇区内边 `(a, b, cost)`，`a < b`（按 Tile 线性下标）
     intra: Vec<Vec<(u32, u32, u64)>>,
     /// 合成后的无向邻接表
@@ -113,12 +119,16 @@ impl HpaGraph {
         self.north[s as usize].clear();
         if sx + 1 < self.sectors_x {
             let (xa, xb) = (r.x1 - 1, r.x1);
-            let pairs = entrances(r.y0, r.y1, |y| grid.passable(xa as i64, y as i64) && grid.passable(xb as i64, y as i64));
+            let pairs = entrances(r.y0, r.y1, |y| {
+                grid.passable(xa as i64, y as i64) && grid.passable(xb as i64, y as i64)
+            });
             self.east[s as usize] = pairs.into_iter().map(|y| ((xa, y), (xb, y))).collect();
         }
         if sy + 1 < self.sectors_y {
             let (ya, yb) = (r.y1 - 1, r.y1);
-            let pairs = entrances(r.x0, r.x1, |x| grid.passable(x as i64, ya as i64) && grid.passable(x as i64, yb as i64));
+            let pairs = entrances(r.x0, r.x1, |x| {
+                grid.passable(x as i64, ya as i64) && grid.passable(x as i64, yb as i64)
+            });
             self.north[s as usize] = pairs.into_iter().map(|x| ((x, ya), (x, yb))).collect();
         }
     }
@@ -242,7 +252,12 @@ impl HpaGraph {
         // 近距直连候选：起终扇区相同或相邻（切比雪夫距离 ≤ 1）时，在两扇区外扩一圈扇区的矩形内
         // 直接求精确 A*，消除「短路径被迫绕经过渡点」的 HPA* 固有偏差
         let mut best: Option<HpaPath> = None;
-        let (ssx, ssy, gsx, gsy) = (ss % self.sectors_x, ss / self.sectors_x, gs % self.sectors_x, gs / self.sectors_x);
+        let (ssx, ssy, gsx, gsy) = (
+            ss % self.sectors_x,
+            ss / self.sectors_x,
+            gs % self.sectors_x,
+            gs / self.sectors_x,
+        );
         if ssx.abs_diff(gsx) <= 1 && ssy.abs_diff(gsy) <= 1 {
             let rect = Rect {
                 x0: ssx.min(gsx).saturating_sub(1) * SECTOR_SIZE,
@@ -272,7 +287,13 @@ impl HpaGraph {
             .collect();
 
         // 抽象图 A*
-        let h = |i: u32| if i == START { octile(start, goal) } else { octile(tile(i), goal) };
+        let h = |i: u32| {
+            if i == START {
+                octile(start, goal)
+            } else {
+                octile(tile(i), goal)
+            }
+        };
         let mut dist: BTreeMap<u32, u64> = BTreeMap::new();
         let mut parent: BTreeMap<u32, u32> = BTreeMap::new();
         let mut heap = BinaryHeap::new();
@@ -307,7 +328,11 @@ impl HpaGraph {
             }
             if let Some(edges) = self.adj.get(&u) {
                 for &(v, c) in edges {
-                    let c = if c == 0 { step_between(grid, tile(u), tile(v)) } else { c };
+                    let c = if c == 0 {
+                        step_between(grid, tile(u), tile(v))
+                    } else {
+                        c
+                    };
                     relax(v, c, h(v), &mut heap);
                 }
             }
@@ -329,7 +354,11 @@ impl HpaGraph {
                 for pair in chain.windows(2) {
                     let (a, b) = (pair[0], pair[1]);
                     let (sa, sb) = (self.sector_of(a.0, a.1), self.sector_of(b.0, b.1));
-                    let rect = if sa == sb { self.sector_rect(sa) } else { union(self.sector_rect(sa), self.sector_rect(sb)) };
+                    let rect = if sa == sb {
+                        self.sector_rect(sa)
+                    } else {
+                        union(self.sector_rect(sa), self.sector_rect(sb))
+                    };
                     let (c, seg) = astar(grid, a, b, rect)?;
                     cost += c;
                     tiles.extend_from_slice(&seg[1..]);
@@ -343,7 +372,8 @@ impl HpaGraph {
 
 /// 两个正交相邻过渡点之间的单步代价
 fn step_between(grid: &NavGrid, a: (u32, u32), b: (u32, u32)) -> u64 {
-    grid.step_cost(a.0, a.1, b.0 as i32 - a.0 as i32, b.1 as i32 - a.1 as i32).unwrap_or(u64::MAX / 4)
+    grid.step_cost(a.0, a.1, b.0 as i32 - a.0 as i32, b.1 as i32 - a.1 as i32)
+        .unwrap_or(u64::MAX / 4)
 }
 
 fn union(a: Rect, b: Rect) -> Rect {
@@ -388,7 +418,7 @@ mod tests {
     fn entrance_rule_follows_botea() {
         assert_eq!(entrances(0, 16, |_| true), vec![0, 15]);
         assert_eq!(entrances(0, 16, |k| (3..8).contains(&k)), vec![5]);
-        assert_eq!(entrances(0, 16, |k| k < 2 || k >= 10), vec![1, 10, 15]);
+        assert_eq!(entrances(0, 16, |k| !(2..10).contains(&k)), vec![1, 10, 15]);
     }
 
     #[test]
@@ -413,7 +443,15 @@ mod tests {
         for y in 0..60 {
             grid.set_occupied(20, y, true);
         }
-        hpa.update_region(&grid, Rect { x0: 20, y0: 0, x1: 21, y1: 60 });
+        hpa.update_region(
+            &grid,
+            Rect {
+                x0: 20,
+                y0: 0,
+                x1: 21,
+                y1: 60,
+            },
+        );
         assert_eq!(hpa, HpaGraph::build(&grid), "增量重建必须与完整重建一致");
         let p = hpa.find_path(&grid, (5, 5), (40, 5)).unwrap();
         assert!(p.tiles.iter().all(|t| grid.passable(t.0 as i64, t.1 as i64)));

@@ -109,7 +109,10 @@ impl FitnessRecord {
 pub fn select_elites(records: &[(u32, FitnessRecord)]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..records.len()).collect();
     order.sort_by_key(|&i| (std::cmp::Reverse(records[i].1.fitness_milli()), records[i].0));
-    let k = (records.len() * ELITE_PERCENT).div_ceil(100).max(ELITE_MIN).min(records.len());
+    let k = (records.len() * ELITE_PERCENT)
+        .div_ceil(100)
+        .max(ELITE_MIN)
+        .min(records.len());
     order.truncate(k);
     order
 }
@@ -187,7 +190,10 @@ pub fn enforce_page_limit(g: &mut Genome) {
             if nz <= SYNAPSE_SLOTS_PER_NEURON {
                 break;
             }
-            let victim = (0..n).filter(|&p| row[p] != 0).min_by_key(|&p| (row[p].unsigned_abs(), p)).expect("非空");
+            let victim = (0..n)
+                .filter(|&p| row[p] != 0)
+                .min_by_key(|&p| (row[p].unsigned_abs(), p))
+                .expect("非空");
             row[victim] = 0;
         }
     }
@@ -205,7 +211,8 @@ pub fn baldwin_assimilate(g: &mut Genome, delta: &[i16], alpha_permille: i64) {
         if *w == 0 {
             return; // 同化只调节既有突触，不改变拓扑
         }
-        let nw = (*w as i64 + d as i64 * alpha_permille / 1000).clamp(-(WEIGHT_LIMIT_Q8 as i64), WEIGHT_LIMIT_Q8 as i64);
+        let nw =
+            (*w as i64 + d as i64 * alpha_permille / 1000).clamp(-(WEIGHT_LIMIT_Q8 as i64), WEIGHT_LIMIT_Q8 as i64);
         *w = if nw == 0 { w.signum() } else { nw as i16 };
     };
     for (i, d) in delta[..n * GENOME_INPUTS].iter().enumerate() {
@@ -213,7 +220,10 @@ pub fn baldwin_assimilate(g: &mut Genome, delta: &[i16], alpha_permille: i64) {
     }
     for h in 0..n {
         for k in 0..GENOME_OUTPUTS {
-            apply(&mut g.w_out[k * n + h], delta[n * GENOME_INPUTS + h * GENOME_OUTPUTS + k]);
+            apply(
+                &mut g.w_out[k * n + h],
+                delta[n * GENOME_INPUTS + h * GENOME_OUTPUTS + k],
+            );
         }
     }
 }
@@ -246,10 +256,13 @@ mod tests {
     fn elites_take_top_ten_percent_with_minimum_two() {
         let recs: Vec<(u32, FitnessRecord)> = (0..25)
             .map(|i| {
-                (i, FitnessRecord {
-                    damage_dealt_milli: (i as i64 % 7) * 1000,
-                    survival_ticks: 0,
-                })
+                (
+                    i,
+                    FitnessRecord {
+                        damage_dealt_milli: (i as i64 % 7) * 1000,
+                        survival_ticks: 0,
+                    },
+                )
             })
             .collect();
         let e = select_elites(&recs);
@@ -281,7 +294,13 @@ mod tests {
             assert_eq!(c1, c2);
             assert_eq!(c1.generation, 1);
             assert_eq!(c1.slot_count(), a.slot_count());
-            assert!(c1.w_in.iter().chain(&c1.w_rec).chain(&c1.w_out).all(|w| w.abs() <= WEIGHT_LIMIT_Q8));
+            assert!(
+                c1.w_in
+                    .iter()
+                    .chain(&c1.w_rec)
+                    .chain(&c1.w_out)
+                    .all(|w| w.abs() <= WEIGHT_LIMIT_Q8)
+            );
             if c1.storage == TopologyStorageClass::PagedDynamicAdjacency {
                 let n = c1.n_hid as usize;
                 assert!((0..n).all(|p| c1.w_rec[p * n..(p + 1) * n].iter().filter(|w| **w != 0).count() <= 32));

@@ -29,6 +29,7 @@ pub struct BuildingSpec {
     pub vision_tiles: u32,
 }
 
+#[allow(clippy::too_many_arguments)] // 参数与平衡表列一一对应，便于逐格核对
 const fn spec(
     kind: BuildingKind,
     name_zh: &'static str,
@@ -58,6 +59,7 @@ const fn spec(
 pub const DEFAULT_BUILDING_VISION_TILES: u32 = 8;
 
 /// 八种建筑平衡表（顺序与设计圣经一致）
+#[rustfmt::skip] // 保持「一行一建筑」的表格形态，便于与设计圣经逐格比对
 pub const BUILDING_SPECS: [BuildingSpec; 8] = [
     spec(BuildingKind::NexusCore, "神经主脑核心", 4, 0, 0, 0, 4000, 15, 30_000, NEXUS_VISION_TILES),
     spec(BuildingKind::BiomassHarvester, "生物质萃取器", 2, 120, 0, 150, 450, 3, -6_000, DEFAULT_BUILDING_VISION_TILES),
@@ -155,8 +157,14 @@ mod tests {
     fn derived_rates_match_bible_annotations() {
         // 萃取器 0.4/Tick × 30 = 12.0 Biomass/s；精炼厂 5 / 2 s = 2.5 Neurogel/s；防御塔 30 / 15 = 2.0 发/秒
         assert_eq!(HARVESTER_MAX_DRAW_MILLI_PER_TICK * 30, 12_000);
-        assert_eq!(REFINERY_CYCLE_OUTPUT_NEUROGEL_MILLI * 30 / REFINERY_CYCLE_TICKS as i64, 2_500);
+        assert_eq!(
+            REFINERY_CYCLE_OUTPUT_NEUROGEL_MILLI * 30 / REFINERY_CYCLE_TICKS as i64,
+            2_500
+        );
         assert_eq!(30 / TURRET_WEAPON.cooldown_ticks, 2);
-        assert_eq!(REACTOR_FISSURE_FLUX_PER_S_MILLI, building_spec(BuildingKind::FluxReactor).flux_per_s_milli * 3 / 2);
+        assert_eq!(
+            REACTOR_FISSURE_FLUX_PER_S_MILLI,
+            building_spec(BuildingKind::FluxReactor).flux_per_s_milli * 3 / 2
+        );
     }
 }

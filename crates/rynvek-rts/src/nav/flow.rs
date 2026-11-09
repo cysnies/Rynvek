@@ -58,7 +58,8 @@ impl FlowField {
     pub fn solve(grid: &NavGrid, goal: (u32, u32), corridor: Option<&BTreeSet<u32>>) -> Self {
         let (w, h) = (grid.width, grid.height);
         let sectors_x = w.div_ceil(SECTOR_SIZE);
-        let allowed = |x: u32, y: u32| corridor.is_none_or(|c| c.contains(&((y / SECTOR_SIZE) * sectors_x + x / SECTOR_SIZE)));
+        let allowed =
+            |x: u32, y: u32| corridor.is_none_or(|c| c.contains(&((y / SECTOR_SIZE) * sectors_x + x / SECTOR_SIZE)));
         let n = (w * h) as usize;
         let mut t = vec![UNREACHED; n];
         let mut frozen = vec![false; n];

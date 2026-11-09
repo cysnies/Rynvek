@@ -51,7 +51,12 @@ fn round_ties_down(depth: i64, s: Slope) -> i64 {
 /// 计算视野：对每个可见格调用 `reveal(x, y)`（可能重复调用同一格）
 ///
 /// `blocks(x, y)` 对越界坐标应返回 `true`。
-pub fn shadowcast(origin: (i64, i64), radius: u32, blocks: impl Fn(i64, i64) -> bool, mut reveal: impl FnMut(i64, i64)) {
+pub fn shadowcast(
+    origin: (i64, i64),
+    radius: u32,
+    blocks: impl Fn(i64, i64) -> bool,
+    mut reveal: impl FnMut(i64, i64),
+) {
     reveal(origin.0, origin.1);
     let r = radius as i64;
     let r2 = r * r;
@@ -187,7 +192,10 @@ impl FactionFog {
 
     /// `4×4` 聚合可见性格（行优先，`1` = 可见，`2` = 仅已探索，`0` = 未探索）
     pub fn visibility_cells(&self) -> Vec<u8> {
-        let (cw, ch) = (self.width.div_ceil(VISIBILITY_CELL_TILES), self.height.div_ceil(VISIBILITY_CELL_TILES));
+        let (cw, ch) = (
+            self.width.div_ceil(VISIBILITY_CELL_TILES),
+            self.height.div_ceil(VISIBILITY_CELL_TILES),
+        );
         let mut out = vec![0u8; (cw * ch) as usize];
         for y in 0..self.height {
             for x in 0..self.width {
@@ -220,16 +228,24 @@ mod tests {
 
     fn fov(walls: &BTreeSet<(i64, i64)>, o: (i64, i64), r: u32) -> BTreeSet<(i64, i64)> {
         let mut seen = BTreeSet::new();
-        shadowcast(o, r, |x, y| walls.contains(&(x, y)) || !(0..40).contains(&x) || !(0..40).contains(&y), |x, y| {
-            seen.insert((x, y));
-        });
+        shadowcast(
+            o,
+            r,
+            |x, y| walls.contains(&(x, y)) || !(0..40).contains(&x) || !(0..40).contains(&y),
+            |x, y| {
+                seen.insert((x, y));
+            },
+        );
         seen
     }
 
     #[test]
     fn open_field_reveals_exact_disc() {
         let seen = fov(&BTreeSet::new(), (20, 20), 5);
-        let expect: BTreeSet<_> = (15..=25).flat_map(|x| (15..=25).map(move |y| (x, y))).filter(|(x, y)| (x - 20) * (x - 20) + (y - 20) * (y - 20) <= 25).collect();
+        let expect: BTreeSet<_> = (15..=25)
+            .flat_map(|x| (15..=25).map(move |y| (x, y)))
+            .filter(|(x, y)| (x - 20) * (x - 20) + (y - 20) * (y - 20) <= 25)
+            .collect();
         assert_eq!(seen, expect);
     }
 
@@ -244,7 +260,9 @@ mod tests {
 
     #[test]
     fn visibility_is_symmetric() {
-        let walls: BTreeSet<_> = [(10, 10), (11, 10), (12, 12), (15, 9), (9, 14), (13, 15), (16, 13)].into_iter().collect();
+        let walls: BTreeSet<_> = [(10, 10), (11, 10), (12, 12), (15, 9), (9, 14), (13, 15), (16, 13)]
+            .into_iter()
+            .collect();
         let r = 9;
         for a in [(8i64, 8i64), (12, 11), (14, 14)] {
             let sa = fov(&walls, a, r);

@@ -92,7 +92,8 @@ impl ArenaMap {
     /// 按任意偶数尺寸生成（测试与自定义房间）；尺寸必须容纳两处出生安全区
     pub fn generate_custom(width: u32, height: u32, seed: u64) -> Self {
         assert!(
-            width >= 2 * (SPAWN_ANCHOR_TILE + SPAWN_SAFE_RADIUS) && height >= 2 * (SPAWN_ANCHOR_TILE + SPAWN_SAFE_RADIUS),
+            width >= 2 * (SPAWN_ANCHOR_TILE + SPAWN_SAFE_RADIUS)
+                && height >= 2 * (SPAWN_ANCHOR_TILE + SPAWN_SAFE_RADIUS),
             "地图过小，无法容纳两处出生安全区"
         );
         let tiles = generate_symmetric_arena_map(width as usize, height as usize, seed);
@@ -315,9 +316,9 @@ pub fn min_vertex_cut_4(map: &ArenaMap, a: (u32, u32), b: (u32, u32), radius: u3
                     queue.push_back(out);
                 }
                 // 反向残量：若邻居 u 曾经向 v 输送流量（g[u→v] > 0），可退回到 out(u)
-                for d in 0..4 {
+                for (d, &opp) in OPPOSITE.iter().enumerate() {
                     if let Some(u) = neighbors(v, d) {
-                        if edge_flow[u][OPPOSITE[d]] > 0 && parent[2 * u + 1] == u32::MAX {
+                        if edge_flow[u][opp] > 0 && parent[2 * u + 1] == u32::MAX {
                             parent[2 * u + 1] = s as u32;
                             queue.push_back(2 * u + 1);
                         }
@@ -349,11 +350,7 @@ pub fn min_vertex_cut_4(map: &ArenaMap, a: (u32, u32), b: (u32, u32), radius: u3
             let (pv, sv) = (p / 2, s / 2);
             if pv == sv {
                 // 同一 Tile 的入点 ↔ 出点
-                if p % 2 == 0 {
-                    vertex_flow[pv] = true;
-                } else {
-                    vertex_flow[pv] = false;
-                }
+                vertex_flow[pv] = p % 2 == 0;
             } else {
                 // 跨 Tile：p 为 out(pv) → s 为 in(sv) 正向；或 p 为 in(pv) → s 为 out(sv) 反向退流
                 let d = (0..4).find(|&d| neighbors(pv, d) == Some(sv)).expect("相邻 Tile");
@@ -373,10 +370,18 @@ mod tests {
 
     #[test]
     fn standard_sizes_match_design_bible() {
-        let sides: Vec<_> = ArenaMapSize::ALL.iter().map(|s| (s.as_str(), s.side_tiles(), s.side_chunks())).collect();
+        let sides: Vec<_> = ArenaMapSize::ALL
+            .iter()
+            .map(|s| (s.as_str(), s.side_tiles(), s.side_chunks()))
+            .collect();
         assert_eq!(
             sides,
-            [("Duel_1v1", 256, 1), ("Skirmish_2v2", 512, 2), ("Arena_4P", 768, 3), ("Persistent_Sector", 2048, 8)]
+            [
+                ("Duel_1v1", 256, 1),
+                ("Skirmish_2v2", 512, 2),
+                ("Arena_4P", 768, 3),
+                ("Persistent_Sector", 2048, 8)
+            ]
         );
     }
 

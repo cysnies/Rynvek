@@ -72,9 +72,21 @@ mod tests {
         assert!(!is_passable(TerrainTileKind::ImperviousWall));
         assert!(blocks_line_of_sight(TerrainTileKind::ImperviousWall));
         assert!(!blocks_line_of_sight(TerrainTileKind::AcidicFissure));
-        assert!(allows_building(TerrainTileKind::AcidicFissure, BuildingKind::FluxReactor));
-        assert!(!allows_building(TerrainTileKind::AcidicFissure, BuildingKind::BiomassHarvester));
-        assert!(!allows_building(TerrainTileKind::ImperviousWall, BuildingKind::FluxReactor));
-        assert!(allows_building(TerrainTileKind::NutrientMarsh, BuildingKind::BiomassHarvester));
+        assert!(allows_building(
+            TerrainTileKind::AcidicFissure,
+            BuildingKind::FluxReactor
+        ));
+        assert!(!allows_building(
+            TerrainTileKind::AcidicFissure,
+            BuildingKind::BiomassHarvester
+        ));
+        assert!(!allows_building(
+            TerrainTileKind::ImperviousWall,
+            BuildingKind::FluxReactor
+        ));
+        assert!(allows_building(
+            TerrainTileKind::NutrientMarsh,
+            BuildingKind::BiomassHarvester
+        ));
     }
 }

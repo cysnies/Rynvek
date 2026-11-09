@@ -351,7 +351,12 @@ impl Genome {
 
     /// 非零突触数（`w_in ∪ w_rec ∪ w_out`）
     pub fn synapse_count(&self) -> usize {
-        self.w_in.iter().chain(&self.w_rec).chain(&self.w_out).filter(|w| **w != 0).count()
+        self.w_in
+            .iter()
+            .chain(&self.w_rec)
+            .chain(&self.w_out)
+            .filter(|w| **w != 0)
+            .count()
     }
 
     /// 全部突触槽位数

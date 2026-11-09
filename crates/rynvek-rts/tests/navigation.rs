@@ -12,7 +12,9 @@ use rynvek_rts::nav::{FlowField, HpaGraph, NavGrid, astar};
 
 /// 简单 64 位 LCG（测试用确定性取样）
 fn lcg(state: &mut u64) -> u64 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     *state >> 33
 }
 
@@ -42,7 +44,11 @@ fn hpa_is_within_25_percent_of_optimal_on_generated_maps() {
             match (exact, approx) {
                 (Some((opt, _)), Some(p)) => {
                     assert!(p.cost >= opt);
-                    assert!(p.cost * 100 <= opt * 125, "seed {seed} {a:?}→{b:?}: {} vs {opt}", p.cost);
+                    assert!(
+                        p.cost * 100 <= opt * 125,
+                        "seed {seed} {a:?}→{b:?}: {} vs {opt}",
+                        p.cost
+                    );
                     worst = worst.max(if opt == 0 { 1000 } else { p.cost * 1000 / opt });
                     for w in p.tiles.windows(2) {
                         let (dx, dy) = (w[1].0 as i32 - w[0].0 as i32, w[1].1 as i32 - w[0].1 as i32);

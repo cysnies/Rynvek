@@ -223,7 +223,9 @@ mod tests {
 
     #[test]
     fn per_tick_share_sums_exactly_per_second() {
-        for rate in [30_000i64, 25_000, 12_000, 10_000, 40_000, 1_500, -6_000, 69_000, 103_500] {
+        for rate in [
+            30_000i64, 25_000, 12_000, 10_000, 40_000, 1_500, -6_000, 69_000, 103_500,
+        ] {
             for second in 0..3u64 {
                 let sum: i64 = (second * 30..(second + 1) * 30).map(|t| per_tick_share(rate, t)).sum();
                 assert_eq!(sum, rate, "rate {rate} 第 {second} 秒");
@@ -254,6 +256,9 @@ mod tests {
         assert_eq!(a.perp(), Vec2::from_int(-4, 3));
         assert_eq!(a.det(Vec2::from_int(1, 0)), Q32_32::from_int(-4));
         assert_eq!(Vec2::tile_center(2, 3).tile(), Some((2, 3)));
-        assert_eq!(Vec2::from_int(10, 0).clamp_length(Q32_32::from_int(2)), Vec2::from_int(2, 0));
+        assert_eq!(
+            Vec2::from_int(10, 0).clamp_length(Q32_32::from_int(2)),
+            Vec2::from_int(2, 0)
+        );
     }
 }

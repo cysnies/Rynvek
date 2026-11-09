@@ -142,7 +142,10 @@ mod tests {
 
     #[test]
     fn milli_conversion_rounds_and_clamps() {
-        assert_eq!(Modulators::from_milli([1000, -1000, 500, 2000]).0, [256, -256, 128, 256]);
+        assert_eq!(
+            Modulators::from_milli([1000, -1000, 500, 2000]).0,
+            [256, -256, 128, 256]
+        );
         assert_eq!(Modulators::from_milli([1, -1, 2, 0]).0, [0, 0, 1, 0]);
         assert_eq!(BeaconConfig::strength_from_milli(50_000), 12_800);
         assert_eq!(BeaconConfig::strength_from_milli(-80_000), -12_800);
@@ -162,7 +165,10 @@ mod tests {
         assert_eq!(received_at(Vec2::from_int(50, 0), &sources), Modulators::ZERO);
         // 交换律：与顺序无关
         let rev: Vec<_> = sources.iter().rev().copied().collect();
-        assert_eq!(received_at(Vec2::from_int(5, 0), &rev), received_at(Vec2::from_int(5, 0), &sources));
+        assert_eq!(
+            received_at(Vec2::from_int(5, 0), &rev),
+            received_at(Vec2::from_int(5, 0), &sources)
+        );
     }
 
     #[test]
@@ -176,7 +182,11 @@ mod tests {
         g.set(FieldId::SignalB, 100, 108, 12_000);
         inject_beacon(&mut g, (100, 100), 16, &cfg);
         assert_eq!(g.get(FieldId::SignalB, 100, 100), 12_800);
-        assert_eq!(g.get(FieldId::SignalB, 108, 100), 9_600, "d = 8：12800 × (256 − 64) / 256");
+        assert_eq!(
+            g.get(FieldId::SignalB, 108, 100),
+            9_600,
+            "d = 8：12800 × (256 − 64) / 256"
+        );
         assert_eq!(g.get(FieldId::SignalB, 100, 108), 12_000, "更强的既有场不被覆盖");
         assert_eq!(g.get(FieldId::SignalB, 117, 100), 0);
         assert_eq!(g.get(FieldId::SignalA, 100, 100), 0);

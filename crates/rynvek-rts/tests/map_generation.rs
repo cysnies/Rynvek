@@ -28,10 +28,17 @@ const GOLDEN_CASES: &[(u32, u32, u64)] = &[
 
 fn golden_entry(w: u32, h: u32, seed: u64) -> Value {
     let m = ArenaMap::generate_custom(w, h, seed);
-    let probes: Vec<Value> = [(0u32, 0u32), (32, 32), (w / 2, h / 2 - 1), (w - 1, h - 1), (17, 99), (w - 5, 3)]
-        .iter()
-        .map(|&(x, y)| json!([x, y, m.tile(x, y) as u8]))
-        .collect();
+    let probes: Vec<Value> = [
+        (0u32, 0u32),
+        (32, 32),
+        (w / 2, h / 2 - 1),
+        (w - 1, h - 1),
+        (17, 99),
+        (w - 5, 3),
+    ]
+    .iter()
+    .map(|&(x, y)| json!([x, y, m.tile(x, y) as u8]))
+    .collect();
     json!({
         "width": w,
         "height": h,
@@ -142,6 +149,9 @@ fn edge_rift_anchors_are_open_ground() {
     for (x, y) in m.edge_rift_anchors() {
         let t = m.tile(x, y);
         assert!(t != TerrainTileKind::ImperviousWall && t != TerrainTileKind::AcidicFissure);
-        assert!(x <= 2 || y <= 2 || x >= m.width - 3 || y >= m.height - 3, "锚点应贴近地图外围：({x}, {y})");
+        assert!(
+            x <= 2 || y <= 2 || x >= m.width - 3 || y >= m.height - 3,
+            "锚点应贴近地图外围：({x}, {y})"
+        );
     }
 }
