@@ -13,9 +13,12 @@
 
 #![deny(unsafe_code)]
 
+pub mod engine;
 pub mod gpu_field;
 pub mod gpu_neural;
 pub mod gpu_rules;
 pub mod protocol;
+pub mod provider;
 
+pub use engine::{Engine, EngineConfig, EngineError, EngineStats, FaultInjection};
 pub use protocol::{ComputeBackendKind, EngineCommand, EngineEvent, GpuMode};
