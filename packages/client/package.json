@@ -1,0 +1,32 @@
+{
+  "name": "@rynvek/client",
+  "version": "0.1.0",
+  "description": "Rynvek Arena 客户端运行时：rynvek-arena/1 线上协议、对局客户端、平衡表镜像、地形解码、APM 预算与 InputActionRouter",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.0.1",
+    "@rynvek/core": "workspace:*",
+    "@rynvek/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
