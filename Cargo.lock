@@ -342,6 +342,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-neural"
+version = "0.1.0"
+dependencies = [
+ "rynvek-core",
+ "rynvek-snapshot",
+ "serde",
+]
+
+[[package]]
 name = "rynvek-protocol"
 version = "0.1.0"
 dependencies = [

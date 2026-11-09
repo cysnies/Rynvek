@@ -1,0 +1,18 @@
+[package]
+name = "rynvek-neural"
+description = "Rynvek Tier 2 Neural Soup 原生运行时：四种神经元模型、三种图存储布局、四因子 STDP 与 NEUR 快照语义"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+rynvek-core.workspace = true
+rynvek-snapshot.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

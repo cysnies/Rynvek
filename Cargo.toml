@@ -31,6 +31,8 @@ rynvek-compute-cpu = { path = "crates/rynvek-compute-cpu" }
 rynvek-field = { path = "crates/rynvek-field" }
 rynvek-spatial = { path = "crates/rynvek-spatial" }
 rynvek-simulation = { path = "crates/rynvek-simulation" }
+rynvek-neural = { path = "crates/rynvek-neural" }
+rynvek-rules = { path = "crates/rynvek-rules" }
 
 # --- 第三方依赖（版本统一在此锁定，成员 crate 通过 `workspace = true` 继承）---
 blake3 = "1.8"
