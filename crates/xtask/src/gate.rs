@@ -30,7 +30,7 @@ fn forbidden_words() -> [String; 4] {
     ]
 }
 
-/// 单独成词的旧缩写（`nv`、`NV_`、`--nv-`、`@nv/` 等）
+/// 单独成词的旧缩写（两字母品牌缩写本身，及其 `_` / `-` / `@…/` 前后缀形式，大小写不敏感）
 fn has_short_legacy_token(line: &str) -> bool {
     line.split(|c: char| !c.is_ascii_alphanumeric())
         .any(|t| t.eq_ignore_ascii_case(&["n", "v"].concat()))
