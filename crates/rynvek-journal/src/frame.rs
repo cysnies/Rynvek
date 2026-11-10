@@ -1,18 +1,10 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Journal 帧布局（规范 10.1 / 审计报告 §4.2）：
+//! Journal 变长帧：`FrameHeader(24B) + payload + blake3(24B头‖payload)`（规范 10.1 / 审计报告 §4.2）。
 //!
-//! | 偏移 | 长度 | 字段 |
-//! | :--- | :--- | :--- |
-//! | 0 | 4 | `frame_magic` = `RYFR` |
-//! | 4 | 2 | `frame_kind`（1..=7 对应完整 WAL 帧种类） |
-//! | 6 | 2 | `reserved` |
-//! | 8 | 8 | `tick` |
-//! | 16 | 8 | `world_revision` |
-//! | 24 | 8 | `payload_len` |
-//! | 32 | N | `payload`（帧体） |
-//! | 32+N | 32 | `frame_blake3`（对前 32+N 字节的 BLAKE3） |
+//! 若文件在 payload 或 checksum 中途截断，读取器返回
+//! [`RynvekErrorCode::JournalTornWriteTruncated`] 并停止重放（已读完的完整帧仍有效）。
 
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_core::hash::Blake3Hash;
@@ -20,18 +12,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::manifest::CommitManifest;
 
-pub const FRAME_MAGIC: [u8; 4] = *b"RYFR";
-pub const FRAME_HEADER_LEN: usize = 32;
+/// 帧头长度（24B：2B kind + 2B flags + 4B payload_len + 8B tick + 8B revision）
+pub const FRAME_HEADER_LEN: usize = 24;
+/// 帧尾校验长度（32B BLAKE3）
 pub const FRAME_CHECKSUM_LEN: usize = 32;
-/// 单帧最大允许载荷长度（64 MiB，防止畸形长度字段触发巨额内存分配）
+/// 单帧最大允许载荷长度（64 MiB）
 pub const MAX_FRAME_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 
-/// 预写日志（WAL）帧种类（审计报告 §4.2）
+/// 预写日志（WAL）帧类型（审计报告 §4.2，涵盖全部 7 种帧）
 #[repr(u16)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FrameKind {
-    /// Tick 提交清单帧（含全套子根与最终状态根）
-    TickCommit = 1,
+    /// 载荷为完整 [`CommitManifest`]（Tick 提交清单）
+    Commit = 1,
     /// 已被权威层接受并排入当前 Tick 的外部命令帧
     CommandAccepted = 2,
     /// 已调度的确定性事件帧
@@ -47,9 +40,12 @@ pub enum FrameKind {
 }
 
 impl FrameKind {
+    /// 与 `Commit` 等价的语义别名
+    pub const TickCommit: Self = Self::Commit;
+
     pub const fn from_u16(v: u16) -> Option<Self> {
         match v {
-            1 => Some(Self::TickCommit),
+            1 => Some(Self::Commit),
             2 => Some(Self::CommandAccepted),
             3 => Some(Self::ScheduledEvent),
             4 => Some(Self::StructuralMutation),
@@ -67,7 +63,6 @@ pub struct JournalCommandRecord {
     pub tick: u64,
     pub world_revision: u64,
     pub faction_id: u8,
-    /// 确定性小端二进制或规范化 JSON 命令字节
     pub command_bytes: Vec<u8>,
 }
 
@@ -85,7 +80,6 @@ pub struct JournalEventRecord {
 pub struct JournalMutationRecord {
     pub tick: u64,
     pub world_revision: u64,
-    /// 1 = Spawn, 2 = Despawn, 3 = ComponentPatch
     pub op_kind: u8,
     pub entity_serial: u32,
     pub mutation_bytes: Vec<u8>,
@@ -122,7 +116,7 @@ pub enum JournalRecord {
 impl JournalRecord {
     pub const fn kind(&self) -> FrameKind {
         match self {
-            Self::TickCommit(_) => FrameKind::TickCommit,
+            Self::TickCommit(_) => FrameKind::Commit,
             Self::CommandAccepted(_) => FrameKind::CommandAccepted,
             Self::ScheduledEvent(_) => FrameKind::ScheduledEvent,
             Self::StructuralMutation(_) => FrameKind::StructuralMutation,
@@ -158,19 +152,20 @@ impl JournalRecord {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JournalFrameHeader {
     pub kind: FrameKind,
+    pub flags: u16,
+    pub payload_len: u32,
     pub tick: u64,
-    pub world_revision: u64,
-    pub payload_len: u64,
+    pub revision: u64,
 }
 
 impl JournalFrameHeader {
     pub fn encode(&self) -> [u8; FRAME_HEADER_LEN] {
         let mut out = [0u8; FRAME_HEADER_LEN];
-        out[0..4].copy_from_slice(&FRAME_MAGIC);
-        out[4..6].copy_from_slice(&(self.kind as u16).to_le_bytes());
+        out[0..2].copy_from_slice(&(self.kind as u16).to_le_bytes());
+        out[2..4].copy_from_slice(&self.flags.to_le_bytes());
+        out[4..8].copy_from_slice(&self.payload_len.to_le_bytes());
         out[8..16].copy_from_slice(&self.tick.to_le_bytes());
-        out[16..24].copy_from_slice(&self.world_revision.to_le_bytes());
-        out[24..32].copy_from_slice(&self.payload_len.to_le_bytes());
+        out[16..24].copy_from_slice(&self.revision.to_le_bytes());
         out
     }
 
@@ -178,25 +173,23 @@ impl JournalFrameHeader {
         if bytes.len() < FRAME_HEADER_LEN {
             return Err(RynvekErrorCode::JournalTornWriteTruncated);
         }
-        if bytes[0..4] != FRAME_MAGIC {
-            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
-        }
-        let kind_raw = u16::from_le_bytes([bytes[4], bytes[5]]);
+        let kind_raw = u16::from_le_bytes([bytes[0], bytes[1]]);
         let kind = FrameKind::from_u16(kind_raw).ok_or(RynvekErrorCode::InvalidFileMagicOrVersion)?;
-        let payload_len = u64::from_le_bytes(bytes[24..32].try_into().unwrap());
+        let payload_len = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         if payload_len as usize > MAX_FRAME_PAYLOAD_BYTES {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
         Ok(Self {
             kind,
-            tick: u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
-            world_revision: u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
+            flags: u16::from_le_bytes([bytes[2], bytes[3]]),
             payload_len,
+            tick: u64::from_le_bytes(bytes[8..16].try_into().unwrap()),
+            revision: u64::from_le_bytes(bytes[16..24].try_into().unwrap()),
         })
     }
 }
 
-/// 一条完整的 Journal 帧
+/// 完整 journal 帧
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct JournalFrame {
     pub header: JournalFrameHeader,
@@ -205,17 +198,19 @@ pub struct JournalFrame {
 }
 
 impl JournalFrame {
-    pub fn from_commit(commit: &CommitManifest) -> Self {
-        let payload = commit.encode().to_vec();
-        Self::from_parts(FrameKind::TickCommit, commit.tick, commit.world_revision, payload)
+    /// 由提交清单构造帧
+    pub fn from_commit(manifest: &CommitManifest) -> Self {
+        let payload = manifest.encode().to_vec();
+        Self::from_parts(FrameKind::Commit, manifest.tick, manifest.world_revision, payload)
     }
 
-    pub fn from_parts(kind: FrameKind, tick: u64, world_revision: u64, payload: Vec<u8>) -> Self {
+    pub fn from_parts(kind: FrameKind, tick: u64, revision: u64, payload: Vec<u8>) -> Self {
         let header = JournalFrameHeader {
             kind,
+            flags: 0,
+            payload_len: payload.len() as u32,
             tick,
-            world_revision,
-            payload_len: payload.len() as u64,
+            revision,
         };
         let checksum = checksum_of(&header, &payload);
         Self {
@@ -267,25 +262,19 @@ impl JournalFrame {
         Self::from_parts(record.kind(), record.tick(), record.world_revision(), payload)
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(FRAME_HEADER_LEN + self.payload.len() + FRAME_CHECKSUM_LEN);
-        out.extend_from_slice(&self.header.encode());
-        out.extend_from_slice(&self.payload);
-        out.extend_from_slice(&self.checksum);
-        out
-    }
-
+    /// 解析为提交清单
     pub fn to_commit(&self) -> Result<CommitManifest, RynvekErrorCode> {
-        if !matches!(self.header.kind, FrameKind::TickCommit | FrameKind::Checkpoint) {
+        if !matches!(self.header.kind, FrameKind::Commit | FrameKind::Checkpoint) {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
         CommitManifest::decode(&self.payload)
     }
 
+    /// 解析为类型化 WAL 记录
     pub fn to_record(&self) -> Result<JournalRecord, RynvekErrorCode> {
         let p = &self.payload;
         match self.header.kind {
-            FrameKind::TickCommit => Ok(JournalRecord::TickCommit(CommitManifest::decode(p)?)),
+            FrameKind::Commit => Ok(JournalRecord::TickCommit(CommitManifest::decode(p)?)),
             FrameKind::Checkpoint => Ok(JournalRecord::Checkpoint(CommitManifest::decode(p)?)),
             FrameKind::CommandAccepted => {
                 if p.len() < 5 {
@@ -298,7 +287,7 @@ impl JournalFrame {
                 }
                 Ok(JournalRecord::CommandAccepted(JournalCommandRecord {
                     tick: self.header.tick,
-                    world_revision: self.header.world_revision,
+                    world_revision: self.header.revision,
                     faction_id,
                     command_bytes: p[5..].to_vec(),
                 }))
@@ -314,7 +303,7 @@ impl JournalFrame {
                 }
                 Ok(JournalRecord::ScheduledEvent(JournalEventRecord {
                     tick: self.header.tick,
-                    world_revision: self.header.world_revision,
+                    world_revision: self.header.revision,
                     event_kind,
                     event_bytes: p[6..].to_vec(),
                 }))
@@ -331,7 +320,7 @@ impl JournalFrame {
                 }
                 Ok(JournalRecord::StructuralMutation(JournalMutationRecord {
                     tick: self.header.tick,
-                    world_revision: self.header.world_revision,
+                    world_revision: self.header.revision,
                     op_kind,
                     entity_serial,
                     mutation_bytes: p[9..].to_vec(),
@@ -347,7 +336,7 @@ impl JournalFrame {
                 }
                 Ok(JournalRecord::WorldPatch(JournalPatchRecord {
                     tick: self.header.tick,
-                    world_revision: self.header.world_revision,
+                    world_revision: self.header.revision,
                     patch_bytes: p[4..].to_vec(),
                 }))
             }
@@ -367,16 +356,58 @@ impl JournalFrame {
         }
     }
 
+    /// 编码为字节（头 + 载荷 + 校验）
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(FRAME_HEADER_LEN + self.payload.len() + FRAME_CHECKSUM_LEN);
+        out.extend_from_slice(&self.header.encode());
+        out.extend_from_slice(&self.payload);
+        out.extend_from_slice(&self.checksum);
+        out
+    }
+
+    /// 与 `encode` 等价的辅助方法
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.encode()
+    }
+
+    /// 校验 checksum 是否匹配
     pub fn verify_checksum(&self) -> Result<(), RynvekErrorCode> {
         let expected = checksum_of(&self.header, &self.payload);
         if expected != self.checksum {
-            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+            Err(RynvekErrorCode::Blake3ChecksumMismatch)
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }
 
 pub(crate) fn checksum_of(header: &JournalFrameHeader, payload: &[u8]) -> [u8; 32] {
-    let hdr = header.encode();
-    Blake3Hash::of_concatenated(&[&hdr, payload]).0
+    let head = header.encode();
+    Blake3Hash::of_concatenated(&[&head, payload]).0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manifest::CommitManifest;
+
+    #[test]
+    fn frame_roundtrip() {
+        let m = CommitManifest::new(
+            [1; 16],
+            3,
+            1,
+            [0; 32],
+            crate::manifest::CommitSubRoots {
+                entity_root_hash: [9; 32],
+                ..Default::default()
+            },
+        );
+        let frame = JournalFrame::from_commit(&m);
+        frame.verify_checksum().unwrap();
+        assert_eq!(frame.to_commit().unwrap(), m);
+        let bytes = frame.encode();
+        let header = JournalFrameHeader::decode(&bytes).unwrap();
+        assert_eq!(header.tick, 3);
+    }
 }

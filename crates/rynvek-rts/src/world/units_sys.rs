@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 单位感知、神经推理、运动与采集。
+//! 单位感知、神经推理、运动与采集（含 `ContactGrid` $O(N)$ 空间分桶加速，审计报告 §10）。
 //!
 //! **感知编码**（16 维 Q8.8，`±256 = ±1.0`，ERRATA E-025）：
 //! - 场梯度（营养 / 信号 A）：中心差分 × 8 后钳制，Forager / Striker 研发趋化增敏后再 × 1.3；
@@ -27,8 +27,10 @@ use crate::units::unit_spec;
 
 use super::{ArenaWorld, Order};
 
-/// 邻居分桶边长（Tiles）
+/// ORCA 邻居分桶边长（Tiles）
 const BUCKET: i64 = 4;
+/// 感知与战斗接触点空间分桶边长（Tiles）
+pub(super) const CONTACT_BUCKET_TILES: i64 = 8;
 /// ORCA 邻居搜索半径（Tiles）
 const NEIGHBOR_RADIUS: i32 = 3;
 /// 到达判定半径（milli Tile）
@@ -63,61 +65,119 @@ pub(super) struct Contact {
     pub is_building: bool,
 }
 
+/// 8×8 Tile 空间分桶接触点索引：将 $O(N^2)$ 全表扫描降为局部邻域桶扫描，同时严格保持 `(距离², EntitySerial)` 全序平局决胜
+#[derive(Clone, Debug)]
+pub(super) struct ContactGrid {
+    pub unit_buckets: BTreeMap<(i64, i64), Vec<Contact>>,
+    pub buildings: Vec<Contact>,
+}
+
+impl ContactGrid {
+    #[inline]
+    pub fn bucket_coords(p: Vec2) -> (i64, i64) {
+        (
+            (p.x.0 >> 32).div_euclid(CONTACT_BUCKET_TILES),
+            (p.y.0 >> 32).div_euclid(CONTACT_BUCKET_TILES),
+        )
+    }
+
+    /// 遍历以 `center` 为圆心、半径不超过 `radius_tiles`（向上取整）的邻域桶内所有单位接触点
+    pub fn for_each_unit_in_radius(&self, center: Vec2, radius_tiles: i64, mut f: impl FnMut(&Contact)) {
+        let cx = center.x.0 >> 32;
+        let cy = center.y.0 >> 32;
+        let r = radius_tiles.max(1) + 1;
+        let bx0 = (cx - r).div_euclid(CONTACT_BUCKET_TILES);
+        let bx1 = (cx + r).div_euclid(CONTACT_BUCKET_TILES);
+        let by0 = (cy - r).div_euclid(CONTACT_BUCKET_TILES);
+        let by1 = (cy + r).div_euclid(CONTACT_BUCKET_TILES);
+        for by in by0..=by1 {
+            for bx in bx0..=bx1 {
+                if let Some(bucket) = self.unit_buckets.get(&(bx, by)) {
+                    for c in bucket {
+                        f(c);
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl ArenaWorld {
-    /// 全部单位与建筑的位置快照（按序号）
-    pub(super) fn contacts(&self) -> Vec<Contact> {
-        let mut out: Vec<Contact> = self
-            .units
-            .values()
-            .map(|u| Contact {
+    /// 构建当前 Tick 的空间分桶接触点索引（$O(N)$）
+    pub(super) fn build_contact_grid(&self) -> ContactGrid {
+        let mut unit_buckets: BTreeMap<(i64, i64), Vec<Contact>> = BTreeMap::new();
+        for u in self.units.values() {
+            let c = Contact {
                 id: u.id,
                 faction: u.faction,
                 position: u.position,
                 is_building: false,
+            };
+            unit_buckets
+                .entry(ContactGrid::bucket_coords(u.position))
+                .or_default()
+                .push(c);
+        }
+        let buildings = self
+            .buildings
+            .values()
+            .map(|b| Contact {
+                id: b.id,
+                faction: b.faction,
+                position: b.center(),
+                is_building: true,
             })
             .collect();
-        out.extend(self.buildings.values().map(|b| Contact {
-            id: b.id,
-            faction: b.faction,
-            position: b.center(),
-            is_building: true,
-        }));
-        out
+        ContactGrid {
+            unit_buckets,
+            buildings,
+        }
     }
 
-    /// 某单位视野内最近的敌方 / 友方（友方只计单位）
-    fn nearest(
+    /// 某单位视野内最近的敌方 / 友方（友方只计单位），使用 `ContactGrid` 局部邻域桶查询并保持 `(d2, id)` 严格一致
+    fn nearest_in_grid(
         &self,
         me: EntitySerial,
         faction: FactionId,
         p: Vec2,
         vision: u32,
-        contacts: &[Contact],
+        grid: &ContactGrid,
     ) -> (Option<Contact>, Option<Contact>) {
         let r2 = Q32_32::from_int(vision as i32).mul(Q32_32::from_int(vision as i32));
         let mut enemy: Option<(Q32_32, Contact)> = None;
         let mut ally: Option<(Q32_32, Contact)> = None;
-        for c in contacts {
+
+        grid.for_each_unit_in_radius(p, vision as i64, |c| {
             if c.id == me {
+                return;
+            }
+            let d2 = p.distance_sq(c.position);
+            if d2 > r2 {
+                return;
+            }
+            if Self::hostile(faction, c.faction) {
+                if enemy.is_none_or(|(b, e)| (d2, c.id) < (b, e.id)) {
+                    enemy = Some((d2, *c));
+                }
+            } else if ally.is_none_or(|(b, a)| (d2, c.id) < (b, a.id)) {
+                ally = Some((d2, *c));
+            }
+        });
+
+        for c in &grid.buildings {
+            if c.id == me || !Self::hostile(faction, c.faction) {
                 continue;
             }
-            let target = if c.is_building {
-                self.buildings[&c.id].nearest_point(p)
-            } else {
-                c.position
-            };
+            let target = self.buildings[&c.id].nearest_point(p);
             let d2 = p.distance_sq(target);
             if d2 > r2 {
                 continue;
             }
-            if Self::hostile(faction, c.faction) {
-                if enemy.is_none_or(|(b, e)| (d2, c.id) < (b, e.id)) {
-                    enemy = Some((d2, Contact { position: target, ..*c }));
-                }
-            } else if !c.is_building && ally.is_none_or(|(b, a)| (d2, c.id) < (b, a.id)) {
-                ally = Some((d2, *c));
+            if enemy.is_none_or(|(b, e)| (d2, c.id) < (b, e.id)) {
+                enemy = Some((d2, Contact { position: target, ..*c }));
             }
         }
+
         (enemy.map(|e| e.1), ally.map(|a| a.1))
     }
 
@@ -153,18 +213,20 @@ impl ArenaWorld {
 
     /// Coupling Epoch：感知 → 调质 → 脑推理
     pub(super) fn step_brains(&mut self) {
-        let contacts = self.contacts();
+        let grid = self.build_contact_grid();
         let mut sources: BTreeMap<FactionId, Vec<ModulatorSource>> = BTreeMap::new();
+        for u in self.units.values() {
+            sources
+                .entry(u.faction)
+                .or_insert_with(|| self.modulator_sources(u.faction));
+        }
         let ids: Vec<EntitySerial> = self.units.keys().copied().collect();
         for id in ids {
             let u = &self.units[&id];
             let faction = u.faction;
-            let srcs = sources
-                .entry(faction)
-                .or_insert_with(|| self.modulator_sources(faction))
-                .clone();
-            let m = received_at(u.position, &srcs);
-            let x = self.sense(id, &contacts);
+            let srcs = &sources[&faction];
+            let m = received_at(u.position, srcs);
+            let x = self.sense(id, &grid);
             let plasticity = self
                 .faction(faction)
                 .is_some_and(|f| f.techs.contains(TechId::HebbianPlasticity));
@@ -175,7 +237,7 @@ impl ArenaWorld {
     }
 
     /// 组装一个单位的 16 维感知
-    fn sense(&self, id: EntitySerial, contacts: &[Contact]) -> [i16; GENOME_INPUTS] {
+    fn sense(&self, id: EntitySerial, grid: &ContactGrid) -> [i16; GENOME_INPUTS] {
         let u = &self.units[&id];
         let spec = unit_spec(u.kind);
         let (tx, ty) = u.tile();
@@ -198,7 +260,7 @@ impl ArenaWorld {
         (x[sensor::SIGNAL_A_GRAD_X], x[sensor::SIGNAL_A_GRAD_Y]) = grad(FieldId::SignalA);
         x[sensor::SIGNAL_B] = level(FieldId::SignalB, 12_800);
         x[sensor::ENERGY] = level(FieldId::Energy, 25_600);
-        let (enemy, ally) = self.nearest(id, u.faction, u.position, spec.vision_tiles, contacts);
+        let (enemy, ally) = self.nearest_in_grid(id, u.faction, u.position, spec.vision_tiles, grid);
         let unit_dir = |p: Vec2| {
             let d = (p - u.position).normalized();
             (
@@ -283,7 +345,7 @@ impl ArenaWorld {
     }
 
     pub(super) fn step_movement(&mut self) {
-        let contacts = self.contacts();
+        let grid = self.build_contact_grid();
         let ids: Vec<EntitySerial> = self.units.keys().copied().collect();
         // 1) 期望速度
         let mut preferred: BTreeMap<EntitySerial, (Vec2, Q32_32)> = BTreeMap::new();
@@ -291,7 +353,7 @@ impl ArenaWorld {
             let u = &self.units[id];
             let spec = unit_spec(u.kind);
             let enemy = if u.order.kind == OrderKind::AttackMove {
-                self.nearest(*id, u.faction, u.position, spec.vision_tiles, &contacts)
+                self.nearest_in_grid(*id, u.faction, u.position, spec.vision_tiles, &grid)
                     .0
                     .map(|c| c.position)
             } else {

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 战斗、环境伤害、护盾再生 / 治疗与死亡结算。
+//! 战斗、环境伤害、护盾再生 / 治疗与死亡结算（含 `ContactGrid` $O(N)$ 索敌与光环预缓存优化，审计报告 §10）。
 //!
 //! 设计圣经只冻结了武器数值与伤害克制，以下为确定性实现（ERRATA E-032）：
 //! - **索敌**：射程内（到建筑取占地最近点）、直线弹道不被墙体阻挡的最近敌方，按 `(距离², 序号)` 取；
@@ -155,32 +155,49 @@ impl ArenaWorld {
         for b in self.buildings.values_mut() {
             b.weapon_cooldown = b.weapon_cooldown.saturating_sub(1);
         }
-        let contacts = self.contacts();
+        let grid = self.build_contact_grid();
         for s in self.shooters() {
             // 射手可能已在本 Tick 早些时候阵亡
             if !(self.units.contains_key(&s.id) || self.buildings.contains_key(&s.id)) {
                 continue;
             }
             let range = Q32_32::from_milli(s.weapon.range_milli);
+            // 考虑最大单位半径（Leviathan 1.4 Tile），在空间分桶中查询 `ceil(range) + 2` Tile 邻域
+            let search_radius_tiles = (s.weapon.range_milli + 2_999) / 1_000;
             let mut best: Option<(Q32_32, EntitySerial, Vec2, bool)> = None;
-            for c in &contacts {
+
+            grid.for_each_unit_in_radius(s.position, search_radius_tiles, |c| {
                 if !Self::hostile(s.faction, c.faction) {
-                    continue;
+                    return;
                 }
-                let (point, extra) = if c.is_building {
-                    match self.buildings.get(&c.id) {
-                        Some(b) => (b.nearest_point(s.position), Q32_32::ZERO),
-                        None => continue,
-                    }
-                } else {
-                    match self.units.get(&c.id) {
-                        Some(u) => (u.position, u.radius()),
-                        None => continue,
-                    }
+                let Some(u) = self.units.get(&c.id) else {
+                    return;
                 };
+                let (point, extra) = (u.position, u.radius());
                 let reach = range.saturating_add(extra);
                 let d2 = s.position.distance_sq(point);
                 if d2 > reach.mul(reach) {
+                    return;
+                }
+                if best.is_some_and(|(bd, bid, _, _)| (bd, bid) <= (d2, c.id)) {
+                    return;
+                }
+                if !self.line_of_fire_clear(s.position, point) {
+                    return;
+                }
+                best = Some((d2, c.id, point, false));
+            });
+
+            for c in &grid.buildings {
+                if !Self::hostile(s.faction, c.faction) {
+                    continue;
+                }
+                let Some(b) = self.buildings.get(&c.id) else {
+                    continue;
+                };
+                let point = b.nearest_point(s.position);
+                let d2 = s.position.distance_sq(point);
+                if d2 > range.mul(range) {
                     continue;
                 }
                 if best.is_some_and(|(bd, bid, _, _)| (bd, bid) <= (d2, c.id)) {
@@ -189,8 +206,9 @@ impl ArenaWorld {
                 if !self.line_of_fire_clear(s.position, point) {
                     continue;
                 }
-                best = Some((d2, c.id, point, c.is_building));
+                best = Some((d2, c.id, point, true));
             }
+
             let Some((_, target, point, _)) = best else { continue };
             // 防御塔弹药
             if s.weapon.flux_per_shot_milli > 0 {
@@ -223,18 +241,24 @@ impl ArenaWorld {
                 debug_assert_eq!(half, 45);
                 let axis = (point - s.position).normalized();
                 let reach2 = range.mul(range);
-                for u in self.units.values() {
-                    if u.id == target || !Self::hostile(s.faction, u.faction) {
-                        continue;
+                let mut arc_hits = Vec::new();
+                grid.for_each_unit_in_radius(s.position, search_radius_tiles, |c| {
+                    if c.id == target || !Self::hostile(s.faction, c.faction) {
+                        return;
                     }
+                    let Some(u) = self.units.get(&c.id) else {
+                        return;
+                    };
                     let rel = u.position - s.position;
                     if rel.length_sq() > reach2 {
-                        continue;
+                        return;
                     }
                     if rel.normalized().dot(axis) >= COS_45 {
-                        victims.push(u.id);
+                        arc_hits.push(u.id);
                     }
-                }
+                });
+                arc_hits.sort_unstable();
+                victims.extend(arc_hits);
             }
             for v in victims {
                 self.resolve_hit(&s, v);

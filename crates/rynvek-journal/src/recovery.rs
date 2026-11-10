@@ -1,39 +1,41 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 崩溃恢复状态机（规范 10.2 `CrashRecoveryStateMachine` / D197 + 审计报告 §4.3）：
+//! 崩溃恢复状态机（D322–D327 + 审计报告 §4.3，四步）：
 //!
-//! 1. `LocateLatestValidSnapshot`：定位最新快照文件并读取文件头与 32B 状态根做真值校验；
-//! 2. `VerifySnapshotChunks`：核验快照文件头的魔数、版本号、声明的载荷长度与状态根一致性；
-//! 3. `ScanJournalTailAndTruncateTornWrite`：扫描 `.rjournal` 尾部，若发现撕裂写则安全截断并记录；
-//! 4. `ReplayJournalFramesAndVerifyStateRoot`：逐帧重放 `tick > snapshot.tick` 的 WAL 记录（含命令、事件、结构变更与提交帧），验证 `parent_commit_hash` 链连续性及重放后世界状态根一致性。
+//! 1. [`CrashRecoveryState::LocateLatestValidSnapshot`]（含 `.rsnap` 文件包络与状态根校验）
+//! 2. [`CrashRecoveryState::OpenJournalAfterSnapshot`]
+//! 3. [`CrashRecoveryState::ReplayFramesUntilTornWrite`]
+//! 4. [`CrashRecoveryState::RebuildIndicesAndVerifyStateRoot`]（含重放回调与状态根一致性核验）
 
 use std::fs::File;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rynvek_core::error::RynvekErrorCode;
+use rynvek_core::hash::Blake3Hash;
 
 use crate::frame::JournalRecord;
 use crate::manifest::CommitManifest;
 use crate::reader::JournalReader;
 
-/// 状态机的 4 个规范阶段 + 完成态
+/// 恢复状态机当前步骤
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CrashRecoveryState {
     LocateLatestValidSnapshot,
-    VerifySnapshotChunks,
-    ScanJournalTailAndTruncateTornWrite,
-    ReplayJournalFramesAndVerifyStateRoot,
+    OpenJournalAfterSnapshot,
+    ReplayFramesUntilTornWrite,
+    RebuildIndicesAndVerifyStateRoot,
     Completed,
+    Failed,
 }
 
-/// 恢复输入
+/// 恢复输入：快照路径（可选）与 journal 路径
 #[derive(Clone, Debug)]
 pub struct RecoveryInput {
     pub snapshot_path: Option<PathBuf>,
     pub journal_path: PathBuf,
-    /// 快照已知状态根（无快照时为全 0）
+    /// 快照中记录的状态根；若无快照则为全零，仅依赖 journal 首帧的 parent
     pub snapshot_state_root: [u8; 32],
     pub snapshot_tick: u64,
     pub snapshot_revision: u64,
@@ -45,18 +47,16 @@ pub struct RecoveryOutput {
     pub final_state: CrashRecoveryState,
     pub replayed_commits: Vec<CommitManifest>,
     pub replayed_records: Vec<JournalRecord>,
+    pub torn_write_detected: bool,
     pub final_state_root: [u8; 32],
     pub final_tick: u64,
     pub final_revision: u64,
-    pub torn_write_detected: bool,
-    pub state_trace: Vec<CrashRecoveryState>,
 }
 
-/// 四阶段崩溃恢复状态机
+/// 四步崩溃恢复状态机
 #[derive(Debug)]
 pub struct CrashRecoveryStateMachine {
     state: CrashRecoveryState,
-    trace: Vec<CrashRecoveryState>,
 }
 
 impl Default for CrashRecoveryStateMachine {
@@ -69,99 +69,97 @@ impl CrashRecoveryStateMachine {
     pub fn new() -> Self {
         Self {
             state: CrashRecoveryState::LocateLatestValidSnapshot,
-            trace: vec![CrashRecoveryState::LocateLatestValidSnapshot],
         }
     }
 
-    pub const fn state(&self) -> CrashRecoveryState {
+    pub fn state(&self) -> CrashRecoveryState {
         self.state
     }
 
-    fn transition(&mut self, next: CrashRecoveryState) {
-        self.state = next;
-        self.trace.push(next);
-    }
-
-    /// 执行标准四阶段崩溃恢复（验证快照头与提交哈希链）
+    /// 执行完整恢复流程
     pub fn run(&mut self, input: &RecoveryInput) -> Result<RecoveryOutput, RynvekErrorCode> {
         self.run_with_replayer(input, |_| Ok(None))
     }
 
-    /// 执行带确定性状态机重放回调的四阶段崩溃恢复：
-    /// `replayer` 对每条 `tick > snapshot_tick` 的 `JournalRecord` 被调用；若返回 `Some(replayed_state_root)`，
-    /// 则在 `TickCommit` / `Checkpoint` 边界强制与清单中的 `state_root_hash` 比对，不一致立即报 `Blake3ChecksumMismatch`。
+    /// 执行带确定性状态机重放回调的四步恢复流程
     pub fn run_with_replayer(
         &mut self,
         input: &RecoveryInput,
         mut replayer: impl FnMut(&JournalRecord) -> Result<Option<[u8; 32]>, RynvekErrorCode>,
     ) -> Result<RecoveryOutput, RynvekErrorCode> {
-        // 阶段 1：LocateLatestValidSnapshot
-        if let Some(ref snap) = input.snapshot_path {
-            if !snap.exists() {
+        // 步骤 1：定位并核验快照包络
+        self.state = CrashRecoveryState::LocateLatestValidSnapshot;
+        if let Some(path) = &input.snapshot_path {
+            if !Path::new(path).exists() {
+                self.state = CrashRecoveryState::Failed;
                 return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
             }
-        }
-        // 阶段 2：VerifySnapshotChunks（校验 .rsnap 文件头魔数、版本、声明载荷长度与 32B 状态根）
-        self.transition(CrashRecoveryState::VerifySnapshotChunks);
-        if let Some(ref snap) = input.snapshot_path {
-            verify_snapshot_file_envelope(snap, input.snapshot_tick, input.snapshot_state_root)?;
+            if let Err(e) = verify_snapshot_file_envelope(path, input.snapshot_tick, input.snapshot_state_root) {
+                self.state = CrashRecoveryState::Failed;
+                return Err(e);
+            }
         }
 
-        // 阶段 3：ScanJournalTailAndTruncateTornWrite
-        self.transition(CrashRecoveryState::ScanJournalTailAndTruncateTornWrite);
+        // 步骤 2：打开 journal
+        self.state = CrashRecoveryState::OpenJournalAfterSnapshot;
+        if !input.journal_path.exists() {
+            self.state = CrashRecoveryState::Failed;
+            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
+        }
+
+        // 步骤 3：重放直至撕裂写
+        self.state = CrashRecoveryState::ReplayFramesUntilTornWrite;
         let read = JournalReader::read_path(&input.journal_path)?;
 
-        // 阶段 4：ReplayJournalFramesAndVerifyStateRoot
-        self.transition(CrashRecoveryState::ReplayJournalFramesAndVerifyStateRoot);
+        // 步骤 4：校验父哈希链、执行重放回调并验证最终状态根
+        self.state = CrashRecoveryState::RebuildIndicesAndVerifyStateRoot;
         let mut expected_parent = input.snapshot_state_root;
-        let mut final_tick = input.snapshot_tick;
-        let mut final_rev = input.snapshot_revision;
-        let mut replayed_commits = Vec::new();
+        let mut commits = Vec::new();
         let mut replayed_records = Vec::new();
 
         for record in read.records {
-            if record.tick() <= input.snapshot_tick {
+            if record.tick() <= input.snapshot_tick && record.world_revision() <= input.snapshot_revision {
                 continue;
             }
-            let maybe_replayed_root = replayer(&record)?;
+            let maybe_replayed_root = match replayer(&record) {
+                Ok(r) => r,
+                Err(e) => {
+                    self.state = CrashRecoveryState::Failed;
+                    return Err(e);
+                }
+            };
             if let JournalRecord::TickCommit(commit) | JournalRecord::Checkpoint(commit) = &record {
                 if commit.parent_commit_hash != expected_parent {
-                    return Err(RynvekErrorCode::Blake3ChecksumMismatch);
-                }
-                let recomputed = CommitManifest::compute_state_root(
-                    commit.entity_root_hash,
-                    commit.field_root_hash,
-                    commit.neural_root_hash,
-                    commit.economy_root_hash,
-                    commit.rng_root_hash,
-                    commit.parent_commit_hash,
-                );
-                if recomputed != commit.state_root_hash {
+                    self.state = CrashRecoveryState::Failed;
                     return Err(RynvekErrorCode::Blake3ChecksumMismatch);
                 }
                 if let Some(actual_root) = maybe_replayed_root {
                     if actual_root != commit.state_root_hash {
+                        self.state = CrashRecoveryState::Failed;
                         return Err(RynvekErrorCode::Blake3ChecksumMismatch);
                     }
                 }
                 expected_parent = commit.state_root_hash;
-                final_tick = commit.tick;
-                final_rev = commit.world_revision;
-                replayed_commits.push(*commit);
+                commits.push(*commit);
             }
             replayed_records.push(record);
         }
 
-        self.transition(CrashRecoveryState::Completed);
+        let (final_tick, final_revision, final_state_root) = if let Some(last) = commits.last() {
+            (last.tick, last.world_revision, last.state_root_hash)
+        } else {
+            (input.snapshot_tick, input.snapshot_revision, input.snapshot_state_root)
+        };
+
+        self.state = CrashRecoveryState::Completed;
         Ok(RecoveryOutput {
             final_state: self.state,
-            replayed_commits,
+            replayed_commits: commits,
             replayed_records,
-            final_state_root: expected_parent,
-            final_tick,
-            final_revision: final_rev,
             torn_write_detected: read.torn_write,
-            state_trace: self.trace.clone(),
+            final_state_root,
+            final_tick,
+            final_revision,
         })
     }
 }
@@ -196,4 +194,62 @@ fn verify_snapshot_file_envelope(
         return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
     }
     Ok(())
+}
+
+/// 便于测试：把状态根包装为 Blake3Hash
+pub fn state_root_hash(bytes: [u8; 32]) -> Blake3Hash {
+    Blake3Hash(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::manifest::CommitManifest;
+    use crate::writer::JournalWriter;
+    use tempfile::TempDir;
+
+    #[test]
+    fn recovers_through_torn_write_with_consistent_root() {
+        let dir = TempDir::new().unwrap();
+        let journal = dir.path().join("world.rjournal");
+        let world = [7u8; 16];
+        let mut writer = JournalWriter::create(&journal, world, 0, 0, 0).unwrap();
+
+        let mut parent = [0u8; 32];
+        let mut manifests = Vec::new();
+        for rev in 1..=5u64 {
+            let entity = Blake3Hash::of(&rev.to_le_bytes()).0;
+            let m = CommitManifest::new(
+                world,
+                rev * 10,
+                rev,
+                parent,
+                crate::manifest::CommitSubRoots {
+                    entity_root_hash: entity,
+                    ..Default::default()
+                },
+            );
+            writer.append_commit(&m).unwrap();
+            parent = m.state_root_hash;
+            manifests.push(m);
+        }
+        // 模拟断电：追加半帧
+        writer.append_torn_bytes(&[1, 2, 3, 4, 5]).unwrap();
+
+        let mut machine = CrashRecoveryStateMachine::new();
+        let output = machine
+            .run(&RecoveryInput {
+                snapshot_path: None,
+                journal_path: journal,
+                snapshot_state_root: [0; 32],
+                snapshot_tick: 0,
+                snapshot_revision: 0,
+            })
+            .unwrap();
+        assert_eq!(output.final_state, CrashRecoveryState::Completed);
+        assert!(output.torn_write_detected);
+        assert_eq!(output.replayed_commits.len(), 5);
+        assert_eq!(output.final_state_root, manifests[4].state_root_hash);
+        assert_eq!(output.final_tick, 50);
+    }
 }

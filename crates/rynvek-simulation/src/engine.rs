@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 16 阶段 Tick 推进引擎（规范 03）。
+//! 16 阶段 Tick 推进引擎（规范 03 / 审计报告 §7.1）。
 //!
 //! M2 范围：在无外部命令/神经/RTS 的最小世界中，完整走过 16 个阶段，
-//! 串联 `rynvek-field` 与 `rynvek-spatial`，并保证 `10_000` Tick 后状态根可复现（零误差）。
+//! 串联 `rynvek-field`（按 10Hz 多速率门控 `clock.is_field_step_due()` 推进）与 `rynvek-spatial`，
+//! 并保证 `10_000` Tick 后状态根可复现（零误差）。
 
 use rynvek_compute::{ComputeBackend, KernelId};
 use rynvek_compute_cpu::CpuReferenceBackend;
@@ -52,6 +53,8 @@ pub struct SimulationEngine {
     backend: CpuReferenceBackend,
     /// 各阶段已执行计数（调试/验收）
     pub phase_exec_counts: [u64; 16],
+    /// 已执行的 10Hz 连续环境场步数（每 3 个 30Hz Tick 递增 1）
+    pub field_steps_completed: u64,
 }
 
 impl Default for SimulationEngine {
@@ -91,6 +94,7 @@ impl SimulationEngine {
             invariants: InvariantRegistry::new(),
             backend: CpuReferenceBackend::new(),
             phase_exec_counts: [0; 16],
+            field_steps_completed: 0,
         }
     }
 
@@ -130,10 +134,14 @@ impl SimulationEngine {
                 Ok(())
             }
             CanonicalPhaseId::EnvironmentAndFieldSolve => {
-                self.backend
-                    .dispatch_1d(KernelId("field.reaction_diffusion_q8"), 1)
-                    .map_err(|e| SimulationError::Dispatch(format!("{e:?}")))?;
-                self.field.step_all().map_err(SimulationError::Field)?;
+                // 10Hz 多速率门控：每 3 个 30Hz 权威 Tick 求解一次反应-扩散环境场（与 FIELD_UPDATE_INTERVAL_TICKS=3 对齐）
+                if self.clock.is_field_step_due() {
+                    self.backend
+                        .dispatch_1d(KernelId("field.reaction_diffusion_q8"), 1)
+                        .map_err(|e| SimulationError::Dispatch(format!("{e:?}")))?;
+                    self.field.step_all().map_err(SimulationError::Field)?;
+                    self.field_steps_completed = self.field_steps_completed.saturating_add(1);
+                }
                 Ok(())
             }
             CanonicalPhaseId::SensoryAndPerceptionGather
@@ -261,11 +269,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sixteen_phases_run_each_tick() {
+    fn sixteen_phases_run_each_tick_and_field_steps_at_10hz() {
         let mut eng = SimulationEngine::new([7u8; 16]);
         eng.tick().unwrap();
         assert!(eng.phase_exec_counts.iter().all(|&c| c == 1));
         assert_eq!(eng.clock.tick, 1);
+        assert_eq!(eng.field_steps_completed, 1);
+
+        // 再推进 29 个 Tick（共 30 个 Tick = 1.0 秒），10Hz 场步应精确执行 10 次
+        for _ in 0..29 {
+            eng.tick().unwrap();
+        }
+        assert_eq!(eng.clock.tick, 30);
+        assert_eq!(eng.field_steps_completed, 10);
     }
 
     /// 验收：16 阶段 Tick 推进 10,000 Ticks 零误差（两次独立运行状态根位级一致）
