@@ -11,6 +11,8 @@
 //! - **聚合**：每 `4×4` Tiles 合成一个可见性格（每 Chunk `64×64`），任一 Tile 可见即该格可见；
 //!   网络层（M7）据此在序列化阶段剔除不可见敌方移动单位，并对敌方建筑下发静态幽灵快照。
 
+use blake3::Hasher;
+use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{BuildingKind, EntitySerial, FactionId};
@@ -112,7 +114,7 @@ pub fn shadowcast(
 }
 
 /// 单阵营的可见 / 已探索状态
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FactionFog {
     pub width: u32,
     pub height: u32,
@@ -129,6 +131,54 @@ impl FactionFog {
             visible: vec![0; words],
             explored: vec![0; words],
         }
+    }
+
+    /// 由可见位图与已探索位图直接构造（用于快照恢复）
+    pub fn from_words(width: u32, height: u32, visible: Vec<u64>, explored: Vec<u64>) -> Result<Self, RynvekErrorCode> {
+        let words = ((width * height) as usize).div_ceil(64);
+        if visible.len() != words || explored.len() != words {
+            return Err(RynvekErrorCode::DimensionMismatch);
+        }
+        Ok(Self {
+            width,
+            height,
+            visible,
+            explored,
+        })
+    }
+
+    /// 获取当前可见位图字切片
+    pub fn visible_words(&self) -> &[u64] {
+        &self.visible
+    }
+
+    /// 获取已探索位图字切片
+    pub fn explored_words(&self) -> &[u64] {
+        &self.explored
+    }
+
+    /// 显式设置单个 Tile 的已探索标记（用于状态根矩阵测试与快照校验）
+    pub fn set_explored(&mut self, x: u32, y: u32, explored: bool) {
+        let (w, b) = self.bit(x, y);
+        if explored {
+            self.explored[w] |= b;
+        } else {
+            self.explored[w] &= !b;
+        }
+    }
+
+    /// 计算该阵营迷雾状态的确定性哈希（涵盖尺寸、可见位图与已探索位图）
+    pub fn state_root(&self) -> Blake3Hash {
+        let mut h = Hasher::new();
+        h.update(&self.width.to_le_bytes());
+        h.update(&self.height.to_le_bytes());
+        for w in &self.visible {
+            h.update(&w.to_le_bytes());
+        }
+        for w in &self.explored {
+            h.update(&w.to_le_bytes());
+        }
+        Blake3Hash(*h.finalize().as_bytes())
     }
 
     /// 新一轮视野计算前清空可见位（已探索保留）

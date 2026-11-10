@@ -23,7 +23,9 @@ mod units_sys;
 
 use std::collections::{BTreeMap, VecDeque};
 
-use rynvek_core::{Blake3Hash, Q32_32};
+use blake3::Hasher;
+use rynvek_core::{Blake3Hash, Q32_32, RynvekErrorCode};
+use rynvek_neural::NeurChunk;
 use serde::{Deserialize, Serialize};
 
 use crate::arena_map::{ArenaMap, ArenaMapSize};
@@ -107,7 +109,7 @@ impl MatchConfig {
 }
 
 /// 孵化任务
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProductionJob {
     pub unit: UnitKind,
     pub genome: Genome,
@@ -116,7 +118,7 @@ pub struct ProductionJob {
 }
 
 /// 繁育任务
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BreedJob {
     pub unit: UnitKind,
     pub child: Genome,
@@ -124,7 +126,7 @@ pub struct BreedJob {
 }
 
 /// 建筑实体
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Building {
     pub id: EntitySerial,
     pub faction: FactionId,
@@ -230,7 +232,7 @@ impl Unit {
 }
 
 /// 阵营状态
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Faction {
     pub id: FactionId,
     pub ledger: ResourceLedger,
@@ -331,6 +333,52 @@ pub enum RtsEvent {
     },
 }
 
+/// 权威世界规范化分层状态根清单（覆盖全部十类权威子状态，消灭审计报告 §3 的全部哈希盲区）
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanonicalWorldState {
+    pub tick: u64,
+    /// 世界配置与地形（MatchConfig + map.tiles_hash）
+    pub config_root: Blake3Hash,
+    /// 建筑与单位全部组件字段（含建造队列、研发、繁育、精炼、信标、指令、适应度与余数）
+    pub entity_root: Blake3Hash,
+    /// 全部存活单位的四模型脑内部动态态（LIF / GatedMLP / Izhikevich / CTRNN）与动作读出
+    pub neural_root: Blake3Hash,
+    /// 五通道连续反应扩散环境场
+    pub field_root: Blake3Hash,
+    /// 阵营资源账本（余额、容量上限、累计采集、溢出丢弃）、科技集合、主脑锚点、投降/淘汰状态
+    pub economy_root: Blake3Hash,
+    /// 阵营基因池、繁育计数、演化坩埚繁育任务、PvE 导演基因池与个体适应度归档
+    pub evolution_root: Blake3Hash,
+    /// 阵营战争迷雾（可见位图 + 已探索位图）与敌方建筑静态幽灵快照
+    pub visibility_root: Blake3Hash,
+    /// 随机流与实体序号发生器状态（world_seed, tick, next_serial）
+    pub rng_root: Blake3Hash,
+    /// 调度事件、胜负裁决结果与突然死亡倒计时
+    pub scheduled_event_root: Blake3Hash,
+    /// 前驱提交根（可选，单步世界状态根缺省为全零）
+    pub parent_commit_root: Blake3Hash,
+}
+
+impl CanonicalWorldState {
+    /// 聚合全部分层子根计算最终 256-bit BLAKE3 世界状态根
+    pub fn state_root(&self) -> Blake3Hash {
+        let mut h = Hasher::new();
+        h.update(b"RYNVEK_CANONICAL_WORLD_STATE_V2");
+        h.update(&self.tick.to_le_bytes());
+        h.update(&self.config_root.0);
+        h.update(&self.entity_root.0);
+        h.update(&self.neural_root.0);
+        h.update(&self.field_root.0);
+        h.update(&self.economy_root.0);
+        h.update(&self.evolution_root.0);
+        h.update(&self.visibility_root.0);
+        h.update(&self.rng_root.0);
+        h.update(&self.scheduled_event_root.0);
+        h.update(&self.parent_commit_root.0);
+        Blake3Hash(*h.finalize().as_bytes())
+    }
+}
+
 /// 竞技场世界
 #[derive(Clone, Debug)]
 pub struct ArenaWorld {
@@ -347,7 +395,7 @@ pub struct ArenaWorld {
     flow_cache: BTreeMap<(u32, u32), FlowField>,
     flow_order: VecDeque<(u32, u32)>,
     pub pve: Option<PveDirector>,
-    pve_records: Vec<(u32, Genome, FitnessRecord)>,
+    pub pve_records: Vec<(u32, Genome, FitnessRecord)>,
     pub outcome: Option<MatchOutcome>,
     pub sudden_death_until: Option<u64>,
     events: Vec<RtsEvent>,
@@ -449,10 +497,29 @@ impl ArenaWorld {
         self.spawn_unit(faction, UnitKind::Striker, Genome::seed(UnitKind::Striker), p);
     }
 
-    fn alloc_serial(&mut self) -> EntitySerial {
+    /// 分配下一个实体序号（带 `checked_add` 溢出保护）
+    pub fn try_alloc_serial(&mut self) -> Result<EntitySerial, RynvekErrorCode> {
         let id = EntitySerial(self.next_serial);
-        self.next_serial += 1;
-        id
+        self.next_serial = self
+            .next_serial
+            .checked_add(1)
+            .ok_or(RynvekErrorCode::DimensionMismatch)?;
+        Ok(id)
+    }
+
+    fn alloc_serial(&mut self) -> EntitySerial {
+        self.try_alloc_serial()
+            .expect("实体序号 EntitySerial 耗尽 u32::MAX 上限")
+    }
+
+    /// 获取下一个待分配的实体序号
+    pub const fn next_serial(&self) -> u32 {
+        self.next_serial
+    }
+
+    /// 设置下一个待分配的实体序号（供快照恢复与测试使用）
+    pub fn set_next_serial(&mut self, next_serial: u32) {
+        self.next_serial = next_serial;
     }
 
     /// 插入建筑（不校验、不扣费）；`complete` 为真时直接完工
@@ -1106,59 +1173,312 @@ impl ArenaWorld {
         }
     }
 
-    /// 世界状态根：Tick、阵营、建筑、单位（含基因组摘要与脑读出）与环境场根依次哈希
-    pub fn state_hash(&self) -> Blake3Hash {
-        let mut h = blake3::Hasher::new();
-        h.update(&self.tick.to_le_bytes());
-        h.update(&self.next_serial.to_le_bytes());
-        for f in &self.factions {
-            let l = &f.ledger;
-            for v in [
-                l.balance.biomass,
-                l.balance.flux,
-                l.balance.neurogel,
-                l.biomass_harvested_total,
-            ] {
-                h.update(&v.to_le_bytes());
-            }
-            h.update(&f.techs.0.to_le_bytes());
-            h.update(&[f.surrendered as u8, f.eliminated as u8]);
-            for (slug, g) in &f.genomes {
-                h.update(slug.as_bytes());
-                h.update(&g.digest().0);
-            }
-        }
-        for b in self.buildings.values() {
-            h.update(&b.id.0.to_le_bytes());
-            h.update(&[b.faction.0, b.kind as u8, b.complete as u8, b.powered as u8]);
-            h.update(&b.origin.0.to_le_bytes());
-            h.update(&b.origin.1.to_le_bytes());
-            h.update(&b.defense.hp_milli.to_le_bytes());
-            h.update(&b.build_progress.to_le_bytes());
-            h.update(&(b.queue.len() as u32).to_le_bytes());
-            h.update(&b.weapon_cooldown.to_le_bytes());
-        }
+    /// 导出全部存活单位脑的 `NEUR` 稀疏神经分块（以实体序号 `u.id.0` 作为 `dense_index`）
+    pub fn to_neur_chunk(&self) -> NeurChunk {
+        let mut rows = Vec::new();
         for u in self.units.values() {
-            h.update(&u.id.0.to_le_bytes());
-            h.update(&[u.faction.0, u.kind as u8]);
-            for v in [
-                u.position.x.0,
-                u.position.y.0,
-                u.velocity.x.0,
-                u.velocity.y.0,
-                u.defense.hp_milli,
-                u.defense.shield_milli,
-            ] {
-                h.update(&v.to_le_bytes());
-            }
-            h.update(&u.weapon_cooldown.to_le_bytes());
-            for a in u.actions {
-                h.update(&a.to_le_bytes());
-            }
-            h.update(&u.genome.digest().0);
+            rows.extend(u.brain.to_neur_rows(u.id.0));
         }
-        h.update(&self.fields.state_root().0);
-        Blake3Hash(*h.finalize().as_bytes())
+        NeurChunk { rows }
+    }
+
+    /// 从 `NEUR` 稀疏神经分块恢复全部存活单位脑的内部动态状态
+    pub fn restore_from_neur(&mut self, chunk: &NeurChunk) -> Result<(), RynvekErrorCode> {
+        for u in self.units.values_mut() {
+            u.brain.restore_from_neur(chunk, u.id.0)?;
+        }
+        Ok(())
+    }
+
+    /// 计算当前世界的完整分层规范化状态根 [`CanonicalWorldState`]
+    pub fn canonical_state(&self) -> CanonicalWorldState {
+        self.canonical_state_with_parent(Blake3Hash::ZERO)
+    }
+
+    /// 带指定前驱提交根计算 [`CanonicalWorldState`]
+    pub fn canonical_state_with_parent(&self, parent_commit_root: Blake3Hash) -> CanonicalWorldState {
+        // 1. config_root：MatchConfig + 地图尺寸与地形内容摘要
+        let config_root = {
+            let mut h = Hasher::new();
+            h.update(b"RYNVEK_SUBROOT_CONFIG");
+            h.update(&[self.config.mode as u8, self.config.map_size as u8, self.config.players]);
+            h.update(&self.config.map_seed.to_le_bytes());
+            h.update(&self.config.world_seed.to_le_bytes());
+            h.update(&self.map.width.to_le_bytes());
+            h.update(&self.map.height.to_le_bytes());
+            h.update(&self.map.seed.to_le_bytes());
+            h.update(&self.map.tiles_hash().0);
+            Blake3Hash(*h.finalize().as_bytes())
+        };
+
+        // 2. entity_root：全部建筑与全部单位的完整权威属性（不含单位脑内部动态态，后者归入 neural_root）
+        let entity_root = {
+            let mut h = Hasher::new();
+            h.update(b"RYNVEK_SUBROOT_ENTITY");
+            h.update(&(self.buildings.len() as u32).to_le_bytes());
+            for b in self.buildings.values() {
+                h.update(&b.id.0.to_le_bytes());
+                h.update(&[
+                    b.faction.0,
+                    b.kind as u8,
+                    b.complete as u8,
+                    b.powered as u8,
+                    b.on_fissure as u8,
+                ]);
+                h.update(&b.origin.0.to_le_bytes());
+                h.update(&b.origin.1.to_le_bytes());
+                h.update(&b.defense.hp_milli.to_le_bytes());
+                h.update(&b.defense.shield_milli.to_le_bytes());
+                h.update(&b.defense.armor.to_le_bytes());
+                h.update(&b.max_hp_milli.to_le_bytes());
+                h.update(&b.build_progress.to_le_bytes());
+                h.update(&b.weapon_cooldown.to_le_bytes());
+                h.update(&b.refinery_progress.to_le_bytes());
+                h.update(&b.harvest_remainder.to_le_bytes());
+                h.update(&[b.beacon.channel as u8]);
+                h.update(&b.beacon.strength_q8.to_le_bytes());
+                for m in b.beacon.modulators.0 {
+                    h.update(&m.to_le_bytes());
+                }
+                h.update(&(b.queue.len() as u32).to_le_bytes());
+                for job in &b.queue {
+                    h.update(&[job.unit as u8]);
+                    h.update(&job.genome.digest().0);
+                    h.update(&job.remaining_ticks.to_le_bytes());
+                    h.update(&job.cost.biomass.to_le_bytes());
+                    h.update(&job.cost.flux.to_le_bytes());
+                    h.update(&job.cost.neurogel.to_le_bytes());
+                }
+                match b.research {
+                    Some((tech, rem)) => {
+                        h.update(&[1u8, tech as u8]);
+                        h.update(&rem.to_le_bytes());
+                    }
+                    None => {
+                        h.update(&[0u8]);
+                    }
+                }
+                match &b.breeding {
+                    Some(job) => {
+                        h.update(&[1u8, job.unit as u8]);
+                        h.update(&job.child.digest().0);
+                        h.update(&job.remaining_ticks.to_le_bytes());
+                    }
+                    None => {
+                        h.update(&[0u8]);
+                    }
+                }
+            }
+
+            h.update(&(self.units.len() as u32).to_le_bytes());
+            for u in self.units.values() {
+                h.update(&u.id.0.to_le_bytes());
+                h.update(&[u.faction.0, u.kind as u8, u.order.kind as u8]);
+                h.update(&u.genome.digest().0);
+                for v in [
+                    u.position.x.0,
+                    u.position.y.0,
+                    u.velocity.x.0,
+                    u.velocity.y.0,
+                    u.defense.hp_milli,
+                    u.defense.shield_milli,
+                    u.defense.armor,
+                    u.max_hp_milli,
+                    u.max_shield_milli,
+                    u.order.target.x.0,
+                    u.order.target.y.0,
+                    u.order.origin.x.0,
+                    u.order.origin.y.0,
+                    u.fitness.damage_dealt_milli,
+                    u.harvest_remainder,
+                ] {
+                    h.update(&v.to_le_bytes());
+                }
+                h.update(&u.weapon_cooldown.to_le_bytes());
+                h.update(&u.born_tick.to_le_bytes());
+                h.update(&u.fitness.survival_ticks.to_le_bytes());
+                for m in u.modulators.0 {
+                    h.update(&m.to_le_bytes());
+                }
+                for a in u.actions {
+                    h.update(&a.to_le_bytes());
+                }
+            }
+            Blake3Hash(*h.finalize().as_bytes())
+        };
+
+        // 3. neural_root：全部存活单位的四模型脑内部动态状态（LIF / GatedMLP / Izhikevich / CTRNN）与读出
+        let neural_root = {
+            let mut h = Hasher::new();
+            h.update(b"RYNVEK_SUBROOT_NEURAL");
+            h.update(&(self.units.len() as u32).to_le_bytes());
+            for u in self.units.values() {
+                h.update(&u.id.0.to_le_bytes());
+                h.update(&u.brain.state_root().0);
+                for a in u.actions {
+                    h.update(&a.to_le_bytes());
+                }
+                for m in u.modulators.0 {
+                    h.update(&m.to_le_bytes());
+                }
+            }
+            Blake3Hash(*h.finalize().as_bytes())
+        };
+
+        // 4. field_root：五通道连续反应扩散环境场
+        let field_root = self.fields.state_root();
+
+        // 5. economy_root：阵营账本（余额、容量上限、累计采集、溢出丢弃）、科技树、主脑锚点、投降与淘汰标记
+        let economy_root = {
+            let mut h = Hasher::new();
+            h.update(b"RYNVEK_SUBROOT_ECONOMY");
+            h.update(&(self.factions.len() as u32).to_le_bytes());
+            for f in &self.factions {
+                h.update(&[f.id.0, f.surrendered as u8, f.eliminated as u8]);
+                let l = &f.ledger;
+                for v in [
+                    l.balance.biomass,
+                    l.balance.flux,
+                    l.balance.neurogel,
+                    l.capacity.biomass,
+                    l.capacity.flux,
+                    l.capacity.neurogel,
+                    l.biomass_harvested_total,
+                    l.overflow_discarded.biomass,
+                    l.overflow_discarded.flux,
+                    l.overflow_discarded.neurogel,
+                ] {
+                    h.update(&v.to_le_bytes());
+                }
+                h.update(&f.techs.0.to_le_bytes());
+                match f.nexus {
+                    Some(id) => {
+                        h.update(&[1u8]);
+                        h.update(&id.0.to_le_bytes());
+                    }
+                    None => {
+                        h.update(&[0u8]);
+                    }
+                }
+            }
+            Blake3Hash(*h.finalize().as_bytes())
+        };
+
+        // 6. evolution_root：阵营基因池、繁育计数、坩埚在途繁育、PvE 导演基因池与个体适应度归档
+        let evolution_root = {
+            let mut h = Hasher::new();
+            h.update(b"RYNVEK_SUBROOT_EVOLUTION");
+            for f in &self.factions {
+                h.update(&[f.id.0]);
+                h.update(&f.bred_count.to_le_bytes());
+                h.update(&(f.genomes.len() as u32).to_le_bytes());
+                for (slug, g) in &f.genomes {
+                    h.update(slug.as_bytes());
+                    h.update(&[0u8]);
+                    h.update(&g.digest().0);
+                }
+            }
+            match &self.pve {
+                Some(d) => {
+                    h.update(&[1u8]);
+                    h.update(&d.state_root().0);
+                }
+                None => {
+                    h.update(&[0u8]);
+                }
+            }
+            h.update(&(self.pve_records.len() as u32).to_le_bytes());
+            for (serial, g, fit) in &self.pve_records {
+                h.update(&serial.to_le_bytes());
+                h.update(&g.digest().0);
+                h.update(&fit.damage_dealt_milli.to_le_bytes());
+                h.update(&fit.survival_ticks.to_le_bytes());
+            }
+            Blake3Hash(*h.finalize().as_bytes())
+        };
+
+        // 7. visibility_root：各阵营战争迷雾（visible + explored 位图）与敌方建筑幽灵快照
+        let visibility_root = {
+            let mut h = Hasher::new();
+            h.update(b"RYNVEK_SUBROOT_VISIBILITY");
+            for f in &self.factions {
+                h.update(&[f.id.0]);
+                h.update(&f.fog.state_root().0);
+                h.update(&(f.ghosts.len() as u32).to_le_bytes());
+                for (id, g) in &f.ghosts {
+                    h.update(&id.0.to_le_bytes());
+                    h.update(&g.entity_id.0.to_le_bytes());
+                    h.update(&[g.faction.0, g.kind as u8]);
+                    h.update(&g.origin.0.to_le_bytes());
+                    h.update(&g.origin.1.to_le_bytes());
+                    h.update(&g.last_seen_tick.to_le_bytes());
+                }
+            }
+            Blake3Hash(*h.finalize().as_bytes())
+        };
+
+        // 8. rng_root：世界随机种子、当前 Tick 与实体序号发生器状态
+        let rng_root = {
+            let mut h = Hasher::new();
+            h.update(b"RYNVEK_SUBROOT_RNG");
+            h.update(&self.config.world_seed.to_le_bytes());
+            h.update(&self.tick.to_le_bytes());
+            h.update(&self.next_serial.to_le_bytes());
+            Blake3Hash(*h.finalize().as_bytes())
+        };
+
+        // 9. scheduled_event_root：突然死亡倒计时与胜负裁决结果
+        let scheduled_event_root = {
+            let mut h = Hasher::new();
+            h.update(b"RYNVEK_SUBROOT_SCHEDULED_EVENT");
+            match self.sudden_death_until {
+                Some(t) => {
+                    h.update(&[1u8]);
+                    h.update(&t.to_le_bytes());
+                }
+                None => {
+                    h.update(&[0u8]);
+                }
+            }
+            match &self.outcome {
+                Some(MatchOutcome::Victory { winner, reason, tick }) => {
+                    h.update(&[1u8, winner.0, *reason as u8]);
+                    h.update(&tick.to_le_bytes());
+                }
+                Some(MatchOutcome::Draw { tick }) => {
+                    h.update(&[2u8]);
+                    h.update(&tick.to_le_bytes());
+                }
+                Some(MatchOutcome::Defeat { tick, waves_cleared }) => {
+                    h.update(&[3u8]);
+                    h.update(&tick.to_le_bytes());
+                    h.update(&waves_cleared.to_le_bytes());
+                }
+                None => {
+                    h.update(&[0u8]);
+                }
+            }
+            Blake3Hash(*h.finalize().as_bytes())
+        };
+
+        CanonicalWorldState {
+            tick: self.tick,
+            config_root,
+            entity_root,
+            neural_root,
+            field_root,
+            economy_root,
+            evolution_root,
+            visibility_root,
+            rng_root,
+            scheduled_event_root,
+            parent_commit_root,
+        }
+    }
+
+    /// 世界状态根：由 [`CanonicalWorldState`] 聚合全部十类权威子状态根得到
+    pub fn state_hash(&self) -> Blake3Hash {
+        self.canonical_state().state_root()
     }
 
     /// 建筑平衡表遍历（UI 建造菜单）

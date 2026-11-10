@@ -7,11 +7,15 @@
 //!
 //! - 所有激活/状态均为 Q8.8（`i16` 原始值），中间量用 `i32`；
 //! - 每个突触项先做 `(w * x) >> 8` 再求和，与 [`crate::storage`] 的三种布局保持位级一致；
-//! - 统一 `16` 维感知输入与 `6` 维动作读出，与 LIF 核接口对齐（GAP-03 六维动作读出）。
+//! - 统一 `16` 维感知输入与 `6` 维动作读出，与 LIF 核接口对齐（GAP-03 六维动作读出）；
+//! - 支持完整的 `state_root()` 与 `NEUR` 稀疏神经分块序列化 / 恢复闭环，确保四种脑模型在快照恢复与状态根哈希中零死角覆盖。
 
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_core::fixed::Q8_8;
+use rynvek_core::hash::Blake3Hash;
+use rynvek_snapshot::{NeurChunk, NeurNeuronRow};
 
+use crate::runtime::NeuronModelKind;
 use crate::storage::{NeuralGraphStorage, SynapticMatVec};
 
 /// 感知输入维度
@@ -122,6 +126,56 @@ impl GatedMlpBrain {
         }
         out
     }
+
+    /// 计算 GatedMLP 脑实例的确定性状态根
+    pub fn state_root(&self) -> Blake3Hash {
+        Blake3Hash::of(&self.to_neur_chunk(0).encode())
+    }
+
+    /// 导出为 NEUR 快照行（每个隐藏单元一行，隐藏激活存入 `membrane_v_q8`）
+    pub fn to_neur_rows(&self, dense_index: u32) -> Vec<NeurNeuronRow> {
+        (0..self.n_hid)
+            .map(|h| NeurNeuronRow {
+                dense_index,
+                neuron_index: h as u16,
+                model_kind: NeuronModelKind::GatedMLP as u8,
+                refractory_ticks: 0,
+                spike_history_ring: 0,
+                membrane_v_q8: self.hidden_q8[h],
+                weight_deltas: Vec::new(),
+                eligibility: Vec::new(),
+            })
+            .collect()
+    }
+
+    /// 导出为独立的 NEUR 分块
+    pub fn to_neur_chunk(&self, dense_index: u32) -> NeurChunk {
+        NeurChunk {
+            rows: self.to_neur_rows(dense_index),
+        }
+    }
+
+    /// 从 NEUR 分块恢复隐藏激活状态
+    pub fn restore_from_neur(&mut self, chunk: &NeurChunk, dense_index: u32) -> Result<(), RynvekErrorCode> {
+        let mut seen = vec![false; self.n_hid];
+        for row in chunk.rows.iter().filter(|r| r.dense_index == dense_index) {
+            let h = row.neuron_index as usize;
+            if h >= self.n_hid
+                || row.model_kind != NeuronModelKind::GatedMLP as u8
+                || !row.weight_deltas.is_empty()
+                || !row.eligibility.is_empty()
+            {
+                return Err(RynvekErrorCode::DimensionMismatch);
+            }
+            self.hidden_q8[h] = row.membrane_v_q8;
+            seen[h] = true;
+        }
+        if seen.iter().all(|&s| s) {
+            Ok(())
+        } else {
+            Err(RynvekErrorCode::DimensionMismatch)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +283,58 @@ impl IzhikevichBrain {
         }
         out_acc.map(|a| Q8_8((a >> 2).clamp(-256, 256) as i16))
     }
+
+    /// 计算 Izhikevich 脑实例的确定性状态根（涵盖 `v_q8`、`u_q8` 与 `spike_ring`）
+    pub fn state_root(&self) -> Blake3Hash {
+        Blake3Hash::of(&self.to_neur_chunk(0).encode())
+    }
+
+    /// 导出为 NEUR 快照行（`membrane_v_q8` 存 `v_q8`，`eligibility[0]` 存恢复变量 `u_q8`，`spike_history_ring` 存脉冲环）
+    pub fn to_neur_rows(&self, dense_index: u32) -> Vec<NeurNeuronRow> {
+        (0..self.n)
+            .map(|h| NeurNeuronRow {
+                dense_index,
+                neuron_index: h as u16,
+                model_kind: NeuronModelKind::Izhikevich as u8,
+                refractory_ticks: 0,
+                spike_history_ring: self.spike_ring[h],
+                membrane_v_q8: self.v_q8[h],
+                weight_deltas: Vec::new(),
+                eligibility: vec![self.u_q8[h]],
+            })
+            .collect()
+    }
+
+    /// 导出为独立的 NEUR 分块
+    pub fn to_neur_chunk(&self, dense_index: u32) -> NeurChunk {
+        NeurChunk {
+            rows: self.to_neur_rows(dense_index),
+        }
+    }
+
+    /// 从 NEUR 分块无损恢复 `v_q8`、`u_q8` 与 `spike_ring`
+    pub fn restore_from_neur(&mut self, chunk: &NeurChunk, dense_index: u32) -> Result<(), RynvekErrorCode> {
+        let mut seen = vec![false; self.n];
+        for row in chunk.rows.iter().filter(|r| r.dense_index == dense_index) {
+            let h = row.neuron_index as usize;
+            if h >= self.n
+                || row.model_kind != NeuronModelKind::Izhikevich as u8
+                || !row.weight_deltas.is_empty()
+                || row.eligibility.len() != 1
+            {
+                return Err(RynvekErrorCode::DimensionMismatch);
+            }
+            self.v_q8[h] = row.membrane_v_q8;
+            self.u_q8[h] = row.eligibility[0];
+            self.spike_ring[h] = row.spike_history_ring;
+            seen[h] = true;
+        }
+        if seen.iter().all(|&s| s) {
+            Ok(())
+        } else {
+            Err(RynvekErrorCode::DimensionMismatch)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +416,56 @@ impl CtrnnBrain {
         }
         out
     }
+
+    /// 计算 CTRNN 脑实例的确定性状态根（涵盖全部神经元连续状态 `y_q8`）
+    pub fn state_root(&self) -> Blake3Hash {
+        Blake3Hash::of(&self.to_neur_chunk(0).encode())
+    }
+
+    /// 导出为 NEUR 快照行（`membrane_v_q8` 存连续状态 `y_q8`）
+    pub fn to_neur_rows(&self, dense_index: u32) -> Vec<NeurNeuronRow> {
+        (0..self.n)
+            .map(|h| NeurNeuronRow {
+                dense_index,
+                neuron_index: h as u16,
+                model_kind: NeuronModelKind::CTRNN as u8,
+                refractory_ticks: 0,
+                spike_history_ring: 0,
+                membrane_v_q8: self.y_q8[h],
+                weight_deltas: Vec::new(),
+                eligibility: Vec::new(),
+            })
+            .collect()
+    }
+
+    /// 导出为独立的 NEUR 分块
+    pub fn to_neur_chunk(&self, dense_index: u32) -> NeurChunk {
+        NeurChunk {
+            rows: self.to_neur_rows(dense_index),
+        }
+    }
+
+    /// 从 NEUR 分块恢复连续状态 `y_q8`
+    pub fn restore_from_neur(&mut self, chunk: &NeurChunk, dense_index: u32) -> Result<(), RynvekErrorCode> {
+        let mut seen = vec![false; self.n];
+        for row in chunk.rows.iter().filter(|r| r.dense_index == dense_index) {
+            let h = row.neuron_index as usize;
+            if h >= self.n
+                || row.model_kind != NeuronModelKind::CTRNN as u8
+                || !row.weight_deltas.is_empty()
+                || !row.eligibility.is_empty()
+            {
+                return Err(RynvekErrorCode::DimensionMismatch);
+            }
+            self.y_q8[h] = row.membrane_v_q8;
+            seen[h] = true;
+        }
+        if seen.iter().all(|&s| s) {
+            Ok(())
+        } else {
+            Err(RynvekErrorCode::DimensionMismatch)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -386,6 +542,63 @@ mod tests {
         let dense = run(TopologyStorageClass::DenseTiledMatrix);
         assert_eq!(dense, run(TopologyStorageClass::BlockSparseCSR));
         assert_eq!(dense, run(TopologyStorageClass::PagedDynamicAdjacency));
+    }
+
+    #[test]
+    fn neur_snapshot_roundtrip_preserves_all_three_models() {
+        let n = 8;
+        let rec = ring_matrix(n, 160);
+        let w_rec = NeuralGraphStorage::build(TopologyStorageClass::DenseTiledMatrix, n, &rec).unwrap();
+        let mut mlp = GatedMlpBrain::new(n, vec![32; n * 16], vec![16; n * 16], vec![64; n], vec![24; 6 * n]).unwrap();
+        let mut izh = IzhikevichBrain::new(
+            IzhikevichParams::REGULAR_SPIKING,
+            vec![64; n * 16],
+            w_rec.clone(),
+            vec![32; 6 * n],
+        )
+        .unwrap();
+        let tau: Vec<u16> = (0..n).map(|j| 4 + j as u16).collect();
+        let mut ctrnn = CtrnnBrain::new(&tau, vec![-32; n], vec![40; n * 16], w_rec.clone(), vec![16; 6 * n]).unwrap();
+
+        for t in 0..25i16 {
+            let s = sensory_const(t * 9 - 80);
+            mlp.step(&s);
+            izh.step(&s);
+            ctrnn.step(&s);
+        }
+
+        let mut rows = Vec::new();
+        rows.extend(mlp.to_neur_rows(10));
+        rows.extend(izh.to_neur_rows(20));
+        rows.extend(ctrnn.to_neur_rows(30));
+        let encoded = NeurChunk { rows }.encode();
+        let decoded = NeurChunk::decode(&encoded).unwrap();
+
+        let mut mlp_restored =
+            GatedMlpBrain::new(n, vec![32; n * 16], vec![16; n * 16], vec![64; n], vec![24; 6 * n]).unwrap();
+        let mut izh_restored = IzhikevichBrain::new(
+            IzhikevichParams::REGULAR_SPIKING,
+            vec![64; n * 16],
+            w_rec.clone(),
+            vec![32; 6 * n],
+        )
+        .unwrap();
+        let mut ctrnn_restored = CtrnnBrain::new(&tau, vec![-32; n], vec![40; n * 16], w_rec, vec![16; 6 * n]).unwrap();
+
+        mlp_restored.restore_from_neur(&decoded, 10).unwrap();
+        izh_restored.restore_from_neur(&decoded, 20).unwrap();
+        ctrnn_restored.restore_from_neur(&decoded, 30).unwrap();
+
+        assert_eq!(mlp_restored.state_root(), mlp.state_root());
+        assert_eq!(izh_restored.state_root(), izh.state_root());
+        assert_eq!(ctrnn_restored.state_root(), ctrnn.state_root());
+
+        for t in 25..50i16 {
+            let s = sensory_const(t * 7 - 100);
+            assert_eq!(mlp_restored.step(&s), mlp.step(&s));
+            assert_eq!(izh_restored.step(&s), izh.step(&s));
+            assert_eq!(ctrnn_restored.step(&s), ctrnn.step(&s));
+        }
     }
 
     #[test]

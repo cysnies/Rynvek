@@ -11,6 +11,10 @@
 //! Spitter 15% / Leviathan 5%；预算按池内顺序循环花费各原型的 Biomass 造价，直到任何原型都买不起；
 //! 后代继承适应度较高一方的原型，并有 5% 概率「原型跃迁」为随机其他原型的种子基因组变体。
 
+use blake3::Hasher;
+use rynvek_core::Blake3Hash;
+use serde::{Deserialize, Serialize};
+
 use crate::evolution::{DEFAULT_MUTATION_RATE_PERMILLE, EvolutionRng, FitnessRecord, breed, mutate, select_elites};
 use crate::genome::Genome;
 use crate::ids::UnitKind;
@@ -127,7 +131,7 @@ pub const fn wave_spawn_tick(w: u32) -> u64 {
 }
 
 /// 虫潮导演：维护跨波次演化的基因池
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PveDirector {
     pub world_seed: u64,
     pub pool: Vec<Genome>,
@@ -157,6 +161,18 @@ impl PveDirector {
             pool,
             wave: 0,
         }
+    }
+
+    /// 计算虫潮导演当前状态（世界种子、当前波次与全部基因池个体摘要）的确定性哈希
+    pub fn state_root(&self) -> Blake3Hash {
+        let mut h = Hasher::new();
+        h.update(&self.world_seed.to_le_bytes());
+        h.update(&self.wave.to_le_bytes());
+        h.update(&(self.pool.len() as u32).to_le_bytes());
+        for g in &self.pool {
+            h.update(&g.digest().0);
+        }
+        Blake3Hash(*h.finalize().as_bytes())
     }
 
     /// 规划第 `w` 波：返回要孵化的基因池下标序列（按预算循环花费）

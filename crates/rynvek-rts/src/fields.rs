@@ -13,7 +13,7 @@
 //! 圣经五通道参数均满足 `D ≤ 0.25`，单子步即满足 CFL，无需拆分。
 
 use blake3::Hasher;
-use rynvek_core::Blake3Hash;
+use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use rynvek_field::{
     FieldChannelId, FieldChannelParams, FieldTileQ8, HALO, STRIDE, TILE_DIM, solve_reaction_diffusion_tile_q8,
 };
@@ -127,6 +127,43 @@ impl FieldGrid {
     /// 已推进的场步数
     pub const fn steps(&self) -> u64 {
         self.steps
+    }
+
+    /// 设置已推进的场步数（供快照恢复与测试使用）
+    pub fn set_steps(&mut self, steps: u64) {
+        self.steps = steps;
+    }
+
+    /// 导出全部五通道界内 Q8.8 原始值（按通道 → 行优先顺序）
+    pub fn export_q8(&self) -> Vec<i16> {
+        let mut out = Vec::with_capacity((self.width as usize) * (self.height as usize) * FieldId::ALL.len());
+        for field in FieldId::ALL {
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    out.push(self.get(*field, x as i64, y as i64));
+                }
+            }
+        }
+        out
+    }
+
+    /// 从快照恢复全部五通道界内 Q8.8 原始值及步数计数
+    pub fn restore_q8(&mut self, steps: u64, values: &[i16]) -> Result<(), RynvekErrorCode> {
+        let expected = (self.width as usize) * (self.height as usize) * FieldId::ALL.len();
+        if values.len() != expected {
+            return Err(RynvekErrorCode::DimensionMismatch);
+        }
+        let mut idx = 0;
+        for field in FieldId::ALL {
+            for y in 0..self.height {
+                for x in 0..self.width {
+                    self.set(*field, x, y, values[idx]);
+                    idx += 1;
+                }
+            }
+        }
+        self.steps = steps;
+        Ok(())
     }
 
     #[inline]
@@ -288,9 +325,12 @@ impl FieldGrid {
         s
     }
 
-    /// 状态根：按通道 → 行优先哈希界内 Q8.8 小端样本
+    /// 状态根：涵盖场步数与按通道 → 行优先哈希的界内 Q8.8 小端样本
     pub fn state_root(&self) -> Blake3Hash {
         let mut hasher = Hasher::new();
+        hasher.update(&self.width.to_le_bytes());
+        hasher.update(&self.height.to_le_bytes());
+        hasher.update(&self.steps.to_le_bytes());
         for field in FieldId::ALL {
             for y in 0..self.height {
                 for x in 0..self.width {

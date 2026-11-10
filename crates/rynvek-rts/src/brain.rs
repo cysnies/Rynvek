@@ -13,9 +13,12 @@
 //! 宏观 D0 层每个 Epoch 只推进脑 [`BRAIN_STEPS_PER_EPOCH`] 步（而非 Neural Soup 的 120 Hz × 4 子步），
 //! 读出取各步算术平均；这样单位脑的推理代价与 Tick 线性相关，且结果只依赖整数运算。
 
-use rynvek_core::{Q8_8, RynvekErrorCode};
+use rynvek_core::{Blake3Hash, Q8_8, RynvekErrorCode};
 use rynvek_neural::models::IzhikevichParams;
-use rynvek_neural::{CtrnnBrain, GatedMlpBrain, IzhikevichBrain, LifBrain, NeuralGraphStorage, NeuronModelKind};
+use rynvek_neural::{
+    CtrnnBrain, GatedMlpBrain, IzhikevichBrain, LifBrain, NeurChunk, NeurNeuronRow, NeuralGraphStorage,
+    NeuronModelKind,
+};
 
 use crate::genome::{GENOME_INPUTS, GENOME_OUTPUTS, Genome, action, sensor};
 
@@ -105,6 +108,44 @@ impl UnitBrain {
             _ => None,
         }
     }
+
+    /// 计算当前脑实例内部全部动态神经状态（含 `GatedMLP.hidden_q8`、`LIF` 膜电位/不应期/脉冲环/可塑性/资格迹、
+    /// `Izhikevich` 膜电位/恢复变量/脉冲环、`CTRNN.y_q8`）的确定性状态根哈希
+    pub fn state_root(&self) -> Blake3Hash {
+        match self {
+            Self::GatedMlp(b) => b.state_root(),
+            Self::Lif(b) => b.state_root(),
+            Self::Izhikevich(b) => b.state_root(),
+            Self::Ctrnn(b) => b.state_root(),
+        }
+    }
+
+    /// 导出该单位脑的 `NEUR` 快照行
+    pub fn to_neur_rows(&self, dense_index: u32) -> Vec<NeurNeuronRow> {
+        match self {
+            Self::GatedMlp(b) => b.to_neur_rows(dense_index),
+            Self::Lif(b) => b.to_neur_rows(dense_index),
+            Self::Izhikevich(b) => b.to_neur_rows(dense_index),
+            Self::Ctrnn(b) => b.to_neur_rows(dense_index),
+        }
+    }
+
+    /// 导出该单位脑的独立 `NEUR` 分块
+    pub fn to_neur_chunk(&self, dense_index: u32) -> NeurChunk {
+        NeurChunk {
+            rows: self.to_neur_rows(dense_index),
+        }
+    }
+
+    /// 从 `NEUR` 分块恢复单位脑内部动态状态
+    pub fn restore_from_neur(&mut self, chunk: &NeurChunk, dense_index: u32) -> Result<(), RynvekErrorCode> {
+        match self {
+            Self::GatedMlp(b) => b.restore_from_neur(chunk, dense_index),
+            Self::Lif(b) => b.restore_from_neur(chunk, dense_index),
+            Self::Izhikevich(b) => b.restore_from_neur(chunk, dense_index),
+            Self::Ctrnn(b) => b.restore_from_neur(chunk, dense_index),
+        }
+    }
 }
 
 /// 把调质注入感知向量：通道 14 / 15 = DA / NE；ACh 放大通道 0..=13
@@ -141,11 +182,20 @@ mod tests {
     }
 
     #[test]
-    fn every_seed_genome_expresses_a_brain() {
-        for unit in UnitKind::ALL {
-            let mut b = UnitBrain::from_genome(&Genome::seed(*unit)).unwrap();
-            let y = b.step_epoch(&[0; 16], [0; 4], false);
+    fn every_seed_genome_expresses_a_brain_and_roundtrips_neur() {
+        for (idx, unit) in UnitKind::ALL.iter().enumerate() {
+            let g = Genome::seed(*unit);
+            let mut b = UnitBrain::from_genome(&g).unwrap();
+            let y = b.step_epoch(&[64; 16], [128, 0, 64, 32], true);
             assert!(y.iter().all(|v| (-256..=256).contains(v)));
+            let chunk = b.to_neur_chunk(idx as u32);
+            let mut restored = UnitBrain::from_genome(&g).unwrap();
+            restored.restore_from_neur(&chunk, idx as u32).unwrap();
+            assert_eq!(restored.state_root(), b.state_root());
+            assert_eq!(
+                restored.step_epoch(&[32; 16], [0, 64, 0, 0], true),
+                b.step_epoch(&[32; 16], [0, 64, 0, 0], true)
+            );
         }
     }
 
