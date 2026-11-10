@@ -13,7 +13,7 @@ use rynvek_ecs::EntityRegistry;
 
 use crate::header::{SNAPSHOT_HEADER_LEN, SnapshotFileHeader};
 use crate::neur::{NEUR_TAG, NeurChunk};
-use crate::writer::{ENTS_TAG, SnapshotCustomChunk};
+use crate::writer::{ENTI_TAG, ENTS_TAG, SnapshotCustomChunk};
 
 /// 解压后快照最大允许体积（256 MiB，防止恶意或损坏 Zstd 压缩炸弹耗尽内存）
 pub const MAX_SNAPSHOT_DECOMPRESSED_BYTES: usize = 256 * 1024 * 1024;
@@ -113,7 +113,7 @@ impl SnapshotReader {
             if Blake3Hash::of(body).as_bytes() != &expected_hash {
                 return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
             }
-            if tag == ENTS_TAG {
+            if tag == ENTI_TAG || tag == ENTS_TAG || &tag == b"ENTS" {
                 registry = Some(EntityRegistry::decode_snapshot_bytes(body)?);
             } else if tag == NEUR_TAG {
                 neur = Some(NeurChunk::decode(body)?);

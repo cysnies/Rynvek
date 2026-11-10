@@ -20,7 +20,8 @@ use rynvek_journal::{CommitManifest, CommitSubRoots};
 use crate::header::{SNAPSHOT_HEADER_LEN, SnapshotFileHeader};
 use crate::neur::{NEUR_TAG, NeurChunk};
 
-pub const ENTS_TAG: [u8; 4] = *b"ENTS";
+pub const ENTI_TAG: [u8; 4] = *b"ENTI";
+pub const ENTS_TAG: [u8; 4] = *b"ENTI";
 pub const CONF_TAG: [u8; 4] = *b"CONF";
 pub const COMP_TAG: [u8; 4] = *b"COMP";
 pub const FILD_TAG: [u8; 4] = *b"FILD";

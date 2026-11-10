@@ -16,6 +16,6 @@ pub use header::{SNAPSHOT_HEADER_LEN, SNAPSHOT_MAGIC, SNAPSHOT_VERSION, Snapshot
 pub use neur::{NEUR_FORMAT_VERSION, NEUR_TAG, NeurChunk, NeurNeuronRow};
 pub use reader::{MAX_SNAPSHOT_DECOMPRESSED_BYTES, SnapshotReadResult, SnapshotReader};
 pub use writer::{
-    COMP_TAG, CONF_TAG, ECON_TAG, ENTS_TAG, EVOL_TAG, FILD_TAG, FOGW_TAG, RNGS_TAG, ROOT_TAG,
+    COMP_TAG, CONF_TAG, ECON_TAG, ENTI_TAG, ENTS_TAG, EVOL_TAG, FILD_TAG, FOGW_TAG, RNGS_TAG, ROOT_TAG,
     SnapshotCustomChunk, SnapshotWriteOutput, SnapshotWriter, compute_snapshot_sub_roots,
 };

@@ -6,6 +6,7 @@
 //! 资源 `res.*`、建筑 `bld.*`、单位 `unit.*`、科技 `tech.*` 与种子基因组 `seed.*.v1` 的文本 ID
 //! 是跨语言（Rust / TypeScript / LLM ToolBroker）与回放归档的公开契约，必须与设计圣经逐字一致。
 
+use rynvek_ecs::EntityId;
 use serde::{Deserialize, Serialize};
 
 /// 为「Rust 枚举 ↔ 规范文本 ID」生成 `ALL` / `as_str` / `parse` 与 serde 文本形态
@@ -174,6 +175,21 @@ impl EntitySerial {
         }
         text.parse().ok().map(Self)
     }
+
+    /// 转换为 Tier 1 ECS 持久 128 位 [`EntityId`]
+    #[inline]
+    pub const fn to_entity_id(self, world_lineage_prefix: u64) -> EntityId {
+        EntityId::from_world_serial(world_lineage_prefix, self.0)
+    }
+
+    /// 由 Tier 1 ECS [`EntityId`] 还原 `EntitySerial`
+    #[inline]
+    pub const fn from_entity_id(id: EntityId) -> Option<Self> {
+        match id.to_serial_u32() {
+            Some(s) => Some(Self(s)),
+            None => None,
+        }
+    }
 }
 
 impl core::fmt::Display for EntitySerial {
@@ -220,12 +236,17 @@ mod tests {
     }
 
     #[test]
-    fn entity_serial_text_is_canonical() {
+    fn entity_serial_text_and_entity_id_bridge_are_canonical() {
         assert_eq!(EntitySerial::parse("17"), Some(EntitySerial(17)));
         assert_eq!(EntitySerial::parse("0"), Some(EntitySerial(0)));
         assert_eq!(EntitySerial::parse("017"), None);
         assert_eq!(EntitySerial::parse("+1"), None);
         assert_eq!(EntitySerial::parse(""), None);
         assert_eq!(EntitySerial::parse("4294967296"), None);
+
+        let serial = EntitySerial(42);
+        let eid = serial.to_entity_id(0xABCD);
+        assert_eq!(eid.lineage_prefix(), 0xABCD);
+        assert_eq!(EntitySerial::from_entity_id(eid), Some(serial));
     }
 }

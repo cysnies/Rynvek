@@ -28,6 +28,12 @@ impl EntityId {
         Self(((lineage_prefix as u128) << 64) | (monotonic_serial as u128))
     }
 
+    /// 由世界种子与 32 位实体序号构造稳定 128 位 `EntityId`
+    #[inline]
+    pub const fn from_world_serial(world_lineage_prefix: u64, serial_u32: u32) -> Self {
+        Self::new(world_lineage_prefix, serial_u32 as u64)
+    }
+
     /// 谱系前缀（高 64 位）
     #[inline]
     pub const fn lineage_prefix(self) -> u64 {
@@ -38,6 +44,17 @@ impl EntityId {
     #[inline]
     pub const fn monotonic_serial(self) -> u64 {
         self.0 as u64
+    }
+
+    /// 若单调序号在 `u32` 范围内则返回对应的 32 位序号（与 RTS `EntitySerial(u32)` 无损互转）
+    #[inline]
+    pub const fn to_serial_u32(self) -> Option<u32> {
+        let s = self.monotonic_serial();
+        if s <= u32::MAX as u64 {
+            Some(s as u32)
+        } else {
+            None
+        }
     }
 
     /// 是否为无效身份

@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 实体注册表：稀疏代数表 + 紧凑稠密下标（规范 04 §4.1）。
+//! 实体注册表：稀疏代数表 + 紧凑稠密下标 + 内存预算联动 + 快照无损编解码（规范 04 §4.1 / 审计报告 §6）。
 //!
 //! ## 两阶段 Tombstone 回收
 //!
@@ -16,10 +16,13 @@
 //!
 //! 规范写法在禁止 `unsafe` 时无法在堆上直接构造巨大定长数组（栈上构造会溢出）。
 //! 本实现改为 `Box<[SparsePageEntry]>`，并在构造时断言长度恰为 [`PAGE_CAPACITY`]（见 ERRATA E-003）。
+//! 每次分配新稀疏页时，自动向关联的 [`MemoryBudget`] 申请并记账页内存字节数。
 
 use std::collections::VecDeque;
 
 use rynvek_core::error::RynvekErrorCode;
+use rynvek_memory::budget::DEFAULT_HYSTERESIS_BPS;
+use rynvek_memory::{DEFAULT_WORLD_MEMORY_BUDGET_BYTES, MemoryBudget, MemoryBudgetLevel};
 
 use crate::identity::{EntityHandle, EntityId, EntityLifecycleState, EntityTombstone, GpuEntityRef};
 
@@ -27,6 +30,9 @@ use crate::identity::{EntityHandle, EntityId, EntityLifecycleState, EntityTombst
 pub const PAGE_CAPACITY: usize = 65_536;
 /// SoA 列在页内的分块容量：4,096（规范 04）
 pub const CHUNK_CAPACITY: usize = 4_096;
+
+/// 快照实体表块魔数
+const ENTS_SNAPSHOT_MAGIC: [u8; 4] = *b"ENTI";
 
 /// 稀疏代数表条目
 #[repr(C)]
@@ -57,8 +63,8 @@ impl SparsePageEntry {
     }
 }
 
-/// 实体注册表
-#[derive(Debug)]
+/// 实体注册表（内嵌 [`MemoryBudget`] 预算状态机联动）
+#[derive(Clone, Debug)]
 pub struct EntityRegistry {
     pub world_lineage_prefix: u64,
     pub next_monotonic_serial: u64,
@@ -71,11 +77,19 @@ pub struct EntityRegistry {
     pub tombstones: Vec<EntityTombstone>,
     /// 下一个从未使用过的稀疏槽位（高水位）
     next_fresh_slot: u32,
+    /// 绑定的世界内存预算记账器
+    memory_budget: MemoryBudget,
 }
 
 impl EntityRegistry {
-    /// 创建空注册表
+    /// 创建使用默认 512 MiB 预算的空注册表
     pub fn new(world_lineage_prefix: u64) -> Self {
+        Self::with_memory_budget(world_lineage_prefix, DEFAULT_WORLD_MEMORY_BUDGET_BYTES)
+    }
+
+    /// 创建指定世界内存预算上限（字节）的空注册表
+    pub fn with_memory_budget(world_lineage_prefix: u64, limit_bytes: u64) -> Self {
+        let _ = DEFAULT_HYSTERESIS_BPS;
         Self {
             world_lineage_prefix,
             // 序号从 1 起，保留 0 作为 Invalid
@@ -85,7 +99,28 @@ impl EntityRegistry {
             free_slots_fifo: VecDeque::new(),
             tombstones: Vec::new(),
             next_fresh_slot: 0,
+            memory_budget: MemoryBudget::new(limit_bytes.max(1024)),
         }
+    }
+
+    /// 获取当前内存预算状态机只读引用
+    pub const fn memory_budget(&self) -> &MemoryBudget {
+        &self.memory_budget
+    }
+
+    /// 获取当前内存预算等级
+    pub const fn budget_level(&self) -> MemoryBudgetLevel {
+        self.memory_budget.level()
+    }
+
+    /// 向注册表关联的内存预算提交额外分配记账（供 `PagedComponentColumn` / `ArchetypeStorage` 联动调用）
+    pub fn commit_memory_bytes(&mut self, bytes: u64) -> Result<MemoryBudgetLevel, RynvekErrorCode> {
+        self.memory_budget.commit_allocation(bytes)
+    }
+
+    /// 从注册表关联的内存预算回收字节
+    pub fn reclaim_memory_bytes(&mut self, bytes: u64) -> MemoryBudgetLevel {
+        self.memory_budget.reclaim(bytes)
     }
 
     /// 当前存活实体数（= 稠密数组长度）
@@ -140,6 +175,11 @@ impl EntityRegistry {
             });
         }
         Ok(entry.stable_id)
+    }
+
+    /// 由句柄查询其当前稠密线性下标
+    pub fn dense_index_of(&self, handle: EntityHandle) -> Result<u32, RynvekErrorCode> {
+        Ok(self.gpu_ref(handle)?.dense_index)
     }
 
     /// 由句柄得到 GPU 紧凑引用
@@ -266,6 +306,81 @@ impl EntityRegistry {
         *hasher.finalize().as_bytes()
     }
 
+    /// 序列化存活实体表为确定性快照字节流（`ENTI` 格式，按 `EntityId` 升序排列）
+    pub fn encode_snapshot_bytes(&self) -> Vec<u8> {
+        let mut rows: Vec<(u128, u32, u32, u16)> = self
+            .iter_alive()
+            .map(|(_, handle, id)| {
+                let arch = self.sparse_entry(handle.slot).map(|e| e.archetype_id).unwrap_or(0);
+                (id.0, handle.slot, handle.generation, arch)
+            })
+            .collect();
+        rows.sort_by_key(|(id, _, _, _)| *id);
+
+        let mut out = Vec::with_capacity(16 + rows.len() * 28);
+        out.extend_from_slice(&ENTS_SNAPSHOT_MAGIC);
+        out.extend_from_slice(&self.world_lineage_prefix.to_le_bytes());
+        out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+        for (id, slot, generation, arch) in rows {
+            out.extend_from_slice(&id.to_le_bytes());
+            out.extend_from_slice(&slot.to_le_bytes());
+            out.extend_from_slice(&generation.to_le_bytes());
+            out.extend_from_slice(&arch.to_le_bytes());
+            out.extend_from_slice(&[0u8; 2]);
+        }
+        out
+    }
+
+    /// 从快照字节流无损恢复 `EntityRegistry`（保留原始 `slot`、`generation`、`stable_id` 与 `archetype_id`）
+    pub fn decode_snapshot_bytes(bytes: &[u8]) -> Result<Self, RynvekErrorCode> {
+        if bytes.len() < 16 || bytes[0..4] != ENTS_SNAPSHOT_MAGIC {
+            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
+        }
+        let lineage = u64::from_le_bytes(bytes[4..12].try_into().unwrap());
+        let count = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+        const ROW: usize = 28;
+        if bytes.len() != 16 + count * ROW {
+            return Err(RynvekErrorCode::JournalTornWriteTruncated);
+        }
+        let mut reg = Self::new(lineage);
+        let mut max_serial = 0u64;
+        let mut max_slot_plus_one = 0u32;
+
+        for i in 0..count {
+            let offset = 16 + i * ROW;
+            let id = u128::from_le_bytes(bytes[offset..offset + 16].try_into().unwrap());
+            let slot = u32::from_le_bytes(bytes[offset + 16..offset + 20].try_into().unwrap());
+            let generation = u32::from_le_bytes(bytes[offset + 20..offset + 24].try_into().unwrap());
+            let arch = u16::from_le_bytes(bytes[offset + 24..offset + 26].try_into().unwrap());
+            let entity_id = EntityId(id);
+            max_serial = max_serial.max(entity_id.monotonic_serial());
+            max_slot_plus_one = max_slot_plus_one.max(slot.saturating_add(1));
+
+            reg.ensure_sparse_page(slot)?;
+            let dense_index = reg.dense_to_sparse_slot.len() as u32;
+            reg.dense_to_sparse_slot.push(slot);
+
+            let entry = reg.sparse_entry_mut(slot)?;
+            entry.stable_id = entity_id;
+            entry.generation = if generation == 0 { 1 } else { generation };
+            entry.state = EntityLifecycleState::Alive;
+            entry.archetype_id = arch;
+            entry.dense_page_id = (dense_index >> 16) as u16;
+            entry.dense_slot_in_page = dense_index as u16;
+        }
+        reg.next_monotonic_serial = max_serial.saturating_add(1);
+        reg.next_fresh_slot = max_slot_plus_one;
+        // 将 `< max_slot_plus_one` 中未被占用的槽位放入空闲 FIFO 队列
+        for s in 0..max_slot_plus_one {
+            if let Ok(entry) = reg.sparse_entry(s) {
+                if entry.state == EntityLifecycleState::Free {
+                    reg.free_slots_fifo.push_back(s);
+                }
+            }
+        }
+        Ok(reg)
+    }
+
     fn allocate_slot(&mut self) -> Result<u32, RynvekErrorCode> {
         if let Some(slot) = self.free_slots_fifo.pop_front() {
             return Ok(slot);
@@ -281,7 +396,9 @@ impl EntityRegistry {
 
     fn ensure_sparse_page(&mut self, slot: u32) -> Result<(), RynvekErrorCode> {
         let page_index = (slot as usize) / PAGE_CAPACITY;
+        let page_bytes = (PAGE_CAPACITY * core::mem::size_of::<SparsePageEntry>()) as u64;
         while self.sparse_pages.len() <= page_index {
+            self.memory_budget.commit_allocation(page_bytes)?;
             let page = vec![SparsePageEntry::EMPTY; PAGE_CAPACITY].into_boxed_slice();
             debug_assert_eq!(page.len(), PAGE_CAPACITY);
             self.sparse_pages.push(page);
@@ -358,6 +475,13 @@ mod tests {
         assert_eq!(h2.slot, h1.slot);
         assert_ne!(h2.generation, h1.generation);
         assert_eq!(reg.resolve(h1), Err(RynvekErrorCode::StaleEntityHandleGeneration));
+    }
+
+    #[test]
+    fn memory_budget_enforces_page_allocation_limit() {
+        // 单页 SparsePageEntry 约 65536 * 32B = 2 MiB；设置 1 MiB 预算应拒绝分配第一页
+        let mut reg = EntityRegistry::with_memory_budget(1, 512 * 1024);
+        assert_eq!(reg.spawn(1), Err(RynvekErrorCode::WorldMemoryBudgetExceeded));
     }
 
     #[test]
