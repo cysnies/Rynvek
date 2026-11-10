@@ -1,6 +1,6 @@
 [package]
 name = "rynvek-world"
-description = "Rynvek Tier 3 World 包：.rworld / .rpack / .rview 统一容器（E-019 布局）读写与 .rworld 加载"
+description = "Rynvek Tier 3 World 包：.rworld / .rpack / .rview 统一容器、WorldPatch 引擎级补丁应用、分区两阶段移交与跨世界联邦网关"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,7 @@ publish.workspace = true
 blake3.workspace = true
 naga.workspace = true
 rynvek-core.workspace = true
+rynvek-ecs.workspace = true
 rynvek-rts.workspace = true
 serde.workspace = true
 serde_json.workspace = true
