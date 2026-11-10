@@ -1,0 +1,30 @@
+{
+  "name": "@rynvek/lab",
+  "version": "0.1.0",
+  "description": "Rynvek Lab：批量多种子演化实验规格构建、扫描 / 消融、路由 17–18 客户端轮询与谱系分析工具",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rynvek/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
