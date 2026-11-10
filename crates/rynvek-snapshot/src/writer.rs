@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `.rsnap` 写入：实体 ENTI 块 + 可选 NEUR 块，整体 Zstd level 3 压缩。
+//! `.rsnap` 写入器：将 `EntityRegistry`、可选 `NeurChunk` 与扩展世界分块（`CONF` / `COMP` / `FILD` / `ECON` / `EVOL` / `FOGW` / `RNGS` / `ROOT`）打包为 Zstd 压缩载荷并支持原子落盘。
+//!
+//! 压缩前载荷布局：
+//! - 块 0：`ENTS`（4B tag + 4B len + 32B blake3 + EntityRegistry 快照字节）
+//! - 块 1（可选）：`NEUR`（4B tag + 4B len + 32B blake3 + `NeurChunk::encode()`）
+//! - 块 2..N（可选）：扩展领域分块（4B tag + 4B len + 32B blake3 + 分块字节）
 
 use std::fs::File;
 use std::io::Write;
@@ -12,61 +17,125 @@ use rynvek_core::hash::Blake3Hash;
 use rynvek_ecs::EntityRegistry;
 use rynvek_journal::{CommitManifest, CommitSubRoots};
 
-use crate::header::SnapshotFileHeader;
-use crate::neur::NeurChunk;
+use crate::header::{SNAPSHOT_HEADER_LEN, SnapshotFileHeader};
+use crate::neur::{NEUR_TAG, NeurChunk};
 
-/// 未压缩分块标签：实体表
-pub const ENTI_TAG: [u8; 4] = *b"ENTI";
+pub const ENTS_TAG: [u8; 4] = *b"ENTS";
+pub const CONF_TAG: [u8; 4] = *b"CONF";
+pub const COMP_TAG: [u8; 4] = *b"COMP";
+pub const FILD_TAG: [u8; 4] = *b"FILD";
+pub const ECON_TAG: [u8; 4] = *b"ECON";
+pub const EVOL_TAG: [u8; 4] = *b"EVOL";
+pub const FOGW_TAG: [u8; 4] = *b"FOGW";
+pub const RNGS_TAG: [u8; 4] = *b"RNGS";
+pub const ROOT_TAG: [u8; 4] = *b"ROOT";
 
-/// 快照写入器
-#[derive(Debug, Default)]
-pub struct SnapshotWriter;
+/// Zstd 默认压缩级别（规范 10.1：level 3）
+pub const SNAPSHOT_ZSTD_LEVEL: i32 = 3;
 
-/// 写入结果
+/// 扩展自定义分块（供上层世界保存 `CONF` / `COMP` / `FILD` / `ECON` / `EVOL` / `FOGW` / `RNGS` / `ROOT` 等分块）
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotCustomChunk {
+    pub tag: [u8; 4],
+    pub payload: Vec<u8>,
+}
+
+/// 写入完成后的元数据回执
 #[derive(Clone, Debug)]
 pub struct SnapshotWriteOutput {
     pub header: SnapshotFileHeader,
     pub state_root: [u8; 32],
     pub commit: CommitManifest,
+    pub total_bytes: usize,
+}
+
+/// 快照写入器
+#[derive(Debug, Default)]
+pub struct SnapshotWriter;
+
+pub(crate) fn write_chunk(out: &mut Vec<u8>, tag: [u8; 4], body: &[u8]) {
+    let hash = Blake3Hash::of(body);
+    out.extend_from_slice(&tag);
+    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    out.extend_from_slice(hash.as_bytes());
+    out.extend_from_slice(body);
+}
+
+/// 根据实体根、可选神经分块与可选扩展分块确定性计算快照 `CommitSubRoots`
+pub fn compute_snapshot_sub_roots(
+    entity_root: [u8; 32],
+    neur: Option<&NeurChunk>,
+    extra_chunks: &[SnapshotCustomChunk],
+) -> CommitSubRoots {
+    let neural_root = neur
+        .map(|n| *Blake3Hash::of(&n.encode()).as_bytes())
+        .unwrap_or([0u8; 32]);
+    let find_hash = |tag: [u8; 4], default_label: &[u8]| -> [u8; 32] {
+        extra_chunks
+            .iter()
+            .find(|c| c.tag == tag)
+            .map(|c| *Blake3Hash::of(&c.payload).as_bytes())
+            .unwrap_or_else(|| *Blake3Hash::of(default_label).as_bytes())
+    };
+    CommitSubRoots {
+        entity_root_hash: entity_root,
+        field_root_hash: find_hash(FILD_TAG, b"field-empty"),
+        neural_root_hash: neural_root,
+        economy_root_hash: find_hash(ECON_TAG, b"economy-empty"),
+        rng_root_hash: find_hash(RNGS_TAG, b"rng-empty"),
+    }
 }
 
 impl SnapshotWriter {
-    /// 将实体注册表（及可选 NEUR）写成 `.rsnap`
-    pub fn write_path(
-        path: impl AsRef<Path>,
+    /// 序列化为完整 `.rsnap` 字节流（基础接口：含 `ENTS` 与可选 `NEUR`）
+    pub fn write_bytes(
         world_id: [u8; 16],
         tick: u64,
         world_revision: u64,
-        parent_commit_hash: [u8; 32],
+        parent_state_root: [u8; 32],
         registry: &EntityRegistry,
         neur: Option<&NeurChunk>,
-    ) -> Result<SnapshotWriteOutput, RynvekErrorCode> {
+    ) -> Result<(Vec<u8>, SnapshotWriteOutput), RynvekErrorCode> {
+        Self::write_bytes_with_chunks(world_id, tick, world_revision, parent_state_root, registry, neur, &[])
+    }
+
+    /// 序列化为包含扩展领域分块的完整 `.rsnap` 字节流
+    pub fn write_bytes_with_chunks(
+        world_id: [u8; 16],
+        tick: u64,
+        world_revision: u64,
+        parent_state_root: [u8; 32],
+        registry: &EntityRegistry,
+        neur: Option<&NeurChunk>,
+        extra_chunks: &[SnapshotCustomChunk],
+    ) -> Result<(Vec<u8>, SnapshotWriteOutput), RynvekErrorCode> {
+        let ents_bytes = registry.encode_snapshot_bytes();
         let entity_root = registry.state_root_blake3();
-        let mut plain = Vec::new();
-        plain.extend_from_slice(&encode_enti_chunk(registry));
+
+        let mut uncompressed = Vec::with_capacity(ents_bytes.len() + 256);
+        write_chunk(&mut uncompressed, ENTS_TAG, &ents_bytes);
         let mut chunk_count = 1u16;
-        if let Some(neur) = neur {
-            plain.extend_from_slice(&neur.encode());
-            chunk_count += 1;
+
+        if let Some(n) = neur {
+            let n_bytes = n.encode();
+            write_chunk(&mut uncompressed, NEUR_TAG, &n_bytes);
+            chunk_count = chunk_count
+                .checked_add(1)
+                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
         }
 
-        let compressed =
-            zstd::encode_all(plain.as_slice(), 3).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?;
+        for extra in extra_chunks {
+            write_chunk(&mut uncompressed, extra.tag, &extra.payload);
+            chunk_count = chunk_count
+                .checked_add(1)
+                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        }
 
-        let commit = CommitManifest::new(
-            world_id,
-            tick,
-            world_revision,
-            parent_commit_hash,
-            CommitSubRoots {
-                entity_root_hash: entity_root,
-                field_root_hash: Blake3Hash::of(b"field-empty").0,
-                neural_root_hash: neur.map(|n| Blake3Hash::of(&n.encode()).0).unwrap_or([0; 32]),
-                economy_root_hash: Blake3Hash::of(b"economy-empty").0,
-                rng_root_hash: Blake3Hash::of(b"rng-empty").0,
-            },
-        );
+        let sub = compute_snapshot_sub_roots(entity_root, neur, extra_chunks);
+        let commit = CommitManifest::new(world_id, tick, world_revision, parent_state_root, sub);
 
+        let compressed = zstd::bulk::compress(&uncompressed, SNAPSHOT_ZSTD_LEVEL)
+            .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
         let header = SnapshotFileHeader::new(
             world_id,
             tick,
@@ -76,47 +145,74 @@ impl SnapshotWriter {
             true,
         );
 
-        let mut file = File::create(path.as_ref()).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?;
-        file.write_all(&header.encode())
-            .map_err(|_| RynvekErrorCode::JournalTornWriteTruncated)?;
-        file.write_all(&commit.state_root_hash)
-            .map_err(|_| RynvekErrorCode::JournalTornWriteTruncated)?;
-        file.write_all(&compressed)
-            .map_err(|_| RynvekErrorCode::JournalTornWriteTruncated)?;
-        file.flush().map_err(|_| RynvekErrorCode::JournalTornWriteTruncated)?;
+        let mut file_bytes = Vec::with_capacity(SNAPSHOT_HEADER_LEN + 32 + compressed.len());
+        file_bytes.extend_from_slice(&header.encode());
+        file_bytes.extend_from_slice(&commit.state_root_hash);
+        file_bytes.extend_from_slice(&compressed);
 
-        Ok(SnapshotWriteOutput {
-            header,
-            state_root: commit.state_root_hash,
-            commit,
-        })
+        let total_bytes = file_bytes.len();
+        Ok((
+            file_bytes,
+            SnapshotWriteOutput {
+                header,
+                state_root: commit.state_root_hash,
+                commit,
+                total_bytes,
+            },
+        ))
     }
-}
 
-fn encode_enti_chunk(registry: &EntityRegistry) -> Vec<u8> {
-    let mut rows: Vec<_> = registry
-        .iter_alive()
-        .map(|(_, handle, id)| {
-            let arch = registry
-                .sparse_pages
-                .get((handle.slot as usize) / rynvek_ecs::PAGE_CAPACITY)
-                .and_then(|p| p.get((handle.slot as usize) % rynvek_ecs::PAGE_CAPACITY))
-                .map(|e| e.archetype_id)
-                .unwrap_or(0);
-            (id.0, handle.slot, handle.generation, arch)
-        })
-        .collect();
-    rows.sort_by_key(|(id, _, _, _)| *id);
-
-    let mut out = Vec::new();
-    out.extend_from_slice(&ENTI_TAG);
-    out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
-    for (id, slot, generation, arch) in rows {
-        out.extend_from_slice(&id.to_le_bytes());
-        out.extend_from_slice(&slot.to_le_bytes());
-        out.extend_from_slice(&generation.to_le_bytes());
-        out.extend_from_slice(&arch.to_le_bytes());
-        out.extend_from_slice(&[0u8; 2]); // padding 对齐到 28 字节行
+    /// 原子写入磁盘文件（先写临时文件 `.tmp` + `sync_all()`，再 `rename` 覆盖目标路径）
+    pub fn write_path(
+        path: impl AsRef<Path>,
+        world_id: [u8; 16],
+        tick: u64,
+        world_revision: u64,
+        parent_state_root: [u8; 32],
+        registry: &EntityRegistry,
+        neur: Option<&NeurChunk>,
+    ) -> Result<SnapshotWriteOutput, RynvekErrorCode> {
+        Self::write_path_with_chunks(
+            path,
+            world_id,
+            tick,
+            world_revision,
+            parent_state_root,
+            registry,
+            neur,
+            &[],
+        )
     }
-    out
+
+    /// 原子写入带扩展领域分块的 `.rsnap` 快照文件
+    #[allow(clippy::too_many_arguments)]
+    pub fn write_path_with_chunks(
+        path: impl AsRef<Path>,
+        world_id: [u8; 16],
+        tick: u64,
+        world_revision: u64,
+        parent_state_root: [u8; 32],
+        registry: &EntityRegistry,
+        neur: Option<&NeurChunk>,
+        extra_chunks: &[SnapshotCustomChunk],
+    ) -> Result<SnapshotWriteOutput, RynvekErrorCode> {
+        let target = path.as_ref();
+        let (bytes, out) = Self::write_bytes_with_chunks(
+            world_id,
+            tick,
+            world_revision,
+            parent_state_root,
+            registry,
+            neur,
+            extra_chunks,
+        )?;
+        let tmp_path = target.with_extension("rsnap.tmp");
+        let mut f = File::create(&tmp_path).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        f.write_all(&bytes)
+            .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        f.sync_all().map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        drop(f);
+        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        Ok(out)
+    }
 }

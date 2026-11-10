@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Journal 顺序读取器：遇到撕裂写即停止。
+//! Journal 顺序读取器：遇到撕裂写即停止，同时解析全部类型化 WAL 记录与提交清单。
 
 use std::fs::File;
 use std::io::Read;
@@ -9,15 +9,18 @@ use std::path::Path;
 
 use rynvek_core::error::RynvekErrorCode;
 
-use crate::frame::{FRAME_CHECKSUM_LEN, FRAME_HEADER_LEN, JournalFrame, JournalFrameHeader, checksum_of};
+use crate::frame::{
+    FRAME_CHECKSUM_LEN, FRAME_HEADER_LEN, JournalFrame, JournalFrameHeader, JournalRecord, checksum_of,
+};
 use crate::header::{JOURNAL_HEADER_LEN, JournalFileHeader};
 use crate::manifest::CommitManifest;
 
-/// 读取结果：完整帧列表 + 是否因撕裂写提前结束
+/// 读取结果：完整提交帧列表 + 全部类型化 WAL 记录 + 是否因撕裂写提前结束
 #[derive(Clone, Debug)]
 pub struct JournalReadResult {
     pub header: JournalFileHeader,
     pub commits: Vec<CommitManifest>,
+    pub records: Vec<JournalRecord>,
     pub torn_write: bool,
 }
 
@@ -41,12 +44,17 @@ impl JournalReader {
         let header = JournalFileHeader::decode(&bytes[..JOURNAL_HEADER_LEN])?;
         let mut offset = JOURNAL_HEADER_LEN;
         let mut commits = Vec::new();
+        let mut records = Vec::new();
         let mut torn_write = false;
         while offset < bytes.len() {
             match decode_frame_at(bytes, offset) {
                 Ok((frame, next)) => {
                     frame.verify_checksum()?;
-                    commits.push(frame.to_commit()?);
+                    let record = frame.to_record()?;
+                    if let JournalRecord::TickCommit(m) | JournalRecord::Checkpoint(m) = &record {
+                        commits.push(*m);
+                    }
+                    records.push(record);
                     offset = next;
                 }
                 Err(RynvekErrorCode::JournalTornWriteTruncated) => {
@@ -59,6 +67,7 @@ impl JournalReader {
         Ok(JournalReadResult {
             header,
             commits,
+            records,
             torn_write,
         })
     }
@@ -99,15 +108,23 @@ fn decode_frame_at(bytes: &[u8], offset: usize) -> Result<(JournalFrame, usize),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frame::JournalCommandRecord;
     use crate::manifest::CommitManifest;
     use crate::writer::JournalWriter;
     use tempfile::TempDir;
 
     #[test]
-    fn reads_until_torn_write() {
+    fn reads_commits_and_typed_records_until_torn_write() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("w.rjournal");
         let mut writer = JournalWriter::create(&path, [1; 16], 0, 0, 0).unwrap();
+        let cmd = JournalRecord::CommandAccepted(JournalCommandRecord {
+            tick: 1,
+            world_revision: 1,
+            faction_id: 0,
+            command_bytes: b"surrender".to_vec(),
+        });
+        writer.append_record(&cmd).unwrap();
         let m1 = CommitManifest::new(
             [1; 16],
             1,
@@ -122,7 +139,9 @@ mod tests {
         writer.append_torn_bytes(&[0xAA, 0xBB, 0xCC]).unwrap();
         let result = JournalReader::read_path(&path).unwrap();
         assert_eq!(result.commits.len(), 1);
+        assert_eq!(result.records.len(), 2);
         assert!(result.torn_write);
         assert_eq!(result.commits[0], m1);
+        assert_eq!(result.records[0], cmd);
     }
 }

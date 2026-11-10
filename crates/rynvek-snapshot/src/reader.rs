@@ -1,26 +1,41 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `.rsnap` 读取与实体表重建。
+//! `.rsnap` 读取器：有界解压 + 校验每个分块的 BLAKE3 + 核验分块计数 + 恢复 `EntityRegistry`、`NeurChunk` 与扩展分块。
 
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
 use rynvek_core::error::RynvekErrorCode;
-use rynvek_ecs::{EntityId, EntityRegistry};
+use rynvek_core::hash::Blake3Hash;
+use rynvek_ecs::EntityRegistry;
 
 use crate::header::{SNAPSHOT_HEADER_LEN, SnapshotFileHeader};
-use crate::neur::NeurChunk;
-use crate::writer::ENTI_TAG;
+use crate::neur::{NEUR_TAG, NeurChunk};
+use crate::writer::{ENTS_TAG, SnapshotCustomChunk};
 
-/// 快照读取结果
-#[derive(Debug)]
+/// 解压后快照最大允许体积（256 MiB，防止恶意或损坏 Zstd 压缩炸弹耗尽内存）
+pub const MAX_SNAPSHOT_DECOMPRESSED_BYTES: usize = 256 * 1024 * 1024;
+
+#[derive(Clone, Debug)]
 pub struct SnapshotReadResult {
     pub header: SnapshotFileHeader,
     pub state_root: [u8; 32],
     pub registry: EntityRegistry,
     pub neur: Option<NeurChunk>,
+    /// 除 `ENTS` 与 `NEUR` 外的扩展领域分块（如 `CONF`、`COMP`、`FILD`、`ECON`、`EVOL`、`FOGW`、`RNGS`、`ROOT`）
+    pub custom_chunks: Vec<SnapshotCustomChunk>,
+}
+
+impl SnapshotReadResult {
+    /// 按 4 字节标签查找扩展分块载荷
+    pub fn find_chunk(&self, tag: [u8; 4]) -> Option<&[u8]> {
+        self.custom_chunks
+            .iter()
+            .find(|c| c.tag == tag)
+            .map(|c| c.payload.as_slice())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -28,94 +43,167 @@ pub struct SnapshotReader;
 
 impl SnapshotReader {
     pub fn read_path(path: impl AsRef<Path>) -> Result<SnapshotReadResult, RynvekErrorCode> {
-        let mut file = File::open(path.as_ref()).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?;
+        let f = File::open(path.as_ref()).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?;
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
+        f.take((MAX_SNAPSHOT_DECOMPRESSED_BYTES + SNAPSHOT_HEADER_LEN + 64) as u64)
+            .read_to_end(&mut bytes)
             .map_err(|_| RynvekErrorCode::JournalTornWriteTruncated)?;
+        if bytes.len() > MAX_SNAPSHOT_DECOMPRESSED_BYTES + SNAPSHOT_HEADER_LEN + 32 {
+            return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+        }
         Self::read_bytes(&bytes)
     }
 
     pub fn read_bytes(bytes: &[u8]) -> Result<SnapshotReadResult, RynvekErrorCode> {
         if bytes.len() < SNAPSHOT_HEADER_LEN + 32 {
-            return Err(RynvekErrorCode::JournalTornWriteTruncated);
+            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
         let header = SnapshotFileHeader::decode(&bytes[..SNAPSHOT_HEADER_LEN])?;
         let mut state_root = [0u8; 32];
         state_root.copy_from_slice(&bytes[SNAPSHOT_HEADER_LEN..SNAPSHOT_HEADER_LEN + 32]);
-        let payload = &bytes[SNAPSHOT_HEADER_LEN + 32..];
-        if payload.len() as u64 != header.payload_bytes {
-            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+        let payload_start = SNAPSHOT_HEADER_LEN + 32;
+        let payload_end = payload_start
+            .checked_add(header.payload_bytes as usize)
+            .ok_or(RynvekErrorCode::JournalTornWriteTruncated)?;
+        if bytes.len() < payload_end {
+            return Err(RynvekErrorCode::JournalTornWriteTruncated);
         }
-        let plain = if header.is_zstd() {
-            zstd::decode_all(payload).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?
+        let compressed = &bytes[payload_start..payload_end];
+        let uncompressed = if header.is_zstd() {
+            let mut decoder = zstd::stream::read::Decoder::new(compressed)
+                .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+            let mut out = Vec::new();
+            decoder
+                .by_ref()
+                .take((MAX_SNAPSHOT_DECOMPRESSED_BYTES + 1) as u64)
+                .read_to_end(&mut out)
+                .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+            if out.len() > MAX_SNAPSHOT_DECOMPRESSED_BYTES {
+                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            }
+            out
         } else {
-            payload.to_vec()
+            if compressed.len() > MAX_SNAPSHOT_DECOMPRESSED_BYTES {
+                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            }
+            compressed.to_vec()
         };
-        let (registry, neur) = decode_payload(&plain, header.world_id)?;
-        // 校验实体根是否与快照声明一致：调用方可用 state_root 与 journal 链比对
-        let _ = registry.state_root_blake3();
+
+        let mut offset = 0usize;
+        let mut parsed_chunks = 0u16;
+        let mut registry: Option<EntityRegistry> = None;
+        let mut neur: Option<NeurChunk> = None;
+        let mut custom_chunks: Vec<SnapshotCustomChunk> = Vec::new();
+
+        while offset < uncompressed.len() {
+            if uncompressed.len() - offset < 40 {
+                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            }
+            let tag: [u8; 4] = uncompressed[offset..offset + 4].try_into().unwrap();
+            let len = u32::from_le_bytes(uncompressed[offset + 4..offset + 8].try_into().unwrap()) as usize;
+            let expected_hash: [u8; 32] = uncompressed[offset + 8..offset + 40].try_into().unwrap();
+            let body_start = offset + 40;
+            let body_end = body_start
+                .checked_add(len)
+                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+            if uncompressed.len() < body_end {
+                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            }
+            let body = &uncompressed[body_start..body_end];
+            if Blake3Hash::of(body).as_bytes() != &expected_hash {
+                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            }
+            if tag == ENTS_TAG {
+                registry = Some(EntityRegistry::decode_snapshot_bytes(body)?);
+            } else if tag == NEUR_TAG {
+                neur = Some(NeurChunk::decode(body)?);
+            } else {
+                custom_chunks.push(SnapshotCustomChunk {
+                    tag,
+                    payload: body.to_vec(),
+                });
+            }
+            parsed_chunks = parsed_chunks
+                .checked_add(1)
+                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+            offset = body_end;
+        }
+
+        if parsed_chunks != header.chunk_count {
+            return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+        }
+
+        let registry = registry.ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
         Ok(SnapshotReadResult {
             header,
             state_root,
             registry,
             neur,
+            custom_chunks,
         })
     }
 }
 
-fn decode_payload(plain: &[u8], world_id: [u8; 16]) -> Result<(EntityRegistry, Option<NeurChunk>), RynvekErrorCode> {
-    let lineage = u64::from_le_bytes(world_id[0..8].try_into().unwrap());
-    let mut registry = EntityRegistry::new(lineage);
-    let mut offset = 0usize;
-    let mut neur = None;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::neur::NeurNeuronRow;
+    use crate::writer::{ CONF_TAG, SnapshotWriter };
+    use tempfile::TempDir;
 
-    while offset + 4 <= plain.len() {
-        let tag = &plain[offset..offset + 4];
-        if tag == ENTI_TAG {
-            offset = decode_enti(&plain[offset..], &mut registry)?;
-        } else if tag == crate::neur::NEUR_TAG {
-            // NEUR 块头自带 body_len，可直接得到消费长度
-            let (chunk, consumed) = NeurChunk::decode_prefix(&plain[offset..])?;
-            offset += consumed;
-            neur = Some(chunk);
-        } else {
-            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
-        }
-    }
-    Ok((registry, neur))
-}
+    #[test]
+    fn snapshot_write_and_read_roundtrip_with_custom_chunks() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("world.rsnap");
+        let mut reg = EntityRegistry::new(7);
+        let (h0, _) = reg.spawn(1).unwrap();
+        let (_h1, _) = reg.spawn(2).unwrap();
+        reg.despawn(h0, 12).unwrap();
+        reg.recycle_tombstones(4);
 
-fn decode_enti(bytes: &[u8], registry: &mut EntityRegistry) -> Result<usize, RynvekErrorCode> {
-    if bytes.len() < 8 || bytes[0..4] != ENTI_TAG {
-        return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
+        let neur = NeurChunk {
+            rows: vec![NeurNeuronRow {
+                dense_index: 0,
+                neuron_index: 3,
+                model_kind: 1,
+                refractory_ticks: 1,
+                spike_history_ring: 0b101,
+                membrane_v_q8: 42,
+                weight_deltas: vec![0, 4, 0, -2],
+                eligibility: vec![0; 8],
+            }],
+        };
+
+        let extra = vec![SnapshotCustomChunk {
+            tag: CONF_TAG,
+            payload: b"duel_seed_42".to_vec(),
+        }];
+
+        let out = SnapshotWriter::write_path_with_chunks(&path, [9; 16], 16, 4, [0; 32], &reg, Some(&neur), &extra)
+            .unwrap();
+        let read = SnapshotReader::read_path(&path).unwrap();
+        assert_eq!(read.header.tick, 16);
+        assert_eq!(read.header.chunk_count, 3);
+        assert_eq!(read.state_root, out.state_root);
+        assert_eq!(read.registry.state_root_blake3(), reg.state_root_blake3());
+        assert_eq!(read.neur.as_ref(), Some(&neur));
+        assert_eq!(read.find_chunk(CONF_TAG), Some(b"duel_seed_42".as_slice()));
     }
-    let count = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
-    let mut offset = 8;
-    // 行：16B id + 4 slot + 4 gen + 2 arch + 2 pad = 28
-    const ROW: usize = 28;
-    if bytes.len() < offset + count * ROW {
-        return Err(RynvekErrorCode::JournalTornWriteTruncated);
+
+    #[test]
+    fn corrupted_chunk_payload_or_count_is_rejected() {
+        let reg = EntityRegistry::new(1);
+        let (mut bytes, _) = SnapshotWriter::write_bytes([1; 16], 1, 1, [0; 32], &reg, None).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xFF;
+        assert!(SnapshotReader::read_bytes(&bytes).is_err());
+
+        // 篡改 header.chunk_count 触发计数校验失败
+        let (mut bytes2, _) = SnapshotWriter::write_bytes([1; 16], 1, 1, [0; 32], &reg, None).unwrap();
+        bytes2[10] = 99;
+        assert_eq!(
+            SnapshotReader::read_bytes(&bytes2),
+            Err(RynvekErrorCode::SnapshotChunkChecksumFailed)
+        );
     }
-    // 重建：按文件中的顺序 spawn，但需要恢复具体 slot/generation ——
-    // 简化策略：按稳定 ID 顺序重新 spawn（generation 从 1 起），
-    // 对崩溃恢复的状态根而言，以 EntityId+archetype 为准（与 registry.state_root_blake3 一致）。
-    let mut max_serial = 0u64;
-    for _ in 0..count {
-        let id = u128::from_le_bytes(bytes[offset..offset + 16].try_into().unwrap());
-        let generation = u32::from_le_bytes(bytes[offset + 20..offset + 24].try_into().unwrap());
-        let arch = u16::from_le_bytes(bytes[offset + 24..offset + 26].try_into().unwrap());
-        let entity_id = EntityId(id);
-        max_serial = max_serial.max(entity_id.monotonic_serial());
-        let (handle, _) = registry.spawn(arch)?;
-        let entry = registry
-            .sparse_pages
-            .get_mut((handle.slot as usize) / rynvek_ecs::PAGE_CAPACITY)
-            .and_then(|p| p.get_mut((handle.slot as usize) % rynvek_ecs::PAGE_CAPACITY))
-            .ok_or(RynvekErrorCode::EntityNotFoundOrTombstoned)?;
-        entry.stable_id = entity_id;
-        entry.generation = if generation == 0 { 1 } else { generation };
-        offset += ROW;
-    }
-    registry.next_monotonic_serial = max_serial.saturating_add(1);
-    Ok(offset)
 }
