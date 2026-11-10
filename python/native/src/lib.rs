@@ -10,8 +10,8 @@
 //!
 //! 所有数值均为定点整数（`*_milli`、`*_raw` Q32.32），与服务端 Parquet 列结构完全一致。
 
-use arrow::array::{Array, RecordBatch};
-use arrow::pyarrow::ToPyArrow;
+use arrow::array::{Array, ArrayData, RecordBatch, StructArray};
+use arrow::ffi::{FFI_ArrowArray, FFI_ArrowSchema};
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError};
 use pyo3::prelude::*;
@@ -47,6 +47,29 @@ fn parse_policy(name: &str) -> PyResult<PolicyKind> {
             "未知策略 {other:?}（可选 idle / economy）"
         ))),
     }
+}
+
+/// 经 Arrow C Data Interface 把 Rust 数组移交给 `pyarrow.<class>._import_from_c`。
+///
+/// `FFI_ArrowArray` 只携带缓冲区指针与释放回调；pyarrow 导入时把回调“移走”（置空原结构的
+/// `release`），之后缓冲区生命周期由 pyarrow 管理，Rust 侧随后析构空结构不会重复释放。
+/// 全程只传递结构体地址，不复制列数据，也无需 `unsafe`。
+fn export_to_pyarrow(py: Python<'_>, class: &str, data: &ArrayData) -> PyResult<PyObject> {
+    let array = FFI_ArrowArray::new(data);
+    let schema = FFI_ArrowSchema::try_from(data.data_type()).map_err(arrow_err)?;
+    let array_addr = std::ptr::addr_of!(array) as usize;
+    let schema_addr = std::ptr::addr_of!(schema) as usize;
+    let obj = py
+        .import("pyarrow")?
+        .getattr(class)?
+        .call_method1("_import_from_c", (array_addr, schema_addr))?;
+    Ok(obj.unbind())
+}
+
+/// `RecordBatch` → `pyarrow.RecordBatch`（以 StructArray 形式移交）
+fn batch_to_pyarrow(py: Python<'_>, batch: RecordBatch) -> PyResult<PyObject> {
+    let data = StructArray::from(batch).into_data();
+    export_to_pyarrow(py, "RecordBatch", &data)
 }
 
 /// 单个竞技场仿真句柄（非线程安全；每个 Python 环境实例持有一个）
@@ -203,7 +226,7 @@ impl ArenaSim {
         let f = self.player(faction)?;
         let v = lab::faction_features(&self.world, f)
             .ok_or_else(|| PyValueError::new_err(format!("阵营 {faction} 无观测")))?;
-        arrow_io::features_array(v).to_data().to_pyarrow(py)
+        export_to_pyarrow(py, "Array", &arrow_io::features_array(v).to_data())
     }
 
     /// 该阵营可见单位的列式视图（`pyarrow.RecordBatch`）
@@ -213,7 +236,7 @@ impl ArenaSim {
             .world
             .observe(f)
             .ok_or_else(|| PyValueError::new_err(format!("阵营 {faction} 无观测")))?;
-        arrow_io::units_batch(&obs).map_err(arrow_err)?.to_pyarrow(py)
+        batch_to_pyarrow(py, arrow_io::units_batch(&obs).map_err(arrow_err)?)
     }
 
     fn __repr__(&self) -> String {
@@ -245,7 +268,7 @@ impl Experiment {
 impl Experiment {
     /// 表的 `pyarrow.RecordBatch`（零拷贝移交）
     fn table(&self, py: Python<'_>, name: &str) -> PyResult<PyObject> {
-        self.batch_of(name)?.to_pyarrow(py)
+        batch_to_pyarrow(py, self.batch_of(name)?)
     }
 
     /// 表的 Parquet 字节（ZSTD；与服务端 `GET .../parquet?table=` 逐字节一致）

@@ -26,7 +26,9 @@ doctest = false
 extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-arrow = { workspace = true, features = ["pyarrow"] }
+# 只启用 C Data Interface（`ffi`），不启用 arrow 的 `pyarrow` 特性：
+# 后者会让 pyo3 经特性合并进入工作区其他 crate 的测试二进制并要求链接 libpython
+arrow = { workspace = true, features = ["ffi"] }
 pyo3.workspace = true
 rynvek-core.workspace = true
 rynvek-rts = { workspace = true, features = ["arrow"] }
