@@ -95,5 +95,8 @@ fn sample_rworld_fixture_is_reproducible() {
     if std::env::var_os("RYNVEK_UPDATE_FIXTURES").is_some() {
         std::fs::write(path, &bytes).unwrap();
     }
-    assert_eq!(std::fs::read(path).expect("夹具存在（RYNVEK_UPDATE_FIXTURES=1 生成）"), bytes);
+    assert_eq!(
+        std::fs::read(path).expect("夹具存在（RYNVEK_UPDATE_FIXTURES=1 生成）"),
+        bytes
+    );
 }

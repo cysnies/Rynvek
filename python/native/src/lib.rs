@@ -43,7 +43,9 @@ fn parse_policy(name: &str) -> PyResult<PolicyKind> {
     match name {
         "idle" => Ok(PolicyKind::Idle),
         "economy" => Ok(PolicyKind::Economy),
-        other => Err(PyValueError::new_err(format!("未知策略 {other:?}（可选 idle / economy）"))),
+        other => Err(PyValueError::new_err(format!(
+            "未知策略 {other:?}（可选 idle / economy）"
+        ))),
     }
 }
 
@@ -184,8 +186,12 @@ impl ArenaSim {
     /// 执行一条原始权威命令（JSON，与 WebSocket / 插件命令同一格式）
     fn apply_command(&mut self, faction: u8, command_json: &str) -> PyResult<()> {
         let f = self.player(faction)?;
-        let cmd: RtsCommand = serde_json::from_str(command_json)
-            .map_err(|e| rynvek_err(RynvekErrorCode::RuleStaticTypeCheckFailed, format!("命令 JSON 非法：{e}")))?;
+        let cmd: RtsCommand = serde_json::from_str(command_json).map_err(|e| {
+            rynvek_err(
+                RynvekErrorCode::RuleStaticTypeCheckFailed,
+                format!("命令 JSON 非法：{e}"),
+            )
+        })?;
         self.world
             .apply_command(f, &cmd)
             .map(|_| ())
@@ -245,9 +251,12 @@ impl Experiment {
     /// 表的 Parquet 字节（ZSTD；与服务端 `GET .../parquet?table=` 逐字节一致）
     fn parquet<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyBytes>> {
         let batch = self.batch_of(name)?;
-        let bytes = py
-            .allow_threads(|| arrow_io::to_parquet(&batch))
-            .map_err(|e| rynvek_err(RynvekErrorCode::JournalTornWriteTruncated, format!("Parquet 写出失败：{e}")))?;
+        let bytes = py.allow_threads(|| arrow_io::to_parquet(&batch)).map_err(|e| {
+            rynvek_err(
+                RynvekErrorCode::JournalTornWriteTruncated,
+                format!("Parquet 写出失败：{e}"),
+            )
+        })?;
         Ok(PyBytes::new(py, &bytes))
     }
 
