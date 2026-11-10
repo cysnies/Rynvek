@@ -18,14 +18,18 @@ arrow = { workspace = true, optional = true }
 blake3.workspace = true
 parquet = { workspace = true, optional = true }
 rynvek-core.workspace = true
+rynvek-ecs.workspace = true
 rynvek-field.workspace = true
+rynvek-journal.workspace = true
 rynvek-neural.workspace = true
+rynvek-snapshot.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 # Parquet 读回测试（parquet 的 ChunkReader 由 bytes::Bytes 实现）
 bytes = "1"
-serde_json.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true
