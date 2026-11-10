@@ -1,0 +1,28 @@
+{
+  "name": "@rynvek/agent-sdk",
+  "version": "0.1.0",
+  "description": "Rynvek 智能体客户端 SDK：封装 9 项标准 ToolBroker / MCP 权威工具调用、迷雾观测解析与神经调质引导助手",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rynvek/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

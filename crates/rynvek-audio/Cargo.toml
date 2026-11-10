@@ -1,0 +1,18 @@
+[package]
+name = "rynvek-audio"
+description = "Rynvek Tier 3 程序化生物声学与可听化遥测内核：Kuramoto 相位同步、神经脉冲密度与战场态势到声学合成参数的确定性映射"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+rynvek-core.workspace = true
+rynvek-rts.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

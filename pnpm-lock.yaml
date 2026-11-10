@@ -15,6 +15,66 @@ importers:
         specifier: ~5.8.3
         version: 5.8.3
 
+  apps/desktop-shell:
+    dependencies:
+      '@rynvek/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.14.0
+        version: 22.20.5
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.5)(jsdom@26.1.0)
+
+  apps/web-platform:
+    dependencies:
+      '@rynvek/arena':
+        specifier: workspace:*
+        version: link:../../packages/arena
+      '@rynvek/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@rynvek/lab':
+        specifier: workspace:*
+        version: link:../../packages/lab
+      '@rynvek/studio':
+        specifier: workspace:*
+        version: link:../../packages/studio
+      '@rynvek/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+    devDependencies:
+      '@types/node':
+        specifier: ^22.14.0
+        version: 22.20.5
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.5)(jsdom@26.1.0)
+
+  packages/agent-sdk:
+    dependencies:
+      '@rynvek/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.14.0
+        version: 22.20.5
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.5)(jsdom@26.1.0)
+
   packages/arena:
     dependencies:
       '@rynvek/client':
@@ -260,6 +320,22 @@ importers:
       '@rynvek/ui':
         specifier: workspace:*
         version: link:../ui
+    devDependencies:
+      '@types/node':
+        specifier: ^22.14.0
+        version: 22.20.5
+      typescript:
+        specifier: ~5.8.3
+        version: 5.8.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.5)(jsdom@26.1.0)
+
+  packages/wasm:
+    dependencies:
+      '@rynvek/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: ^22.14.0

@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+name: Rynvek Deterministic CI Gate
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  ci-full-gate:
+    name: Full Deterministic & Compliance Gate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22 & pnpm 10
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Rust 1.87 toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.87.0"
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown, wasm32-wasip2
+
+      - name: Run Rynvek CI Full Gate
+        run: cargo xtask ci-full-gate --soak-duration 90s

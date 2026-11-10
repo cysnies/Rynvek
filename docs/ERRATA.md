@@ -674,3 +674,58 @@
   9. 短浸泡：与 24 小时浸泡同一执行体、同一不变量，缺省 120 秒，可用 `RYNVEK_SOAK_DURATION` 或 `--soak-duration` 覆盖。
   `--skip <步骤>` 只用于本地排障。
 - **`deny.toml`**：工作区内部 crate 均为 `publish = false` 的路径依赖，开启 `allow-wildcard-paths`，以消除 cargo-deny 的通配版本误报。
+
+## E-054：`Q32_32::from_milli` 移位溢出修复、饱和/受检运算与 `GV-005`（M9）
+
+- **位置**：`crates/rynvek-core/src/fixed.rs`、`packages/core/src/fixed.ts`、`tests/golden_vectors/v1_baseline.json`。
+- **问题**：原实现 `((milli << 32) / 1000)` 在 64 位有符号整数上先左移 32 位，导致当 `|milli| >= 2,147,483,648`（约 `2.147 × 10^6` 单位）时提前触发符号位翻转或截断溢出；同时 `Q32_32::mul` 与 `div_safe` 直接将 `i128` 强转为 `i64`，在极端大值下回绕而非饱和。
+- **裁决**：
+  - `from_milli` 先拓宽到 `i128`（TypeScript 侧为任意精度 `bigint`）再左移 32 位并除以 `1000`，最后钳制到 `[i64::MIN, i64::MAX]`；
+  - 补齐 `checked_from_milli`、`saturating_from_milli`、`checked_add`、`checked_sub`、`checked_mul`、`saturating_mul`、`checked_div`、`saturating_div`；
+  - 在 `tests/golden_vectors/v1_baseline.json` 中新增第 5 条跨语言黄金向量 `GV-005-Q32_32_BOUNDARY_AND_OVERFLOW`，锁定大额毫单位（`5,000,000,000` 与 `-5,000,000,000`）与饱和乘法边界在 Rust 与 TypeScript 双端逐位一致。
+
+## E-055：`CanonicalWorldState` 十子根分层哈希与四脑模型 `NEUR` 全覆盖（M9）
+
+- **位置**：`crates/rynvek-neural/src/models.rs`、`crates/rynvek-rts/src/brain.rs`、`crates/rynvek-rts/src/world/mod.rs`、`crates/rynvek-rts/tests/state_root_matrix.rs`。
+- **问题**：M6 初版 `ArenaWorld::state_hash()` 未纳入单位脑内部动态态（`LIF` 膜电位/不应期/脉冲环/可塑性 `δw`/资格迹、`GatedMLP.hidden_q8`、`Izhikevich` 的 `v_q8/u_q8/spike_ring`、`CTRNN.y_q8`）、单位指令与适应度、建筑生产队列明细/研发/繁育/精炼/信标参数、阵营迷雾与幽灵快照、PvE 导演基因池与突然死亡倒计时。
+- **裁决**：
+  - 为 `GatedMlpBrain`、`IzhikevichBrain` 与 `CtrnnBrain` 补齐与 `LifBrain` 对齐的 `state_root()`、`to_neur_rows()`、`to_neur_chunk()` 与 `restore_from_neur()`；其中 `IzhikevichBrain` 的恢复变量 `u_q8` 存入 `NeurNeuronRow.eligibility[0]` 实现零损耗往返；
+  - 在 `ArenaWorld` 中建立 `CanonicalWorldState`（含 `config_root`、`entity_root`、`neural_root`、`field_root`、`economy_root`、`evolution_root`、`visibility_root`、`rng_root`、`scheduled_event_root`、`parent_commit_root` 十个域分离 BLAKE3 子根），并由 `crates/rynvek-rts/tests/state_root_matrix.rs` 的 14 项单字段扰动测试矩阵锁定。
+
+## E-056：`.rsnap` 全世界分块快照、有界解压与 `.rjournal` 7 类 WAL 帧崩溃恢复闭环（M9）
+
+- **位置**：`crates/rynvek-snapshot`、`crates/rynvek-journal`、`crates/rynvek-rts/src/world/persistence.rs`。
+- **裁决**：
+  - `.rsnap` 支持扩展领域分块（`CONF` / `COMP` / `FILD` / `ECON` / `EVOL` / `FOGW` / `RNGS` / `ROOT`），读取器强制执行 `MAX_SNAPSHOT_DECOMPRESSED_BYTES = 256 MiB` 有界解压与 `header.chunk_count` 核验，写入器采用 `.rsnap.tmp` + `sync_all()` + `rename` 原子落盘；
+  - `.rjournal` 的 `FrameKind` 扩展为全部 7 类帧（`Commit/TickCommit = 1`、`CommandAccepted = 2`、`ScheduledEvent = 3`、`StructuralMutation = 4`、`WorldPatch = 5`、`SnapshotReference = 6`、`Checkpoint = 7`），`JournalWriter` 每次追加帧后执行 `sync_data()` 持久化屏障；
+  - `CrashRecoveryStateMachine::run_with_replayer` 与 `ArenaWorld::recover_from_snapshot_and_journal` 实现从 `.rsnap` 加载完整世界并重放 `.rjournal` 命令帧与提交帧的端到端状态根核验闭环。
+
+## E-057：`DomainPage` 容量修复、`PagedComponentColumn`、`MemoryBudget` 联动与 `EntityId` 双向桥接（M10）
+
+- **位置**：`crates/rynvek-ecs/src/{identity.rs,registry.rs,soa.rs}`、`crates/rynvek-rts/src/ids.rs`。
+- **裁决**：
+  - `DomainPage.len` 由 `u16` 升为 `u32`，修复满页 `PAGE_CAPACITY = 65,536` 时截断归零的缺陷；
+  - 新增真正按 `CHUNK_CAPACITY = 4,096` 分块分配的 `PagedComponentColumn<T>` 与确定性 `StructuralMutationBuffer`；
+  - `EntityRegistry` 内嵌 `MemoryBudget` 预算记账器，每次分配新稀疏页时自动校验并记账页字节数；
+  - `EntityId(u128)` 与 `EntitySerial(u32)` 提供 `from_world_serial` / `to_serial_u32` 无损双向桥接，同时 `ArenaWorld::try_alloc_serial` 使用 `checked_add(1)` 防止序号回绕。
+
+## E-058：`SimulationEngine` 10Hz 场步门控、`LeniaKernel`、`DynamicBvh`、`ContactGrid` 与 `WorldRuntime` 收敛（M10）
+
+- **位置**：`crates/rynvek-simulation`、`crates/rynvek-field/src/lenia.rs`、`crates/rynvek-spatial/src/bvh.rs`、`crates/rynvek-rts/src/world/{units_sys.rs,combat_sys.rs}`、`crates/rynvek-engine/src/provider.rs`。
+- **裁决**：
+  - `MultiRateClock` 新增 `TICKS_PER_FIELD_STEP = 3` 与 `is_field_step_due()`，`SimulationEngine` 的 `EnvironmentAndFieldSolve` 阶段按 10Hz（每 3 个 30Hz 权威 Tick 一次）推进连续场；
+  - `rynvek-field` 新增纯整数 Q8.8 定点 `LeniaKernel`，`rynvek-spatial` 新增确定性轴对齐包围盒树 `DynamicBvh`；
+  - `ArenaWorld` 的感知与战斗索敌改用 `8×8 Tile` 的 `ContactGrid` 空间分桶索引，消除 $O(N^2)$ 全表扫描并严格保持 `(距离², EntitySerial)` 平局决胜顺序；
+  - `rynvek-engine` 新增 `ArenaVisualizationProvider` 与 `WorldRuntime`，将 `SimulationEngine` 与 `ArenaWorld` 收敛到统一的推进与渲染场景提取门面。
+
+## E-059：`NeuralPopulationRuntime`、`WorldPatch` 真实引擎应用、跨分区两阶段移交与联邦网关（M11–M12）
+
+- **位置**：`crates/rynvek-neural/src/population.rs`、`crates/rynvek-world/src/{authoring.rs,partition.rs,federation.rs}`。
+- **裁决**：
+  - `rynvek-neural` 新增 `NeuralPopulationRuntime`，支持四模型混合群体批处理推进、代谢能耗结算、Kuramoto 相位一致性度量与 Coupling Epoch 边界的鲍德温同化（Baldwin Assimilation）；
+  - `rynvek-world` 新增 `authoring::WorldPatch::apply_to_arena`（将 `PaintTerrainRect` 等补丁真实作用于 `ArenaWorld` 地形、导航网格与 HPA*）、`partition::EntityHandoffCoordinator`（跨分区两阶段 `PrepareHandoff` / `CommitHandoff` / `AbortHandoff` 协议）与 `federation::FederatedWorldGateway`（跨世界迁移票据验签、防重放与突触预算检疫）。
+
+## E-060：工作区缺失成员补齐（`rynvek-audio`、`@rynvek/agent-sdk`、`@rynvek/wasm`、`apps/web-platform`、`apps/desktop-shell` 与 CI 工作流）（M12）
+
+- **位置**：`crates/rynvek-audio`、`packages/agent-sdk`、`packages/wasm`、`apps/web-platform`、`apps/desktop-shell`、`.github/workflows/ci.yml`。
+- **裁决**：补齐规范目录树中声明的全部工作区成员与 GitHub Actions CI 门禁流水线；其中 `@rynvek/agent-sdk` 遵循公开 SDK 的 `Apache-2.0 WITH LLVM-exception` 许可证，其余引擎与应用层模块遵循 `AGPL-3.0-only`。

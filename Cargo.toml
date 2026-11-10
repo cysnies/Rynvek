@@ -38,6 +38,7 @@ rynvek-render = { path = "crates/rynvek-render" }
 rynvek-rts = { path = "crates/rynvek-rts" }
 rynvek-world = { path = "crates/rynvek-world" }
 rynvek-agent = { path = "crates/rynvek-agent" }
+rynvek-audio = { path = "crates/rynvek-audio" }
 rynvek-engine = { path = "crates/rynvek-engine" }
 rynvek-security = { path = "crates/rynvek-security" }
 rynvek-network = { path = "crates/rynvek-network" }

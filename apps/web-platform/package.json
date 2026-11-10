@@ -1,0 +1,32 @@
+{
+  "name": "@rynvek/web-platform",
+  "version": "0.1.0",
+  "description": "Rynvek Web 平台旗舰宿主应用：集成 Arena 竞技场、Studio 实时协作编辑器、Lab 演化实验室与 Hub 门户",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rynvek/arena": "workspace:*",
+    "@rynvek/core": "workspace:*",
+    "@rynvek/lab": "workspace:*",
+    "@rynvek/studio": "workspace:*",
+    "@rynvek/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

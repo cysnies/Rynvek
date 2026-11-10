@@ -3021,6 +3021,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rynvek-audio"
+version = "0.1.0"
+dependencies = [
+ "rynvek-core",
+ "rynvek-rts",
+ "serde",
+]
+
+[[package]]
 name = "rynvek-cli"
 version = "0.1.0"
 dependencies = [
@@ -3182,10 +3191,14 @@ dependencies = [
  "bytes",
  "parquet",
  "rynvek-core",
+ "rynvek-ecs",
  "rynvek-field",
+ "rynvek-journal",
  "rynvek-neural",
+ "rynvek-snapshot",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -3333,6 +3346,7 @@ dependencies = [
  "blake3",
  "naga",
  "rynvek-core",
+ "rynvek-ecs",
  "rynvek-rts",
  "serde",
  "serde_json",
