@@ -565,3 +565,112 @@
 - **`server` 就绪行**：首行 stdout 为 JSON（实际端口、证书指纹、回放签名公钥）。收到 SIGTERM / Ctrl-C 时优雅停机。
 - **种子文件**：一行 64 位十六进制，`create_new` 创建，权限 0600，绝不覆盖。
 - **HTTP 客户端**：内置极简 HTTP/1.1 客户端，仅 `http://`，供 CLI 与测试使用。生产环境经 TLS 反向代理访问。
+
+## E-046：`rynvek:plugin@1.0.0` WIT 与 Wasmtime 宿主
+
+- **WIT**：规范只冻结了包名 `rynvek:plugin@1.0.0` 与“零网络、零文件系统”的能力边界。`protocols/wit/rynvek-plugin.wit` 按最佳实践补全：
+  - `types`（错误、能力枚举 `observe / command / log`、清单、阵营视图、命令）；
+  - `host`（`log`、按计数器取 Philox 随机数 `random`）；
+  - `plugin`（`init`、`on-tick`）；
+  - world `rynvek-plugin`（导入 `host`，导出 `plugin`）。
+  单位 / 建筑 `kind` 使用 `UnitKind` / `BuildingKind` 的声明顺序索引，避免引擎反向依赖网络层编码。
+- **资源上限**（TL3）：每 Tick Gas ≤ 500,000（Gas = Wasmtime fuel，1:1）、线性内存 ≤ 64 MiB 且只允许 1 个内存；每 Tick ≤ 64 条命令、每条 ≤ 4 KiB；每 Tick ≤ 64 条日志、每条 ≤ 1 KiB；组件 ≤ 16 MiB。
+- **导入白名单**：组件只能导入 `rynvek:plugin/types@1.0.0` 与 `rynvek:plugin/host@1.0.0`；任何 WASI 或其他导入在编译期即被拒绝。必须导出 `rynvek:plugin/plugin@1.0.0`，核心模块（非组件）一律拒绝。
+- **错误码映射**：燃料耗尽 `0x5004`、内存超限 `0x5005`；能力越权、陷阱（trap）、非法输出、非法组件均归入 `0x5006 PluginCapabilityDenied`。三者恢复策略相同（`IsolateFaultyExtension`），规范未细分陷阱与输出错误，故归入最接近的 `0x5006`。插件自报的 `plugin-error` 不隔离插件，原样上报其错误码。
+- **`init` 阶段禁止写日志**：清单尚未声明 `log` 能力，统一按越权处理。
+- **夹具**：`examples/plugins/probe`（Apache，独立工作区，wit-bindgen `=0.36.0`，edition 2021，以避开 edition 2024 对生成代码的 unsafe 警告）。`cargo xtask build-plugin-fixtures` 以 `--locked` 并重映射源码根、`CARGO_HOME` 与 rustc sysroot 路径，产物逐字节可复现；`--check` 只比较不写入（ci-full-gate 使用）。
+
+## E-047：`rynvek-world` 的范围与统一包容器
+
+- **范围**：规范把 `rynvek-world` 列为 Tier 3 的“World 生命周期、Partition/Halo 协调、Fork/Patch/Merge、.rworld 加载”。M8 只实现其中的 **`.rworld` 加载**，以及 `.rworld / .rpack / .rview` 共用的容器读写和 WGSL 审查（自 TS 端逐行移植）。其余职责仍由既有 crate 承担，没有在本阶段搬迁。
+- **容器**：三种包沿用 E-019 的 `.rview` 布局：魔数分别为 `RYWL / RYPK / RYVW`，schema `rynvek.<kind>.v1`。
+  - 按包类型限定条目 `kind` 与媒体类型：rpack 为 `rule_module / rule_source / plugin / genome / data`；rworld 为 `world_config / lockfile / genome / data`；
+  - rpack 与 rworld 额外允许 `Apache-2.0`、`Apache-2.0 WITH LLVM-exception`、`MIT` 许可证；
+  - JSON Schema 见 `protocols/schemas/{rpack,rworld}.schema.json`。
+- **`.rworld` 内容**：固定路径 `world.json`（schema `rynvek.world-config.v1`：`template ∈ {arena_duel, arena_pve}`、`map_seed`、可选 `players`），以及可选的 `dependencies.lock`。
+- **夹具**：`tests/packages/sample.rworld` 由 Rust 测试写出（`RYNVEK_UPDATE_FIXTURES=1` 重新生成），Python 测试读取它并核对状态根。
+
+## E-048：Hub 静态扫描与沙箱验证（路由 15）
+
+- **流程**：验签与 lockfile 校验（E-042）之后，在阻塞线程池中执行验证；失败一律返回 `0x9004`（HTTP 422），容器结构错误保持 `0x7001 / 0x7002`。
+  - `.rview`：对全部着色器做 WGSL 静态审查与 naga 校验。社区包按 TrustLevel 2 的预算审查，官方组织按 TrustLevel 1。`.rview` 不产生仿真副作用，因此不跑沙箱。
+  - `.rpack`：校验 JSON 条目、`decode_rir` 规则模块、规则源码（≤ 256 KiB，UTF-8）。然后编译每个插件，并在 `MatchConfig::pve(1, 1)` 上用 `ArenaPluginDriver` 跑 1,000 Tick 沙箱；插件被隔离即判定失败。
+  - `.rworld`：包内 `dependencies.lock` 必须与发布请求一致（否则 `0x9003`）。随后实例化世界推进 1,000 Tick，并用命令日志重放核对状态根。
+  - 音频等非容器类型：`static_scan = "not_applicable"`，TrustLevel 3（官方 1）。
+- **0x9004 的名称**：规范中 `0x9004` 名为 `UnsafeRviewShaderRejected`，是 Package/Hub 段唯一的“验证被拒”错误码。`.rpack / .rworld` 扫描失败复用此码，不新增规范外错误码。
+- **信任等级**：通过验证后社区包为 TL2、官方为 TL1（E-042 中的“其他 3”因此变为“通过验证的社区包为 2”）。首次发布写入；同一版本再次发布只在信任等级提升时更新。发布响应增加 `trust_level` 与 `verification{signature, lockfile, static_scan, sandbox, findings}`。
+- **OAuth**：规范没有要求第三方 OAuth，鉴权保持既有的 Ed25519 挑战登录 + CapabilityToken，未授权返回 `0x8001`。
+
+## E-049：Lab 批量执行与 Parquet（路由 17–18）
+
+- **实验规格**：在规范请求体 `{name, seeds, ticks}` 之外，增加可选的 `sample_every`（缺省 `min(30, ticks)`）与 `variants[]`（`{label, mode: pve|duel, players?, policy: idle|economy}`）。缺省为单个基线变体（单人 PvE + 经济策略）。run 数 = 变体数 × 种子数，≤ 256；Tick ≤ 108,000。
+- **执行**：提交后登记为 `queued`。后台执行器受 `--lab-max-concurrent`（缺省 2）信号量限制，转为 `running` 后在阻塞线程池中执行 `run_experiment`：run 级多线程并行，结果按 run 编号确定性合并。三张表编码为 Parquet 写入 CAS 后转为 `completed`，异常转为 `failed`。
+- **三张表**（列结构冻结在 `rynvek_rts::lab::arrow_io`，Python、`@rynvek/lab` 与服务端共用）：
+  - `runs`：每个 run 一行的汇总，含最终状态根；
+  - `metrics`：每个采样 Tick × 玩家阵营一行，含状态根；
+  - `lineage`：基因组 slug 首次出现记录。规范的 Genome 没有父代链接，谱系以“首次出现 Tick + 代数”表达。
+  Parquet 使用固定写入属性（ZSTD、单行组、`created_by = rynvek-lab`），同一规格产出逐字节相同的文件。
+- **路由 18**：增加查询参数 `?table=runs|metrics|lineage`（缺省 `metrics`，即规范的“谱系与统计指标”文件），非法值返回 400 / `0x5001`。产出前返回 `0x2002`，消息带状态与进度；就绪后带 `ETag`（BLAKE3）与 `x-rynvek-experiment-status`。
+
+## E-050：`.rworld` 上传与文件系统 CAS
+
+- **上传**：`POST /api/v1/worlds` 新增 `Content-Type: application/vnd.rynvek.rworld`（也接受 `application/octet-stream`）。请求体为包字节，元数据放在查询串 `?title=&org_id=&visibility=`（`title` 缺省取清单 `name`）。服务端校验包后把它写入 CAS，并在创世清单中记录 `rworld` 标识。其他内容类型返回 `0x7001`。
+- **对象存储**：规范没有指定对象存储服务。新增 `FsBlobStore`（`--blob-dir` / `RYNVEK_BLOB_DIR`），布局为 `<root>/<hex2>/<hex>`；写入走临时文件 → fsync → 原子 rename；读取时校验 BLAKE3（损坏或缺失为 `0x7002`，写失败为 `0x7003`）。S3 兼容后端可以实现同一 `BlobStore` trait 接入，本阶段不引入云 SDK。
+
+## E-051：Python `rynvek` 包
+
+- **布局**：规范给出 `python/pyproject.toml` 与 `python/rynvek/`。PyO3 原生扩展需要一个 Cargo crate，放在 `python/native`（crate 名 `rynvek-python`，模块 `rynvek._native`），作为工作区成员（Tier 4 绑定层，只依赖 rts / world / core）。
+- **许可证**：GAP-15 规定 Python `rynvek` 为 `Apache-2.0 WITH LLVM-exception`。纯 Python 层（`python/rynvek/*.py`、测试、`pyproject.toml`）遵守这一规定。原生扩展链接 AGPL 引擎代码，因此 `python/native` 为 `AGPL-3.0-only`，wheel 元数据声明 `Apache-2.0 WITH LLVM-exception AND AGPL-3.0-only`。license-gate 按此分区检查。
+- **构建**：PyO3 0.23（`abi3-py312`，单一 wheel 覆盖 Python ≥ 3.12），arrow 54（只启用 `ffi` 特性，自行经 `_import_from_c` 移交；不启用 `pyarrow` 特性，以免 pyo3 经特性合并进入其他 crate 的测试二进制而要求链接 libpython），Maturin 1.16。依赖由 `python/uv.lock` 精确锁定：pyarrow 26.0.1、numpy 2.5.4、gymnasium 1.4.0、pettingzoo 1.27.0、pytest 9.2.0。
+  - `cargo xtask python-env` 用 `uv sync --frozen` 安装到 `python/.venv`（锁文件哈希未变时跳过），再以 `opt-dev` 配置 `maturin develop`；
+  - `opt-dev` 继承 release，但关闭 LTO、启用增量编译。仿真速度约为 debug 的 16 倍，增量重建只需数秒。
+- **零拷贝**：观测（`ArenaSim.features` → `pyarrow.Int64Array`、`units` → `RecordBatch`）与实验表（`Experiment.table`）经 Arrow C Data Interface 移交。缓冲区由 Rust 分配、由 pyarrow 接管释放回调，测试以 `pa.total_allocated_bytes()` 不变加以证明。numpy 视图再用 `to_numpy(zero_copy_only=True)` 共享同一缓冲区。
+- **环境**：
+  - `RynvekArenaEnv`（Gymnasium，注册 `rynvek/ArenaDuel-v0`、`rynvek/ArenaPvE-v0`）：动作为 `Discrete(9)` 宏动作，观测为 24 维 int64 定点特征（遵守迷雾），每步 30 Tick。奖励为得分增量 / 1000，终局胜 +10、负 −10。
+  - `RynvekParallelEnv`（PettingZoo）：同一步内各阵营动作按阵营编号升序结算（Canonical Ordering）。`state()` 为 32 字节状态根。
+  两者都通过官方 `check_env` / `parallel_api_test`。
+- **`pytest` 入口**：验收命令直接调用 `pytest`，但本机没有全局 pytest，按要求也不能污染全局 Python。`cargo xtask install-pytest-shim` 在用户目录 `~/.local/bin` 写入一个 POSIX sh 转发入口：在 Rynvek 工作树内执行 `cargo xtask pytest "$@"`，即用 `python/.venv` 运行并先增量重建扩展。该入口不安装任何 Python 包，可以随时删除。`/usr/local/bin` 不可写，因此缺省使用 `~/.local/bin`。
+
+## E-052：`@rynvek/lab`
+
+- **许可证**：GAP-15 的 Apache 例外只列出 protocol / rules / agent-sdk / Python `rynvek`，`@rynvek/lab` 属于应用层，因此为 `AGPL-3.0-only`。
+- **内容**：
+  - 与 Rust 逐条一致的规格校验与 run 展开（测试直接解析 Rust 源码，比对常量与三张表的列名）；
+  - 流式构建器、全因子 `sweep` 与单因子 `ablation`；
+  - 路由 17–18 客户端：本地校验后提交；轮询直到 Parquet 就绪；状态为 `failed` 或实验不存在时立即停止；支持超时与 `AbortSignal`；校验 `PAR1` 魔数；
+  - 谱系与指标分析：按 run 汇总谱系、累计多样性曲线、变体胜率、得分序列。
+- **不内置 Parquet 解码器**：解码交给调用方选择的 Arrow 实现，以免引入大体积依赖。行类型同时接受 `number` 与 `bigint`（Arrow JS 对 64 位整数产出 `bigint`）。种子要求为非负安全整数（≤ 2^53 − 1）。
+- **类型环境**：tsconfig 增加 `DOM` lib，以使用 `fetch / Response / AbortSignal`；包可在浏览器 `/lab` 与 Node 22 中运行。
+
+## E-053：浸泡测试（Soak Test）与 `ci-full-gate`
+
+- **命令**：`cargo xtask soak --duration <时长> [--report <路径>]`，时长写法为 `90s` / `15m` / `24h`。执行体 `rynvek-soak`（`crates/xtask/src/bin/rynvek-soak.rs`）以 `opt-dev` 配置构建。报告写入 `target/soak/soak-report.json`，包含计数器、资源判定与全部资源样本。
+  - **完整 24 小时：`cargo xtask soak --duration 24h`**（报告见 `target/soak/soak-report.json`）。
+- **负载与不变量**（每个循环）：
+  1. 竞技场对局：双人 / 单人 PvE / 双人 PvE 轮换；奇数循环由探针 WASM 插件控制阵营 0，其余为经济策略；每局 1,800 Tick 并录制命令。每 150 Tick 的实时状态根检查点必须与按命令日志重放的检查点逐一相等，最终状态根也必须相等（D0 确定性）。
+  2. 同种子重跑：种子空间 0..12 循环，后续循环的最终状态根必须与首次运行逐位相同（跨时间无漂移）。
+  3. 每 4 个循环跑一次故障插件：`spin / bomb / sneaky-command` 必须分别以 `0x5004 / 0x5005 / 0x5006` 隔离，世界继续推进。
+  4. 每 6 个循环跑一次 Lab 小实验（2 变体 × 2 种子 × 300 Tick），三张表的 Parquet 必须与首个循环逐字节相同；同时跑一次 `.rpack` Hub 验证（静态扫描 + 1,000 Tick 沙箱），报告必须与首个循环相同。
+  5. `.rworld` 打包 → 解析 → 实例化，状态根必须等于模板世界；文件系统 CAS 写读一致；篡改文件后读取必须报 `0x7002`。
+  6. 进程内 HTTP 服务端：健康检查、Hub 检索、源码要约各 10 次，必须全部返回 200。
+- **资源不变量**：前 20% 时长为预热，之后每个循环采样 RSS（`/proc/self/statm`）、文件描述符数与线程数。
+  - RSS 判定为“单调增长”的条件：最小二乘斜率外推的增长 > 48 MiB，**且**末三分之一的最低值高于前三分之一的最高值；
+  - fd 不得超过预热后基线 + 8，线程不得超过基线 + 4；
+  - 预热后样本少于 6 个视为失败。
+  任一不变量失败、panic 或崩溃都以非零退出码结束。
+- **本次实际运行**（墙钟均未达 24 小时）：
+  - 正式验收中 `ci-full-gate` 的短浸泡：120.96 秒，69 个循环，248,400 Tick；897 个状态根检查点，69 次重放核对，57 次同种子重跑，54 次故障插件隔离，12 次 Lab，12 次 Hub 验证，69 次 CAS 往返，2,070 次 HTTP 请求。RSS 外推增长 −1.4 MiB，fd 恒为 12，线程恒为 3。结果 `passed: true`。
+  - 额外独立浸泡 `cargo xtask soak --duration 30m`：1,801.1 秒，1,013 个循环，3,646,800 Tick；13,169 个检查点，1,013 次重放，1,001 次同种子重跑，762 次故障隔离，910,800 次插件 Tick，169 次 Lab 与 169 次 Hub 验证，30,390 次 HTTP 请求。RSS 在 38.9–55.3 MiB 之间波动，斜率 −78 B/s，fd 与线程数不变。结果 `passed: true`。
+  - 两次运行覆盖的不变量相同，都是上面列出的全部条目。完整 24 小时运行需要另行执行 `cargo xtask soak --duration 24h`（约 24 小时，报告见 `target/soak/soak-report.json`）。
+- **`ci-full-gate`**（`cargo xtask ci-full-gate`）依次执行：
+  1. `cargo fmt --all --check`；
+  2. `cargo clippy --workspace --all-targets -- -D warnings`；
+  3. `cargo test --workspace`；
+  4. 跨语言黄金向量；
+  5. `build-plugin-fixtures --check`；
+  6. `license-gate`：禁用旧称（`docs/` 历史文档与一个断言“旧称不存在”的守卫测试豁免）、SPDX 文件头或 REUSE 覆盖、双层许可证分区、`cargo deny --offline check licenses bans`、`rynvek sbom` 为非空 SPDX 2.3；
+  7. `pnpm install --frozen-lockfile --offline`，然后 `pnpm -r typecheck / test / build`；
+  8. `cargo xtask pytest`；
+  9. 短浸泡：与 24 小时浸泡同一执行体、同一不变量，缺省 120 秒，可用 `RYNVEK_SOAK_DURATION` 或 `--soak-duration` 覆盖。
+  `--skip <步骤>` 只用于本地排障。
+- **`deny.toml`**：工作区内部 crate 均为 `publish = false` 的路径依赖，开启 `allow-wildcard-paths`，以消除 cargo-deny 的通配版本误报。
