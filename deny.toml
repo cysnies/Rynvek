@@ -26,3 +26,5 @@ confidence-threshold = 0.95
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# 工作区内部 crate 均 `publish = false`，以路径依赖互相引用（不视为通配版本）
+allow-wildcard-paths = true
