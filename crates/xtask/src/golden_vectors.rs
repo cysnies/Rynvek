@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 跨语言确定性 Golden Test Vectors 校验器（规范 12 §12.3）。
+//! 跨语言确定性 Golden Test Vectors 校验器（规范 12 §12.3 & Audit v1.1 §5.3）。
 //!
 //! 逐条读取基线文件中的向量，用 `rynvek-core` 的权威实现重新计算，并与期望值逐位比对。
 //! 任何一比特不匹配都视为实现缺陷。64 位整数在 JSON 中以十进制字符串存储，以避免 JS 双精度截断。
@@ -10,6 +10,7 @@ use std::fmt;
 use std::path::Path;
 
 use rynvek_core::coord::WorldPosition2D;
+use rynvek_core::error::RynvekErrorCode;
 use rynvek_core::fixed::{Q8_8, Q32_32};
 use rynvek_core::rng::philox4x32_10;
 use rynvek_neural::{
@@ -126,6 +127,7 @@ fn verify_vector(vector: &RawVector) -> Result<(), String> {
         "GV-002-WORLD_POS_CANONICALIZE" => run_typed(vector, verify_world_pos_canonicalize),
         "GV-003-PHILOX4X32_10_ORIGIN" => run_typed(vector, verify_philox),
         "GV-004-Q8_8_LIF_STEP" => run_typed(vector, verify_lif_step),
+        "GV-005-Q32_32_BOUNDARY_AND_OVERFLOW" => run_typed(vector, verify_q32_boundary),
         unknown => Err(format!("未知的向量 ID：{unknown}（校验器必须覆盖基线中的每一条向量）")),
     }
 }
@@ -184,7 +186,6 @@ fn verify_q32_arithmetic(inputs: Q32Inputs, expected: Q32Expected) -> Result<(),
         a.mul(b).0,
         parse_i64("mul_raw_i64", &expected.mul_raw_i64)?,
     )?;
-    // 除数非零，fallback 不会被使用；取 ZERO 便于在失败时识别
     expect_eq(
         "div_raw_i64",
         a.div_safe(b, Q32_32::ZERO).0,
@@ -273,10 +274,6 @@ struct LifExpected {
 }
 
 /// 单个 LIF 神经元单步积分：直接调用 `rynvek-neural` 的权威实现。
-///
-/// - `theta_eff` / `v_candidate` 取自与内核逐位一致的公开辅助函数；
-/// - 发放、复位与不应期取自真实运行一次 `step_lif_brain_deterministic`（1 个隐藏神经元，
-///   通道 0 输入 `syn_in` × 权重 1.0，使突触电流恰为 `syn_in`）。
 fn lif_reference_step(inputs: &LifInputs) -> Result<LifExpected, String> {
     if inputs.leak_beta_q8 != LIF_LEAK_BETA_Q8 {
         return Err(format!(
@@ -323,6 +320,86 @@ fn verify_lif_step(inputs: LifInputs, expected: LifExpected) -> Result<(), Strin
     expect_eq("lif_step", lif_reference_step(&inputs)?, expected)
 }
 
+// ---------------------------------------------------------------------------
+// GV-005：Q32_32 边界移位、受检溢出与饱和钳制
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct Q32BoundaryInputs {
+    large_milli_pos: String,
+    large_milli_neg: String,
+    overflow_milli: String,
+    big_factor_raw: String,
+    tiny_divisor_raw: String,
+}
+
+#[derive(Deserialize)]
+struct Q32BoundaryExpected {
+    from_milli_pos_raw: String,
+    from_milli_neg_raw: String,
+    checked_milli_overflow: bool,
+    saturating_milli_raw: String,
+    checked_mul_overflow: bool,
+    saturating_mul_pos_raw: String,
+    saturating_mul_neg_raw: String,
+    checked_div_overflow: bool,
+    saturating_div_raw: String,
+}
+
+fn verify_q32_boundary(inputs: Q32BoundaryInputs, expected: Q32BoundaryExpected) -> Result<(), String> {
+    let m_pos = parse_i64("large_milli_pos", &inputs.large_milli_pos)?;
+    let m_neg = parse_i64("large_milli_neg", &inputs.large_milli_neg)?;
+    let m_ovf = parse_i64("overflow_milli", &inputs.overflow_milli)?;
+    let big = Q32_32(parse_i64("big_factor_raw", &inputs.big_factor_raw)?);
+    let tiny = Q32_32(parse_i64("tiny_divisor_raw", &inputs.tiny_divisor_raw)?);
+
+    expect_eq(
+        "from_milli_pos_raw",
+        Q32_32::from_milli(m_pos).0,
+        parse_i64("from_milli_pos_raw", &expected.from_milli_pos_raw)?,
+    )?;
+    expect_eq(
+        "from_milli_neg_raw",
+        Q32_32::from_milli(m_neg).0,
+        parse_i64("from_milli_neg_raw", &expected.from_milli_neg_raw)?,
+    )?;
+    expect_eq(
+        "checked_milli_overflow",
+        Q32_32::checked_from_milli(m_ovf) == Err(RynvekErrorCode::FixedPointOverflow),
+        expected.checked_milli_overflow,
+    )?;
+    expect_eq(
+        "saturating_milli_raw",
+        Q32_32::saturating_from_milli(m_ovf).0,
+        parse_i64("saturating_milli_raw", &expected.saturating_milli_raw)?,
+    )?;
+    expect_eq(
+        "checked_mul_overflow",
+        big.checked_mul(big) == Err(RynvekErrorCode::FixedPointOverflow),
+        expected.checked_mul_overflow,
+    )?;
+    expect_eq(
+        "saturating_mul_pos_raw",
+        big.saturating_mul(big).0,
+        parse_i64("saturating_mul_pos_raw", &expected.saturating_mul_pos_raw)?,
+    )?;
+    expect_eq(
+        "saturating_mul_neg_raw",
+        big.saturating_mul(Q32_32(-big.0)).0,
+        parse_i64("saturating_mul_neg_raw", &expected.saturating_mul_neg_raw)?,
+    )?;
+    expect_eq(
+        "checked_div_overflow",
+        big.checked_div(tiny) == Err(RynvekErrorCode::FixedPointOverflow),
+        expected.checked_div_overflow,
+    )?;
+    expect_eq(
+        "saturating_div_raw",
+        big.saturating_div(tiny, Q32_32::ZERO).0,
+        parse_i64("saturating_div_raw", &expected.saturating_div_raw)?,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,7 +414,7 @@ mod tests {
     #[test]
     fn baseline_passes() {
         let report = verify_str(&baseline_text()).unwrap();
-        assert_eq!(report.outcomes.len(), 4);
+        assert_eq!(report.outcomes.len(), 5);
         for outcome in &report.outcomes {
             assert_eq!(outcome.result, Ok(()), "{}", outcome.id);
         }

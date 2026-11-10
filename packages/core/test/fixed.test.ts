@@ -14,17 +14,27 @@ describe("Q32_32", () => {
     expect(Q32_32.DT_30HZ.raw).toBe((1n << 32n) / 30n);
   });
 
-  it("fromMilli 与 toIntFloor", () => {
+  it("fromMilli 与 toIntFloor（含大数防移位溢出验证）", () => {
     expect(Q32_32.fromMilli(1000n).equals(Q32_32.ONE)).toBe(true);
     expect(Q32_32.fromMilli(-1500n).toIntFloor()).toBe(-2);
     expect(Q32_32.fromMilli(2999n).toIntFloor()).toBe(2);
+    expect(Q32_32.fromMilli(2_147_483_648n).raw).toBe(9_223_372_036_854_775n);
+    expect(Q32_32.fromMilli(-2_147_483_648n).raw).toBe(-9_223_372_036_854_775n);
+    expect(Q32_32.checkedFromMilli(3_000_000_000_000n)).toBeNull();
+    expect(Q32_32.saturatingFromMilli(3_000_000_000_000n).equals(Q32_32.MAX)).toBe(true);
   });
 
-  it("乘法、除法与零除回退", () => {
+  it("乘法、除法、受检溢出与零除回退", () => {
     expect(q(10_737_418_240n).mul(q(6_442_450_944n)).raw).toBe(16_106_127_360n);
     expect(q(10_737_418_240n).divSafe(q(6_442_450_944n), Q32_32.ZERO).raw).toBe(7_158_278_826n);
     expect(Q32_32.ONE.divSafe(Q32_32.ZERO, Q32_32.NEG_ONE)).toBe(Q32_32.NEG_ONE);
     expect(Q32_32.NEG_ONE.mul(q(10_737_418_240n)).raw).toBe(-10_737_418_240n);
+
+    const big = Q32_32.fromInt(65_536);
+    expect(big.checkedMul(big)).toBeNull();
+    expect(big.saturatingMul(big).equals(Q32_32.MAX)).toBe(true);
+    expect(big.checkedDiv(q(1n))).toBeNull();
+    expect(big.saturatingDiv(q(1n), Q32_32.ZERO).equals(Q32_32.MAX)).toBe(true);
   });
 
   it("平方根为真实平方根的下取整", () => {
@@ -41,7 +51,9 @@ describe("Q32_32", () => {
   it("饱和加减与范围校验", () => {
     const max = q((1n << 63n) - 1n);
     expect(max.saturatingAdd(Q32_32.ONE).equals(max)).toBe(true);
+    expect(max.checkedAdd(Q32_32.ONE)).toBeNull();
     expect(q(-(1n << 63n)).saturatingSub(Q32_32.ONE).raw).toBe(-(1n << 63n));
+    expect(q(-(1n << 63n)).checkedSub(Q32_32.ONE)).toBeNull();
     expect(() => Q32_32.fromRaw(1n << 63n)).toThrow(RangeError);
     expect(() => Q32_32.fromInt(2 ** 31)).toThrow(RangeError);
   });

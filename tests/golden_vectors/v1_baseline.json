@@ -58,6 +58,28 @@
         "v_after_reset_q8": 0,
         "refractory_ticks_set": 2
       }
+    },
+    {
+      "id": "GV-005-Q32_32_BOUNDARY_AND_OVERFLOW",
+      "description": "Q32_32 大数 from_milli 防移位溢出、受检乘除溢出检测与饱和钳制边界验证",
+      "inputs": {
+        "large_milli_pos": "2147483648",
+        "large_milli_neg": "-2147483648",
+        "overflow_milli": "3000000000000",
+        "big_factor_raw": "281474976710656",
+        "tiny_divisor_raw": "1"
+      },
+      "expected": {
+        "from_milli_pos_raw": "9223372036854775",
+        "from_milli_neg_raw": "-9223372036854775",
+        "checked_milli_overflow": true,
+        "saturating_milli_raw": "9223372036854775807",
+        "checked_mul_overflow": true,
+        "saturating_mul_pos_raw": "9223372036854775807",
+        "saturating_mul_neg_raw": "-9223372036854775808",
+        "checked_div_overflow": true,
+        "saturating_div_raw": "9223372036854775807"
+      }
     }
   ]
 }

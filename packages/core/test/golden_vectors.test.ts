@@ -69,4 +69,23 @@ describe(`Golden Vectors · ${suite.suite}`, () => {
     const out = philox4x32_10(inputs["ctr_u32x4"] as U32x4, inputs["key_u32x2"] as U32x2);
     expect(out).toEqual(expected["out_u32x4"]);
   });
+
+  it("GV-005-Q32_32_BOUNDARY_AND_OVERFLOW", () => {
+    const { inputs, expected } = vector("GV-005-Q32_32_BOUNDARY_AND_OVERFLOW");
+    const mPos = rawField(inputs, "large_milli_pos");
+    const mNeg = rawField(inputs, "large_milli_neg");
+    const mOvf = rawField(inputs, "overflow_milli");
+    const big = Q32_32.fromRaw(rawField(inputs, "big_factor_raw"));
+    const tiny = Q32_32.fromRaw(rawField(inputs, "tiny_divisor_raw"));
+
+    expect(Q32_32.fromMilli(mPos).raw).toBe(rawField(expected, "from_milli_pos_raw"));
+    expect(Q32_32.fromMilli(mNeg).raw).toBe(rawField(expected, "from_milli_neg_raw"));
+    expect(Q32_32.checkedFromMilli(mOvf) === null).toBe(expected["checked_milli_overflow"]);
+    expect(Q32_32.saturatingFromMilli(mOvf).raw).toBe(rawField(expected, "saturating_milli_raw"));
+    expect(big.checkedMul(big) === null).toBe(expected["checked_mul_overflow"]);
+    expect(big.saturatingMul(big).raw).toBe(rawField(expected, "saturating_mul_pos_raw"));
+    expect(big.saturatingMul(Q32_32.fromRaw(-big.raw)).raw).toBe(rawField(expected, "saturating_mul_neg_raw"));
+    expect(big.checkedDiv(tiny) === null).toBe(expected["checked_div_overflow"]);
+    expect(big.saturatingDiv(tiny, Q32_32.ZERO).raw).toBe(rawField(expected, "saturating_div_raw"));
+  });
 });
