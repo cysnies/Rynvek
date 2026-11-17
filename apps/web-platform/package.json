@@ -30,12 +30,19 @@
     "@rynvek/studio": "workspace:*",
     "@rynvek/ui": "workspace:*",
     "@rynvek/client": "workspace:*",
-    "@rynvek/engine": "workspace:*"
+    "@rynvek/engine": "workspace:*",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "typescript": "~5.8.3",
     "vitest": "^3.2.4",
-    "vite": "^7.3.8"
+    "vite": "^7.3.8",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/dom": "10.4.2",
+    "jsdom": "26.1.0"
   }
 }
