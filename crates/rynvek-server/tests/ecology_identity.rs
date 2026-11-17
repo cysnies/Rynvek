@@ -18,6 +18,7 @@ async fn seed_current(s: &RunningServer, u: &User) -> (WorldRow, MatchConfig) {
     expected.ecology = Some(ForagerEcologyContract {
         basal_cost_micro_per_tick: 1000,
         reserve_ticks: 4,
+        birth_energy_milli: 1000,
     });
     let world = ArenaWorld::new(expected.clone());
     let id = rynvek_server::ids::new_uuid_v7();
@@ -203,12 +204,13 @@ async fn current_wal_rejects_other_contracts_and_replays_committed_suffix() {
     let old = restored(&s, &source).await;
     let (candidate, record) = next_record(&old);
     assert_eq!(record.replay(&old).unwrap().state_root(), candidate.state_root());
-    for variant in 0..3 {
+    for variant in 0..4 {
         let mut wrong = config.clone();
         match variant {
             0 => wrong.ecology = None,
             1 => wrong.ecology.as_mut().unwrap().basal_cost_micro_per_tick += 1,
-            _ => wrong.ecology.as_mut().unwrap().reserve_ticks += 1,
+            2 => wrong.ecology.as_mut().unwrap().reserve_ticks += 1,
+            _ => wrong.ecology.as_mut().unwrap().birth_energy_milli += 1,
         }
         let other = ArenaRuntime::new(source.world_id.0, ArenaWorld::new(wrong));
         assert!(record.replay(&other).is_err(), "空输入也不能跨契约混入WAL");

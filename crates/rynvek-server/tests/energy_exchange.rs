@@ -30,6 +30,7 @@ async fn automatic_local_uptake_uses_real_actor_permissions_private_state_and_wa
         ForagerEcologyContract {
             basal_cost_micro_per_tick: 1000,
             reserve_ticks: 4,
+            birth_energy_milli: 1000,
         },
         false,
     )
@@ -43,6 +44,7 @@ async fn explicit_basal_survival_contract_really_kills_fed_foragers_in_actor_and
         ForagerEcologyContract {
             basal_cost_micro_per_tick: 2_000_000,
             reserve_ticks: 4,
+            birth_energy_milli: 1000,
         },
         true,
     )
@@ -246,6 +248,88 @@ async fn run_energy_contract(params: ForagerEcologyContract, expect_death: bool)
             .matches_played,
         0
     );
+    if !expect_death {
+        // 同一真实认证Actor继续建槽、生产、付款出生和WAL恢复；不直接插入单位或身体账户。
+        let origin = (0..original.map.height)
+            .flat_map(|y| (0..original.map.width).map(move |x| (x, y)))
+            .find(|&p| {
+                original
+                    .validate_placement(rynvek_rts::FactionId(0), rynvek_rts::BuildingKind::SpawningVat, p)
+                    .is_ok()
+            })
+            .unwrap();
+        let mut vat = None;
+        for phase in 0..2 {
+            let command = if phase == 0 {
+                rynvek_rts::commands::RtsCommand::PlaceBuilding {
+                    kind: rynvek_rts::BuildingKind::SpawningVat,
+                    origin,
+                }
+            } else {
+                rynvek_rts::commands::RtsCommand::QueueUnit {
+                    vat: vat.unwrap(),
+                    unit: rynvek_rts::UnitKind::Forager,
+                    genome_slug: "seed.forager.v1".into(),
+                    count: 1,
+                }
+            };
+            let old_ids: Vec<_> = original.units.keys().copied().collect();
+            let mut next = original.candidate_tick().unwrap();
+            let expected = next.apply_command(rynvek_rts::FactionId(0), &command).unwrap();
+            if let rynvek_rts::commands::CommandAck::BuildingPlaced { id } = expected {
+                vat = Some(id);
+            }
+            next.finish_tick().unwrap();
+            let (ack, advanced) = tokio::join!(
+                socket.command(
+                    original.tick,
+                    json!({"type":"command","seq":3+phase,"fencing_token":token,"command":command})
+                ),
+                async {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        host.wait_for(|s| s.pending_inputs == 1),
+                    )
+                    .await
+                    .unwrap();
+                    host.advance(1).await
+                }
+            );
+            assert_eq!(ack["type"], "ack", "{ack}");
+            advanced.unwrap();
+            original = next;
+            let ticks = if phase == 0 {
+                rynvek_rts::buildings::building_spec(rynvek_rts::BuildingKind::SpawningVat).build_ticks
+            } else {
+                rynvek_rts::units::unit_spec(rynvek_rts::UnitKind::Forager).hatch_ticks - 1
+            };
+            for n in (0..ticks).step_by(20).map(|i| (ticks - i).min(20)) {
+                for _ in 0..n {
+                    original.step().unwrap();
+                }
+                host.advance(n).await.unwrap();
+                let replayed = restored(&server, world_id).await;
+                assert_eq!(replayed.state_root(), original.state_root());
+                assert_eq!(replayed.ecology, original.ecology);
+                assert_eq!(host.status().state_root, original.state_root());
+            }
+            if phase == 1 {
+                let born = *original
+                    .units
+                    .keys()
+                    .find(|id| !old_ids.contains(id))
+                    .expect("真实Actor孵化必须出生");
+                let a = &original.ecology.as_ref().unwrap().bodies[&born].account;
+                assert!(
+                    a.received_q >= u64::from(params.birth_energy_milli) * 4000,
+                    "真实Actor不能在空身体池上冒充已付款出生"
+                );
+                assert!(a.is_conserved());
+                assert_eq!(a.unfunded_q, 0);
+                assert_eq!(original.units[&born].order.kind, rynvek_rts::OrderKind::HoldPosition);
+            }
+        }
+    }
     server.shutdown().await;
 }
 
@@ -257,6 +341,7 @@ fn automatic_first_feeding_survives_serialized_tick_wal() {
     cfg.ecology = Some(ForagerEcologyContract {
         basal_cost_micro_per_tick: 1000,
         reserve_ticks: 4,
+        birth_energy_milli: 1000,
     });
     let mut world = ArenaWorld::with_map(
         cfg,
@@ -316,7 +401,7 @@ async fn survival_contract_cannot_sneak_into_legacy_or_invalid_worlds() {
     let base = server.base_url();
     let owner = register(&base, "survival-validation", "human", 105).await;
     let url = format!("{base}/api/v1/worlds");
-    let params = json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4});
+    let params = json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000});
     for ecology in [serde_json::Value::Null, json!("energy_exchange_v1")] {
         let res = client::send_json(
             "POST",
@@ -329,9 +414,11 @@ async fn survival_contract_cannot_sneak_into_legacy_or_invalid_worlds() {
         assert_eq!(res.status, 400);
     }
     for bad in [
-        json!({"reserve_ticks":4}),
-        json!({"basal_cost_micro_per_tick":0,"reserve_ticks":4}),
-        json!({"basal_cost_micro_per_tick":u32::MAX,"reserve_ticks":u32::MAX}),
+        json!({"reserve_ticks":4,"birth_energy_milli":1000}),
+        json!({"basal_cost_micro_per_tick":0,"reserve_ticks":4,"birth_energy_milli":1000}),
+        json!({"basal_cost_micro_per_tick":u32::MAX,"reserve_ticks":u32::MAX,"birth_energy_milli":1000}),
+        json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4}),
+        json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":0}),
     ] {
         let res = client::send_json(
             "POST",
