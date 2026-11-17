@@ -78,8 +78,9 @@ const local = (code: number, name: string, message: string) => new ArenaError({ 
 
 export class ArenaClient {
   private seq = 0;
+  private disposed = false;
   private readonly pending = new Map<number, Pending>();
-  private readonly observationWaiters: ((o: FactionObservation) => void)[] = [];
+  private readonly observationWaiters: {resolve(o: FactionObservation):void;reject(error:ArenaError):void}[] = [];
   private readonly listeners = new Set<(e: ArenaClientEvent) => void>();
   private welcomeWaiter: { resolve(w: WelcomeInfo): void; reject(e: ArenaError): void } | null = null;
   private readonly unsubscribe: () => void;
@@ -114,15 +115,21 @@ export class ArenaClient {
   }
 
   private send(message: ArenaClientMessage): void {
+    if(this.disposed)throw this.closedError();
     this.transport.send(message);
   }
 
+  private closedError():ArenaError{return local(0x8001,"UnauthorizedCapabilityToken","客户端身份/传输已销毁；没有确认服务器成功");}
+
   private request<T>(build: (seq: number) => ArenaClientMessage): Promise<T> {
+    if(this.disposed)return Promise.reject(this.closedError());
     const seq = ++this.seq;
     const p = new Promise<T>((resolve, reject) => {
       this.pending.set(seq, { resolve: resolve as (v: unknown) => void, reject });
     });
-    this.send(build(seq));
+    try{this.send(build(seq));}catch(error){
+      this.pending.get(seq)?.reject(error instanceof ArenaError?error:local(0x8001,"UnauthorizedCapabilityToken",String(error)));this.pending.delete(seq);
+    }
     return p;
   }
 
@@ -136,6 +143,7 @@ export class ArenaClient {
   }
 
   private receive(m: ArenaServerMessage): void {
+    if(this.disposed)return;
     switch (m.type) {
       case "welcome": {
         const info: WelcomeInfo = { faction: m.faction, mode: m.mode, tick: m.tick, map: m.map, tools: m.tools };
@@ -166,7 +174,7 @@ export class ArenaClient {
         this.observation = m.observation;
         this.events.push(...m.events);
         const waiters = this.observationWaiters.splice(0);
-        for (const w of waiters) w(m.observation);
+        for (const w of waiters) w.resolve(m.observation);
         this.emit({ type: "observation", observation: m.observation, events: m.events });
         break;
       }
@@ -184,16 +192,18 @@ export class ArenaClient {
 
   /** 入座并等待 `welcome` */
   connect(): Promise<WelcomeInfo> {
+    if(this.disposed)return Promise.reject(this.closedError());
+    if(this.welcomeWaiter)return Promise.reject(local(0x2005,"StructuralMutationConflict","同一客户端握手尚未完成"));
     const p = new Promise<WelcomeInfo>((resolve, reject) => {
       this.welcomeWaiter = { resolve, reject };
     });
-    this.send({
+    try{this.send({
       type: "hello",
       protocol: ARENA_PROTOCOL,
       principal_id: this.identity.principalId,
       kind: this.identity.kind,
       faction: this.identity.faction,
-    });
+    });}catch(error){this.welcomeWaiter?.reject(error instanceof ArenaError?error:local(0x8001,"UnauthorizedCapabilityToken",String(error)));this.welcomeWaiter=null;}
     return p;
   }
 
@@ -237,17 +247,24 @@ export class ArenaClient {
 
   /** 等待下一份观测（不发送任何消息） */
   nextObservation(): Promise<FactionObservation> {
-    return new Promise((resolve) => this.observationWaiters.push(resolve));
+    if(this.disposed)return Promise.reject(this.closedError());
+    return new Promise((resolve,reject) => this.observationWaiters.push({resolve,reject}));
   }
 
   /** 推进 `ticks` 并等待观测（本地练习 / PvE / 测试） */
   advance(ticks: number): Promise<FactionObservation> {
     const p = this.nextObservation();
-    this.send({ type: "advance", ticks });
+    try{this.send({ type: "advance", ticks });}catch(error){this.observationWaiters.pop()?.reject(error instanceof ArenaError?error:local(0x8001,"UnauthorizedCapabilityToken",String(error)));}
     return p;
   }
 
+  /** 销毁是身份边界：关闭传输、拒绝等待者并清空阵营私有缓存，迟到帧不得重新附回。 */
   dispose(): void {
-    this.unsubscribe();
+    if(this.disposed)return;this.disposed=true;this.unsubscribe();
+    const error=this.closedError();this.welcomeWaiter?.reject(error);this.welcomeWaiter=null;
+    for(const pending of this.pending.values())pending.reject(error);this.pending.clear();
+    for(const waiter of this.observationWaiters.splice(0))waiter.reject(error);
+    this.listeners.clear();this.events.length=0;this.observation=null;this.terrain=null;this.lease=null;this.welcome=null;
+    this.transport.close?.();
   }
 }
