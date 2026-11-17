@@ -1,4 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 The Rynvek Contributors -->
+
+> 历史批次记录：t15u已撤销向后兼容要求。以下版本/迁移说明不再是当前接口。当前统一契约、格式拒绝边界与首摄食证据见 `RYN-1_Forager_Uptake_2026-11-17.md`；不再支持旧生态V1/V2/identity迁移入口。
+
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 
 # RYN-1：有来源角色的神经计算预算事务切片

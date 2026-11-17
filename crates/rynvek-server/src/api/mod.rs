@@ -51,10 +51,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/worlds", get(worlds::list).post(worlds::create))
         .route("/api/v1/worlds/{world_id}/commits", get(worlds::commits))
         .route("/api/v1/worlds/{world_id}/fork", post(worlds::fork))
-        .route(
-            "/api/v1/worlds/{world_id}/migrate-ecology-identity",
-            post(worlds::migrate_ecology_identity),
-        )
         .route("/api/v1/worlds/{world_id}/patches", post(worlds::patches))
         .route("/api/v1/worlds/{world_id}/stream", get(worlds::stream))
         .route("/api/v1/matches/queue", post(matches::queue))

@@ -4,9 +4,8 @@
 //! 真实HTTP权限、既有Store原子提交、历史CAS/检查点和TickRecord恢复。
 mod common;
 use common::*;
-use rynvek_core::Blake3Hash;
 use rynvek_protocol::WireUuid;
-use rynvek_rts::world::ecology::EcologyVersion;
+use rynvek_rts::world::ecology::ForagerEcologyContract;
 use rynvek_rts::{ArenaRuntime, ArenaWorld, MatchConfig};
 use rynvek_security::Visibility;
 use rynvek_server::store::{CommitRow, WorldRow};
@@ -14,36 +13,13 @@ use rynvek_server::transactions::{TickCommitter, TickRecord, restore_committed};
 use rynvek_server::{RunningServer, client};
 use serde_json::json;
 
-async fn seed_legacy(s: &RunningServer, u: &User, v2: bool, mislabel: bool) -> (WorldRow, MatchConfig) {
-    let text = if v2 {
-        include_str!("../../../tests/arena/forager-budget-v2.json")
-    } else {
-        include_str!("../../../tests/arena/energy-exchange-v1.json")
-    };
-    let f: serde_json::Value = serde_json::from_str(text).unwrap();
-    let bytes: Vec<u8> = f["snapshot_hex"]
-        .as_str()
-        .unwrap()
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|x| u8::from_str_radix(std::str::from_utf8(x).unwrap(), 16).unwrap())
-        .collect();
+async fn seed_current(s: &RunningServer, u: &User) -> (WorldRow, MatchConfig) {
     let mut expected = MatchConfig::pve(57, 1);
-    expected.ecology = Some(if v2 {
-        EcologyVersion::ForagerBudgetV2
-    } else {
-        EcologyVersion::EnergyExchangeV1
+    expected.ecology = Some(ForagerEcologyContract {
+        basal_cost_micro_per_tick: 1000,
+        reserve_ticks: 4,
     });
-    let mut world = ArenaWorld::decode_snapshot_with_config(&bytes, &expected).unwrap();
-    let original_root = world.state_hash();
-    if mislabel {
-        world.config.ecology = Some(if v2 {
-            EcologyVersion::EnergyExchangeV1
-        } else {
-            EcologyVersion::ForagerBudgetV2
-        });
-        assert_eq!(world.state_hash(), original_root, "明确复现legacy模式根碰撞");
-    }
+    let world = ArenaWorld::new(expected.clone());
     let id = rynvek_server::ids::new_uuid_v7();
     let runtime = ArenaRuntime::new(id.0, world);
     let cp = runtime.checkpoint().unwrap();
@@ -58,7 +34,7 @@ async fn seed_legacy(s: &RunningServer, u: &User, v2: bool, mislabel: bool) -> (
         world_id: id,
         org_id: u.principal_id,
         owner_principal_id: u.principal_id,
-        title: "冻结旧生态世界".into(),
+        title: "当前统一契约世界".into(),
         world_profile: "RTS_Standard".into(),
         game_mode: "PvE_Survival".into(),
         execution_profile: "D0_Strict".into(),
@@ -112,30 +88,22 @@ fn next_record(runtime: &ArenaRuntime) -> (ArenaRuntime, TickRecord) {
 }
 
 #[tokio::test]
-async fn migration_requires_permissions_and_publishes_only_atomic_auditable_private_fork() {
+async fn current_fork_preserves_permissions_atomicity_private_state_and_wal() {
     let s = start_server(false).await;
     let base = s.base_url();
     let owner = register(&base, "identity-owner", "human", 111).await;
     let other = register(&base, "identity-other", "human", 112).await;
-    let (source, config) = seed_legacy(&s, &owner, false, false).await;
+    let (source, config) = seed_current(&s, &owner).await;
     let source_cp = restored(&s, &source).await.checkpoint().unwrap();
-    let url = format!("{base}/api/v1/worlds/{}/migrate-ecology-identity", source.world_id);
-    let req =
-        json!({"base_revision":source.latest_revision,"base_root":source.latest_state_root,"expected_config":config});
+    let url = format!("{base}/api/v1/worlds/{}/fork", source.world_id);
+    let req = json!({"world_revision": source.latest_revision});
     let denied = client::send_json("POST", &url, Some(&other.token), &req).await.unwrap();
-    assert_eq!(denied.status, 404, "复用既有私有世界防探测策略，不泄漏资源存在性");
-    let mut stale = req.clone();
-    stale["base_root"][0] = json!(source.latest_state_root[0] ^ 1);
-    let rejected = client::send_json("POST", &url, Some(&owner.token), &stale)
-        .await
-        .unwrap();
-    assert_eq!(rejected.status, 409);
-    let mut wrong = req.clone();
-    wrong["expected_config"]["ecology"] = json!("forager_budget_v2");
+    assert_eq!(denied.status, 404, "私有分叉仍执行真实权限防探测");
+    let wrong = json!({"world_revision":source.latest_revision, "expected_config":config});
     let rejected = client::send_json("POST", &url, Some(&owner.token), &wrong)
         .await
         .unwrap();
-    assert_eq!(rejected.status, 409);
+    assert_eq!(rejected.status, 400, "普通分叉不接受覆盖契约或历史迁移参数");
     assert_eq!(
         s.state
             .store()
@@ -160,27 +128,11 @@ async fn migration_requires_permissions_and_publishes_only_atomic_auditable_priv
     let (_, legacy_record) = next_record(&restored(&s, &source).await);
     assert!(
         legacy_record.replay(&migrated).is_err(),
-        "旧来源日志不能混入迁移后的新根链"
+        "来源日志不能混入分叉后的新根链"
     );
-    assert!(migrated.config.ecology_identity.is_some());
     assert_eq!(migrated.config.ecology, config.ecology);
     assert_eq!(migrated.tick, source.latest_tick);
     assert_ne!(row.latest_state_root, source.latest_state_root);
-    let commit = s.state.store().list_commits(id).await.unwrap().pop().unwrap();
-    let audit: serde_json::Value = serde_json::from_slice(
-        &s.state
-            .inner
-            .world_snapshots
-            .get(&Blake3Hash(commit.journal_segment_cid))
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(audit["format"], "rynvek-ecology-identity-migration/1");
-    assert_eq!(audit["source"]["config"], serde_json::to_value(&config).unwrap());
-    assert_eq!(
-        audit["source"]["state_root"],
-        rynvek_server::ids::hex(&source.latest_state_root)
-    );
     // 新分支继续走原真实WAL提交和恢复，不能只产出一次性导出文件。
     let token = s
         .state
@@ -244,65 +196,45 @@ async fn migration_requires_permissions_and_publishes_only_atomic_auditable_priv
 }
 
 #[tokio::test]
-async fn replay_requires_legacy_context_and_rejects_cross_bound_mode() {
+async fn current_wal_rejects_other_contracts_and_replays_committed_suffix() {
     let s = start_server(false).await;
-    let base = s.base_url();
-    let u = register(&base, "identity-replay", "human", 113).await;
-    for v2 in [false, true] {
-        let (source, config) = seed_legacy(&s, &u, v2, false).await;
-        let old = restored(&s, &source).await;
-        let (candidate, record) = next_record(&old);
-        assert!(record.replay(&old).is_err());
-        assert_eq!(
-            record.replay_with_config(&old, &config).unwrap().state_root(),
-            candidate.state_root()
-        );
+    let u = register(&s.base_url(), "current-replay", "human", 113).await;
+    let (source, config) = seed_current(&s, &u).await;
+    let old = restored(&s, &source).await;
+    let (candidate, record) = next_record(&old);
+    assert_eq!(record.replay(&old).unwrap().state_root(), candidate.state_root());
+    for variant in 0..3 {
         let mut wrong = config.clone();
-        wrong.ecology = Some(if v2 {
-            EcologyVersion::EnergyExchangeV1
-        } else {
-            EcologyVersion::ForagerBudgetV2
-        });
-        assert!(record.replay_with_config(&old, &wrong).is_err());
-        let token = s
-            .state
-            .store()
-            .claim_world(source.world_id, 0, 1, "legacy-host".into())
-            .await
-            .unwrap();
-        TickCommitter {
-            store: s.state.store().clone(),
-            snapshots: s.state.inner.world_snapshots.clone(),
-            world_id: source.world_id,
-            fencing_token: token,
+        match variant {
+            0 => wrong.ecology = None,
+            1 => wrong.ecology.as_mut().unwrap().basal_cost_micro_per_tick += 1,
+            _ => wrong.ecology.as_mut().unwrap().reserve_ticks += 1,
         }
-        .persist(&candidate, &record)
+        let other = ArenaRuntime::new(source.world_id.0, ArenaWorld::new(wrong));
+        assert!(record.replay(&other).is_err(), "空输入也不能跨契约混入WAL");
+    }
+    let token = s
+        .state
+        .store()
+        .claim_world(source.world_id, 0, 1, "current-host".into())
         .await
         .unwrap();
-        let latest = s.state.store().get_world(source.world_id).await.unwrap().unwrap();
-        assert_eq!(restored(&s, &latest).await.state_root(), candidate.state_root());
-        let url = format!("{base}/api/v1/worlds/{}/migrate-ecology-identity", source.world_id);
-        let r=client::send_json("POST",&url,Some(&u.token),&json!({"base_revision":latest.latest_revision,"base_root":latest.latest_state_root,"expected_config":config})).await.unwrap();
-        assert_eq!(r.status, 409, "不得旁路活动宿主");
-        let a = ArenaRuntime::new([117; 16], ArenaWorld::new(config));
-        let b = ArenaRuntime::new([117; 16], ArenaWorld::new(wrong));
-        let (_, r) = next_record(&a);
-        assert!(r.replay(&b).is_err(), "新记录跨模式即使输入为空也必须拒绝");
-    }
-    s.shutdown().await;
-}
-
-#[tokio::test]
-async fn trusted_genesis_pin_rejects_legacy_mode_collision_without_reinterpreting_snapshot() {
-    let s = start_server(false).await;
-    let u = register(&s.base_url(), "identity-collision", "human", 114).await;
-    for v2 in [false, true] {
-        let (row, _) = seed_legacy(&s, &u, v2, true).await;
-        assert!(
-            restore_committed(s.state.store(), s.state.inner.world_snapshots.as_ref(), &row)
-                .await
-                .is_err()
-        );
-    }
+    let committer = TickCommitter {
+        store: s.state.store().clone(),
+        snapshots: s.state.inner.world_snapshots.clone(),
+        world_id: source.world_id,
+        fencing_token: token,
+    };
+    committer.persist(&candidate, &record).await.unwrap();
+    let latest = s.state.store().get_world(source.world_id).await.unwrap().unwrap();
+    assert_eq!(restored(&s, &latest).await.state_root(), candidate.state_root());
+    assert!(
+        committer.persist(&candidate, &record).await.is_err(),
+        "重复提交不能多扣费或增加第二修订"
+    );
+    assert_eq!(
+        s.state.store().get_world(source.world_id).await.unwrap().unwrap(),
+        latest
+    );
     s.shutdown().await;
 }
