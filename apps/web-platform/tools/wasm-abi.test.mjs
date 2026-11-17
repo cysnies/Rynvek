@@ -53,3 +53,27 @@ test("实际cargo失败不得调用胶水生成或宣称成功", () => {
     return calls.length === 1 ? { status: 0, stdout: "wasm-bindgen 0.2.130" } : { status: 101 }; } }), /失败/);
   assert.deepEqual(calls, [process.env.WASM_BINDGEN || "wasm-bindgen", "cargo"]);
 });
+
+
+test("真实WASM接收服务端校验地图和选择协议，拒绝错哈希/错网格且不运行本地世界", async () => {
+  const transcript = JSON.parse(readFileSync(new URL("../../../tests/arena/opening.transcript.json", import.meta.url), "utf8"));
+  const messages = transcript.flatMap(x => x.recv).filter(x => x.to === "human:p0").map(x => x.message);
+  const welcome = messages.find(x => x.type === "welcome"), observation = messages.find(x => x.type === "observation").observation;
+  const packed = Buffer.from(welcome.map.terrain_b64, "base64");
+  const tiles = Array.from({length: welcome.map.width * welcome.map.height}, (_, i) => i % 2 === 0 ? packed[i >> 1] & 15 : packed[i >> 1] >> 4);
+  const worldId = fixture.commands[0].worldId;
+  const map = {type: "ARENA_MAP", worldId, map: {width: welcome.map.width, height: welcome.map.height, tiles, tilesHash: welcome.map.tiles_hash}};
+  const worker = new EngineWorker();
+  const post = command => JSON.parse(worker.post(JSON.stringify(command)));
+  try {
+    await worker.init(null, JSON.stringify({type: "ENGINE_INIT", width: 256, height: 256, gpuMode: "disabled", worldId, arenaFaction: 0}));
+    assert.ok(post({...map, map: {...map.map, tilesHash: "0".repeat(64)}}).some(x => x.type === "ENGINE_ERROR"));
+    assert.deepEqual(post(map), []);
+    assert.ok(post(fixture.commands.find(x => x.type === "ARENA_OBSERVATION")).some(x => x.type === "ENGINE_ERROR"), "地图尺寸约束真实生效");
+    assert.deepEqual(post({type: "ARENA_OBSERVATION", worldId, observation}), []);
+    assert.deepEqual(post({type: "ARENA_SELECTION", worldId, units: [observation.units[0].id], building: null}), []);
+    assert.deepEqual(JSON.parse(worker.frame(3000)), []);
+    assert.deepEqual(post({type: "ARENA_OBSERVATION", worldId, observation}), []);
+    assert.ok(post({type: "ARENA_SELECTION", worldId: "f".repeat(32), units: [], building: null}).some(x => x.type === "ENGINE_ERROR"));
+  } finally { worker.post('{"type":"SHUTDOWN"}'); worker.free(); }
+});

@@ -66,6 +66,8 @@ export type EngineCommand =
   | { type: "SET_LAYER_MASK"; mask: number }
   | { type: "SET_HEATMAP_CHANNEL"; channel: FieldChannel }
   | { type: "SIMULATE_DEVICE_LOST" }
+  | { type: "ARENA_MAP"; worldId: string; map: {width: number; height: number; tiles: number[]; tilesHash: string} }
+  | { type: "ARENA_SELECTION"; worldId: string; units: number[]; building: number | null }
   | { type: "ARENA_OBSERVATION"; worldId: string; observation: FactionObservation }
   | { type: "SHUTDOWN" };
 
@@ -87,6 +89,8 @@ export const ENGINE_COMMAND_TYPES = [
   "SET_LAYER_MASK",
   "SET_HEATMAP_CHANNEL",
   "SIMULATE_DEVICE_LOST",
+  "ARENA_MAP",
+  "ARENA_SELECTION",
   "ARENA_OBSERVATION",
   "SHUTDOWN",
 ] as const;

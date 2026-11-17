@@ -171,6 +171,8 @@ pub struct Engine {
     config: EngineConfig,
     sim: SimulationEngine,
     arena_observation: Option<Box<rynvek_rts::observation::FactionObservation>>,
+    arena_map: Option<Box<crate::protocol::ArenaMapData>>,
+    arena_selection: crate::observation::Selection,
     owner: Option<GpuDeviceOwner>,
     gpu: Option<GpuResources>,
     recovery: DeviceLostRecovery,
@@ -200,6 +202,8 @@ impl Engine {
         Self {
             sim: SimulationEngine::new(config.world_id),
             arena_observation: None,
+            arena_map: None,
+            arena_selection: Default::default(),
             recovery: DeviceLostRecovery::new(config.max_recovery_attempts),
             config,
             owner: None,
@@ -793,7 +797,14 @@ impl Engine {
         if self.config.arena_faction.is_some() {
             return self.arena_observation.as_ref().map_or_else(
                 || rynvek_render::FrameScene::new(0, rynvek_render::RenderLayerMask::NONE),
-                |obs| crate::observation::scene(obs, self.layer_mask),
+                |obs| {
+                    crate::observation::presentation_scene(
+                        obs,
+                        self.layer_mask,
+                        self.arena_map.as_deref(),
+                        &self.arena_selection,
+                    )
+                },
             );
         }
         collect_scene(
@@ -878,6 +889,19 @@ impl Engine {
         out
     }
 
+    fn require_arena_binding(&self, world_id: &str) -> Result<(), EngineError> {
+        if self.shutdown
+            || self.config.arena_faction.is_none()
+            || crate::protocol::parse_world_id(world_id) != Some(self.config.world_id)
+        {
+            return Err(EngineError {
+                code: RynvekErrorCode::SimulationInvariantViolated,
+                message: "表现消息与只读世界绑定不符".into(),
+            });
+        }
+        Ok(())
+    }
+
     /// 执行一条协议命令（`ENGINE_INIT` 由宿主处理）
     pub fn handle_command(&mut self, cmd: EngineCommand) -> Result<(), EngineError> {
         match cmd {
@@ -911,6 +935,39 @@ impl Engine {
                         message: format!("未知场通道 {channel}"),
                     })?;
             }
+            EngineCommand::ArenaMap { world_id, map } => {
+                self.require_arena_binding(&world_id)?;
+                crate::observation::validate_map(&map)?;
+                if self.arena_map.as_ref().is_some_and(|old| old != &map)
+                    || self
+                        .arena_observation
+                        .as_ref()
+                        .is_some_and(|obs| !crate::observation::map_matches(&map, obs))
+                {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "地图不可替换，且必须匹配观察网格".into(),
+                    });
+                }
+                self.arena_map = Some(map);
+            }
+            EngineCommand::ArenaSelection {
+                world_id,
+                units,
+                building,
+            } => {
+                self.require_arena_binding(&world_id)?;
+                if units.len() > 65_536 {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "选择数量超过上限".into(),
+                    });
+                }
+                self.arena_selection = crate::observation::Selection {
+                    units: units.into_iter().collect(),
+                    building,
+                };
+            }
             EngineCommand::ArenaObservation { world_id, observation } => {
                 if self.shutdown
                     || crate::protocol::parse_world_id(&world_id) != Some(self.config.world_id)
@@ -926,6 +983,16 @@ impl Engine {
                     });
                 }
                 crate::observation::validate(&observation)?;
+                if self
+                    .arena_map
+                    .as_ref()
+                    .is_some_and(|map| !crate::observation::map_matches(map, &observation))
+                {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "观察与静态地图尺寸不符".into(),
+                    });
+                }
                 self.last_tick = observation.tick;
                 self.arena_observation = Some(observation);
             }
@@ -935,6 +1002,8 @@ impl Engine {
                 self.shutdown = true;
                 self.gpu = None;
                 self.arena_observation = None;
+                self.arena_map = None;
+                self.arena_selection = Default::default();
             }
         }
         Ok(())

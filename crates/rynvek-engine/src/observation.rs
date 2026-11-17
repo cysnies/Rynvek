@@ -2,12 +2,49 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! 服务器裁剪观察 → 既有 WorldRenderer 场景。这里只持有只读观察，不实例化 ArenaWorld。
-//! 地形纹理与幽灵建筑后续接入；可见格背景不是随机地形，未知格不上传实体或拾取 ID。
+//! 静态地图与选择叠层沿用同一 FrameScene；未知格不上传地形种类，隐藏敌人不进入实例。
 
 use crate::EngineError;
 use rynvek_core::{error::RynvekErrorCode, fixed::Q32_32};
 use rynvek_render::{FrameScene, InstanceData, InstanceShape, RenderLayer, RenderLayerMask, Rgba8, WorldPalette};
 use rynvek_rts::{buildings::building_spec, fog::VISIBILITY_CELL_TILES, observation::FactionObservation};
+
+#[derive(Debug, Default)]
+pub(crate) struct Selection {
+    pub units: std::collections::BTreeSet<u32>,
+    pub building: Option<u32>,
+}
+
+pub(crate) fn validate_map(map: &crate::protocol::ArenaMapData) -> Result<(), EngineError> {
+    if map.width == 0
+        || map.height == 0
+        || map.width > 1024
+        || map.height > 1024
+        || map.tiles.len() != map.width as usize * map.height as usize
+        || map.tiles.iter().any(|tile| *tile > 4)
+        || rynvek_core::hash::Blake3Hash::of(&map.tiles).to_hex() != map.tiles_hash
+    {
+        return Err(EngineError {
+            code: RynvekErrorCode::DimensionMismatch,
+            message: "静态地图尺寸、地形或BLAKE3不符".into(),
+        });
+    }
+    Ok(())
+}
+
+pub(crate) fn map_matches(map: &crate::protocol::ArenaMapData, obs: &FactionObservation) -> bool {
+    map.width.div_ceil(VISIBILITY_CELL_TILES) == obs.visibility_width
+        && map.height.div_ceil(VISIBILITY_CELL_TILES) as usize * obs.visibility_width as usize == obs.visibility.len()
+}
+
+const TERRAIN_COLORS: [[u8; 4]; 5] = [
+    [39, 54, 43, 255],
+    [59, 69, 71, 255],
+    [83, 108, 50, 255],
+    [110, 59, 40, 255],
+    [23, 29, 27, 255],
+];
+const SELECTION_COLOR: Rgba8 = Rgba8([228, 255, 158, 255]);
 
 const MAX_VISIBILITY_CELLS: usize = 65_536;
 
@@ -69,13 +106,26 @@ fn visible(obs: &FactionObservation, x: u32, y: u32) -> bool {
 /// 已裁剪的实体再作保守过滤，且不接受前端图层开关取消该过滤。
 /// 不绑定 SimulationEngine 的场缓冲，不把 RTS EntitySerial 当成 dense-index 拾取 ID。
 pub fn scene(obs: &FactionObservation, mask: RenderLayerMask) -> FrameScene {
-    let layers = RenderLayerMask(
-        mask.0
-            & (RenderLayerMask::NONE
-                .with(RenderLayer::Structures)
-                .with(RenderLayer::Organisms))
-            .0,
-    );
+    presentation_scene(obs, mask, None, &Selection::default())
+}
+
+/// 带静态地图/选择的同一场景构建路径，表现状态不能反向修改观察。
+pub(crate) fn presentation_scene(
+    obs: &FactionObservation,
+    mask: RenderLayerMask,
+    map: Option<&crate::protocol::ArenaMapData>,
+    selection: &Selection,
+) -> FrameScene {
+    let mut allowed = RenderLayerMask::NONE
+        .with(RenderLayer::Structures)
+        .with(RenderLayer::Organisms);
+    if map.is_some() {
+        allowed = allowed.with(RenderLayer::Terrain);
+    }
+    if !selection.units.is_empty() || selection.building.is_some() {
+        allowed = allowed.with(RenderLayer::Overlay);
+    }
+    let layers = RenderLayerMask(mask.0 & allowed.0);
     let mut scene = FrameScene::new(obs.tick, layers);
     // 防止调用者绕开 validate 直接构建场景；非法帧只产生空画面。
     if validate(obs).is_err() {
@@ -83,22 +133,50 @@ pub fn scene(obs: &FactionObservation, mask: RenderLayerMask) -> FrameScene {
     }
     let cell = VISIBILITY_CELL_TILES as f32;
     for (index, state) in obs.visibility.iter().enumerate() {
-        if *state == 0 {
-            continue;
-        }
         let x = (index % obs.visibility_width as usize) as f32 * cell;
         let y = (index / obs.visibility_width as usize) as f32 * cell;
-        scene.push(InstanceData::new(
-            RenderLayer::Structures,
-            [x + cell / 2.0, y + cell / 2.0],
-            cell,
-            if *state == 1 {
-                Rgba8([34, 43, 37, 255])
-            } else {
-                Rgba8([17, 21, 19, 255])
-            },
-            InstanceShape::Square,
-        ));
+        if let Some(map) = map {
+            // 未知格只上传统一不透明底色；关闭迷雾层也不能泄漏真实地形。
+            if *state == 0 {
+                scene.push(InstanceData::new(
+                    RenderLayer::Terrain,
+                    [x + cell / 2.0, y + cell / 2.0],
+                    cell,
+                    WorldPalette::NEUTRAL_DARK.background,
+                    InstanceShape::Square,
+                ));
+                continue;
+            }
+            for ty in y as u32..(y as u32 + VISIBILITY_CELL_TILES).min(map.height) {
+                for tx in x as u32..(x as u32 + VISIBILITY_CELL_TILES).min(map.width) {
+                    let mut color = TERRAIN_COLORS[map.tiles[(ty * map.width + tx) as usize] as usize];
+                    if *state == 2 {
+                        for c in &mut color[..3] {
+                            *c = (*c as u16 * 32 / 100) as u8;
+                        }
+                    }
+                    scene.push(InstanceData::new(
+                        RenderLayer::Terrain,
+                        [tx as f32 + 0.5, ty as f32 + 0.5],
+                        1.0,
+                        Rgba8(color),
+                        InstanceShape::Square,
+                    ));
+                }
+            }
+        } else if *state != 0 {
+            scene.push(InstanceData::new(
+                RenderLayer::Structures,
+                [x + cell / 2.0, y + cell / 2.0],
+                cell,
+                if *state == 1 {
+                    Rgba8([34, 43, 37, 255])
+                } else {
+                    Rgba8([17, 21, 19, 255])
+                },
+                InstanceShape::Square,
+            ));
+        }
     }
     for building in &obs.buildings {
         let size = building_spec(building.kind).footprint;
@@ -114,12 +192,36 @@ pub fn scene(obs: &FactionObservation, mask: RenderLayerMask) -> FrameScene {
             InstanceShape::Square,
         ));
     }
+    for building in &obs.buildings {
+        if building.faction == obs.faction && selection.building == Some(building.id.0) {
+            let size = building_spec(building.kind).footprint as f32;
+            scene.push(InstanceData::new(
+                RenderLayer::Overlay,
+                [
+                    building.origin.0 as f32 + size / 2.0,
+                    building.origin.1 as f32 + size / 2.0,
+                ],
+                size * 1.45,
+                SELECTION_COLOR,
+                InstanceShape::Ring,
+            ));
+        }
+    }
     for unit in &obs.units {
         let p = position(unit.position);
         if unit.faction != obs.faction
             && !visible(obs, (unit.position.x.0 >> 32) as u32, (unit.position.y.0 >> 32) as u32)
         {
             continue;
+        }
+        if unit.faction == obs.faction && selection.units.contains(&unit.id.0) {
+            scene.push(InstanceData::new(
+                RenderLayer::Overlay,
+                p,
+                1.25,
+                SELECTION_COLOR,
+                InstanceShape::Ring,
+            ));
         }
         scene.push(InstanceData::new(
             RenderLayer::Organisms,

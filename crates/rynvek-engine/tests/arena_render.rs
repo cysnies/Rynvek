@@ -211,3 +211,157 @@ fn fog_index_never_rounds_a_hidden_unit_into_the_adjacent_visible_cell() {
         count
     );
 }
+
+fn map_command(world: &ArenaWorld) -> serde_json::Value {
+    serde_json::json!({"type":"ARENA_MAP", "worldId":"0".repeat(32), "map": {
+        "width":world.map.width, "height":world.map.height,
+        "tiles":world.map.tiles.iter().map(|t| *t as u8).collect::<Vec<_>>(),
+        "tilesHash":world.map.tiles_hash().to_hex()
+    }})
+}
+fn command(value: serde_json::Value) -> EngineCommand {
+    EngineCommand::from_json(&value.to_string()).unwrap()
+}
+#[test]
+fn verified_server_map_and_own_selection_reach_existing_frame_scene() {
+    let world = world();
+    let mut engine = engine();
+    let mut obs = world.observe(FactionId(0)).unwrap();
+    let own = obs.units[0].id.0;
+    let mut enemy = world.observe(FactionId(1)).unwrap().units.remove(0);
+    enemy.position = obs.units[0].position;
+    let enemy_id = enemy.id.0;
+    obs.units.push(enemy);
+    engine.handle_command(command(map_command(&world))).unwrap();
+    engine.handle_command(frame(obs.clone())).unwrap();
+    engine.handle_command(command(serde_json::json!({"type":"ARENA_SELECTION", "worldId":"0".repeat(32), "units":[own, enemy_id], "building":obs.buildings[0].id.0}))).unwrap();
+    let scene = engine.frame_scene();
+    assert!(!scene.layer_instances(RenderLayer::Terrain).is_empty());
+    assert_eq!(scene.layer_instances(RenderLayer::Overlay).len(), 2);
+    assert!(scene.ordered_instances().iter().all(|i| i.pick_id == 0));
+    assert_eq!(engine.simulation().clock.tick, 0);
+    // 恶意保留已经不在观察中的选择，也不得残留高亮。
+    obs.units.clear();
+    obs.buildings.clear();
+    obs.tick += 1;
+    engine.handle_command(frame(obs)).unwrap();
+    assert_eq!(engine.frame_scene().layer_instances(RenderLayer::Overlay).len(), 0);
+}
+#[test]
+fn map_hash_dimensions_world_and_immutability_are_checked_atomically() {
+    let world = world();
+    let mut engine = engine();
+    engine
+        .handle_command(frame(world.observe(FactionId(0)).unwrap()))
+        .unwrap();
+    let before = engine.frame_scene();
+    for case in 0..5 {
+        let mut bad = map_command(&world);
+        match case {
+            0 => bad["map"]["tilesHash"] = serde_json::json!("f".repeat(64)),
+            1 => bad["map"]["tiles"][0] = serde_json::json!(5),
+            2 => bad["map"]["width"] = serde_json::json!(0),
+            3 => bad["map"]["height"] = serde_json::json!(world.map.height - 4),
+            _ => bad["worldId"] = serde_json::json!("f".repeat(32)),
+        }
+        assert!(engine.handle_command(command(bad)).is_err());
+        assert_eq!(engine.frame_scene(), before);
+    }
+    engine.handle_command(command(map_command(&world))).unwrap();
+    let valid = engine.frame_scene();
+    let mut changed = world.map.clone();
+    changed.tiles[0] = rynvek_rts::map_gen::TerrainTileKind::NutrientMarsh;
+    let mut replacement = map_command(&world);
+    replacement["map"]["tiles"] = serde_json::json!(changed.tiles.iter().map(|t| *t as u8).collect::<Vec<_>>());
+    replacement["map"]["tilesHash"] = serde_json::json!(changed.tiles_hash().to_hex());
+    assert!(engine.handle_command(command(replacement)).is_err());
+    assert_eq!(engine.frame_scene(), valid);
+    engine.handle_command(EngineCommand::Shutdown).unwrap();
+    assert!(engine.handle_command(command(map_command(&world))).is_err());
+}
+
+#[test]
+fn software_gpu_pixels_cover_terrain_fog_selection_and_y_down_mapping() {
+    let Some(owner) = common::gpu() else {
+        return;
+    };
+    let world = world();
+    let mut engine = engine();
+    let mut obs = world.observe(FactionId(0)).unwrap();
+    let mut own = obs.units.remove(0);
+    own.position = rynvek_rts::math::Vec2::new(
+        rynvek_core::fixed::Q32_32(3_i64 << 31),
+        rynvek_core::fixed::Q32_32(3_i64 << 31),
+    );
+    let mut enemy = world.observe(FactionId(1)).unwrap().units.remove(0);
+    enemy.position = rynvek_rts::math::Vec2::new(rynvek_core::fixed::Q32_32(11_i64 << 31), own.position.y);
+    let ids = vec![own.id.0, enemy.id.0];
+    obs.units = vec![own, enemy];
+    obs.buildings.clear();
+    obs.visibility_width = 2;
+    obs.visibility = vec![1, 2, 0, 1];
+    // 非对称、已知色值的地图夹具检查真实管线，不用 CPU 位图替代 GPU 输出。
+    let tiles: Vec<u8> = (0..64).map(|i| (i % 8 % 5) as u8).collect();
+    engine
+        .handle_command(command(
+            serde_json::json!({"type":"ARENA_MAP", "worldId":"0".repeat(32), "map": {
+                "width":8,"height":8,"tilesHash":rynvek_core::hash::Blake3Hash::of(&tiles).to_hex(),"tiles":tiles
+            }}),
+        ))
+        .unwrap();
+    engine.handle_command(frame(obs)).unwrap();
+    engine
+        .handle_command(command(
+            serde_json::json!({"type":"ARENA_SELECTION", "worldId":"0".repeat(32), "units":ids,"building":null}),
+        ))
+        .unwrap();
+    engine
+        .handle_command(EngineCommand::SetLayerMask {
+            mask: RenderLayerMask::ALL.without(RenderLayer::FogOfWar).0,
+        })
+        .unwrap();
+    assert_eq!(engine.frame_scene().layer_instances(RenderLayer::Overlay).len(), 1);
+    engine.attach_gpu(owner).unwrap();
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    engine.enable_rendering(format).unwrap();
+    engine.camera = Camera2D::new([4.0, 4.0], 32.0, [256, 256]);
+    let target = OffscreenTarget::new(engine.gpu_owner().unwrap().device(), [256, 256], format);
+    assert!(engine.render_frame(&target.color_view));
+    let owner = engine.gpu_owner().unwrap();
+    let pixels = target.read_color_blocking(owner.device(), owner.queue());
+    let at = |x: usize, y: usize| &pixels[(y * 256 + x) * 4..(y * 256 + x) * 4 + 4];
+    for (x, color) in [
+        (16, [39, 54, 43, 255]),
+        (48, [59, 69, 71, 255]),
+        (80, [83, 108, 50, 255]),
+        (112, [110, 59, 40, 255]),
+        (144, [7, 9, 8, 255]),
+        (176, [12, 17, 13, 255]),
+    ] {
+        assert_eq!(at(x, 16), color);
+    }
+    assert_eq!(at(16, 144), WorldPalette::NEUTRAL_DARK.background.0);
+    assert_eq!(at(48, 48), WorldPalette::faction(0).0); // 与浏览器 yDown=true 相同，非竖直镜像。
+    assert_eq!(at(66, 48), [228, 255, 158, 255]);
+    eprintln!(
+        "[原生软件GL像素，非浏览器] 地形={:?}，暗格={:?}，未知格={:?}，己方={:?}，选择环={:?}，隐藏敌人落点={:?}",
+        at(16, 16),
+        at(176, 16),
+        at(16, 144),
+        at(48, 48),
+        at(66, 48),
+        at(176, 48)
+    );
+    assert_eq!(at(176, 48), [12, 17, 13, 255]); // 已探索格不能显示/高亮敌人。
+    engine
+        .handle_command(EngineCommand::SetLayerMask {
+            mask: RenderLayerMask::ALL.without(RenderLayer::Overlay).0,
+        })
+        .unwrap();
+    assert!(engine.render_frame(&target.color_view));
+    let owner = engine.gpu_owner().unwrap();
+    let plain = target.read_color_blocking(owner.device(), owner.queue());
+    assert_eq!(&plain[(48 * 256 + 66) * 4..(48 * 256 + 66) * 4 + 4], [83, 108, 50, 255]);
+    assert!(owner.take_uncaptured_errors().is_empty());
+    assert_eq!(engine.simulation().clock.tick, 0);
+}
