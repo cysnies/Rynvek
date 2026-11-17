@@ -166,3 +166,70 @@ async fn durable_sdk_owner_isolation_checkpoint_recovery_and_private_atomic_resu
     assert_eq!(exported.json().unwrap()["experiments"][0]["exp_id"], id);
     restarted.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn parameter_studio_source_sdk_scan_checkpoint_rebuild_and_four_tables_are_real() {
+    let store = Store::memory();
+    let dir = std::env::temp_dir().join(format!("rynvek-stage38-{}", new_uuid_v7()));
+    let server = start(store.clone(), &dir).await;
+    rynvek_server::lab_jobs::stop_workers(&server.state).await;
+    let base = server.base_url();
+    let owner = register(&base, "parameter-lab-owner", "human", 81).await;
+    let other = register(&base, "parameter-lab-other", "human", 82).await;
+    let receipt =
+        sdk(json!({"phase":"parameter-submit","base":base,"token":owner.token,"key":new_uuid_v7().to_string()})).await;
+    let id = receipt["id"].as_str().unwrap().to_owned();
+    let path = format!("/api/v1/lab/experiments/{id}");
+    let world = receipt["world"].as_str().unwrap();
+    assert_eq!(
+        get(&base, &format!("/api/v1/worlds/{world}/authoring/lab-model"), &other)
+            .await
+            .status,
+        404
+    );
+    for tail in ["", "/rows?table=metrics", "/parquet?table=metrics"] {
+        assert_eq!(get(&base, &format!("{path}{tail}"), &other).await.status, 404);
+    }
+    let job = store.lab_claim("stage38-before-rebuild".into()).await.unwrap().unwrap();
+    let claim = job.claim_ref();
+    let spec = job.experiment.spec();
+    spec.validate().unwrap();
+    let plan = spec.runs().remove(0);
+    let result = rynvek_rts::lab::run_one(&plan, spec.ticks, spec.sample_every);
+    assert!(result.lineage.is_empty());
+    assert_eq!(result.runs[0].final_tick, 4);
+    let checkpoint = serde_json::to_vec(
+        &json!({"profile":KERNEL_PROFILE,"spec_digest":job.experiment.spec_digest,"run":0,"result":result}),
+    )
+    .unwrap();
+    let cid = server.state.inner.world_snapshots.put(&checkpoint).unwrap().to_hex();
+    store
+        .lab_worker(
+            claim.clone(),
+            WorkerAction::Checkpoint {
+                run: 0,
+                cid: cid.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    store.lab_worker(claim.clone(), WorkerAction::Release).await.unwrap();
+    assert!(store.lab_worker(claim, WorkerAction::Fail).await.is_err());
+    let pending = store.lab_get(owner.principal_id, id.clone()).await.unwrap().unwrap();
+    assert!(pending.experiment.tables.is_empty());
+    server.shutdown().await; // Same memory Store + real file CAS only: not PG multi-machine disaster recovery.
+    let restarted = start(store.clone(), &dir).await;
+    let base = restarted.base_url();
+    let done = sdk(json!({"phase":"parameter-download","base":base,"token":owner.token,"id":id})).await;
+    assert_eq!(done["samples"], 4);
+    assert_eq!(done["tables"], json!(["energy", "lineage", "metrics", "runs"]));
+    let persisted = store.lab_get(owner.principal_id, id.clone()).await.unwrap().unwrap();
+    assert_eq!(persisted.chunks[&0], cid);
+    assert_eq!(persisted.experiment.attempt, 2);
+    assert_eq!(persisted.chunks.len(), 2);
+    assert_eq!(persisted.experiment.tables.len(), 4);
+    let public = format!("/api/v1/hub/blobs/{}", persisted.experiment.tables["metrics"]);
+    assert_eq!(get(&base, &public, &other).await.status, 404);
+    restarted.shutdown().await;
+    std::fs::remove_dir_all(dir).unwrap();
+}

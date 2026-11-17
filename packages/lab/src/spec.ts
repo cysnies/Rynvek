@@ -20,7 +20,8 @@ export const MAX_NAME_CHARS = 128;
 /** 变体标签最大字符数 */
 export const MAX_LABEL_CHARS = 64;
 
-export type LabMode = "pve" | "duel";
+import {validateParameterModel,type ParameterModel} from "./parameters.js";
+export type LabMode = "pve" | "duel" | "parameters";
 export type PolicyKind = "idle" | "economy" | "ecology";
 
 /** 当前Forager供能/出生实验契约；数值必须显式，不是生物学默认常数。 */
@@ -45,6 +46,7 @@ export interface VariantSpec {
   readonly players?: number;
   readonly policy?: PolicyKind;
   readonly ecology?: EcologyContract | null;
+  readonly model?: ParameterModel | null;
 }
 
 /** 实验规格 */
@@ -58,7 +60,7 @@ export interface ExperimentSpec {
 }
 
 /** 服务端基线变体 */
-export const BASELINE_VARIANT: Required<Omit<VariantSpec, "players" | "ecology">> = {
+export const BASELINE_VARIANT: Required<Omit<VariantSpec, "players" | "ecology" | "model">> = {
   label: "baseline",
   mode: "pve",
   policy: "economy",
@@ -73,7 +75,7 @@ const charCount = (s: string): number => [...s].length;
 
 /** 变体的玩家数（含缺省值） */
 export function playerCount(v: VariantSpec): number {
-  return v.players ?? ((v.mode ?? "pve") === "pve" ? 1 : 2);
+  return v.players ?? (v.mode === "parameters" ? 0 : (v.mode ?? "pve") === "pve" ? 1 : 2);
 }
 
 /** 实际生效的变体列表 */
@@ -107,6 +109,7 @@ export function validateSpec(spec: ExperimentSpec): void {
   const runs = variants.length * spec.seeds.length;
   if (runs > MAX_RUNS) throw new SpecError(`变体数 × 种子数 = ${runs}，超过上限 ${MAX_RUNS}`);
   const labels = new Set<string>();
+  let parameterRows=0;
   for (const v of variants) {
     if (v.label.length === 0 || charCount(v.label) > MAX_LABEL_CHARS) {
       throw new SpecError(`变体 label 必须为 1–${MAX_LABEL_CHARS} 字符`);
@@ -132,10 +135,16 @@ export function validateSpec(spec: ExperimentSpec): void {
         if(BigInt(role.basal_cost_micro_per_tick)*BigInt(role.reserve_ticks)*4n>(1n<<64n)-1n)throw new SpecError("代谢预留超出精确范围");
       }
     }
+    if(v.mode==="parameters"){
+      if((v.policy??"economy")!=="idle"||v.ecology!=null||v.model==null)throw new SpecError("parameters必须提供model、idle且无生态契约");
+      validateParameterModel(v.model);
+      parameterRows+=v.model.outputs.length*Math.ceil(spec.ticks/every)*spec.seeds.length;
+    }else if(v.model!=null)throw new SpecError("model只允许parameters profile");
     const p = playerCount(v);
-    const ok = (v.mode ?? "pve") === "pve" ? p === 1 || p === 2 : p === 2;
+    const ok = v.mode === "parameters" ? p === 0 : (v.mode ?? "pve") === "pve" ? p === 1 || p === 2 : v.mode === "duel" && p === 2;
     if (!ok) throw new SpecError(`变体 ${v.label} 的 players=${p} 与模式不符`);
   }
+  if(parameterRows>200_000)throw new SpecError("参数采样超过200000行；减少种子/变体/输出或增大采样间隔");
 }
 
 /** 单个 run 的计划 */
@@ -166,6 +175,7 @@ export function toRequestBody(spec: ExperimentSpec): Record<string, unknown> {
       if (v.players !== undefined) o["players"] = v.players;
       if (v.policy !== undefined) o["policy"] = v.policy;
       if (v.ecology !== undefined) o["ecology"] = v.ecology===null?null:{...v.ecology};
+      if(v.model!==undefined)o["model"]=v.model;
       return o;
     });
   }

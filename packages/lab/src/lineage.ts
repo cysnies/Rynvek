@@ -31,11 +31,11 @@ export interface LineageRow {
 export interface MetricRow {
   readonly run: number;
   readonly tick: U64;
-  readonly faction: number;
-  readonly score_milli: U64;
-  readonly units: number;
-  readonly buildings: number;
-  readonly wild_units: number;
+  readonly faction: number | null;
+  readonly score_milli: U64 | null;
+  readonly units: number | null;
+  readonly buildings: number | null;
+  readonly wild_units: number | null;
 }
 
 /** `runs` 表一行（节选） */
@@ -229,8 +229,8 @@ export function variantStats(rows: Iterable<RunRow>): VariantStats[] {
 /** 某 run 某阵营的得分时间序列（Tick 升序；score 为 milli 定点） */
 export function scoreSeries(rows: Iterable<MetricRow>, run: number, faction: number): Array<[number, number]> {
   return [...rows]
-    .filter((r) => r.run === run && r.faction === faction)
-    .map((r): [number, number] => [num(r.tick), num(r.score_milli)])
+    .filter((r) => r.run === run && r.faction === faction && r.score_milli !== null)
+    .map((r): [number, number] => [num(r.tick), num(r.score_milli!)])
     .sort((a, b) => a[0] - b[0]);
 }
 
@@ -253,6 +253,8 @@ export const TABLE_COLUMNS = {
     "waves_spawned",
     "natural_births",
     "max_generation",
+    "model_digest",
+    "parameter_fault",
   ],
   metrics: [
     "run",
@@ -270,6 +272,10 @@ export const TABLE_COLUMNS = {
     "wild_units",
     "pve_wave",
     "state_root",
+    "parameter_entity",
+    "parameter_component",
+    "parameter_type",
+    "parameter_value",
   ],
   lineage: ["run", "faction", "slug", "unit", "generation", "entity", "parent", "origin", "born_tick", "genome", "parent_genome", "allocated_q"],
   energy: ["enabled","run","tick","live_bodies","remains","natural_births","max_generation","received_q","stored_q","dissipated_q","exported_q","returned_q","transferred_q","external_received_q","state_root"],

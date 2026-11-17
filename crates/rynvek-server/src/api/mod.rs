@@ -81,6 +81,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/worlds/{world_id}/fork", post(worlds::fork))
         .route("/api/v1/worlds/{world_id}/patches", post(worlds::patches))
         .route("/api/v1/worlds/{world_id}/authoring", get(worlds::authoring))
+        .route("/api/v1/worlds/{world_id}/authoring/lab-model", get(worlds::lab_parameter_model))
         .route("/api/v1/worlds/{world_id}/authoring/editors", get(studio_collaboration::list).post(studio_collaboration::change))
         .route("/api/v1/worlds/{world_id}/authoring/changes",get(studio_collaboration::changes))
         .route(

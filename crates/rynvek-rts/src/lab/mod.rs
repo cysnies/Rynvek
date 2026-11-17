@@ -237,7 +237,7 @@ pub struct RunRecord {
     pub end_reason: String,
     pub final_state_root: [u8; 32],
     pub model_digest: Option<String>,
-    /// 原Engine持久故障(module_id,error_code)，并非模型声称的结果。
+    /// 原Engine持久故障(binding_id,error_code)，并非模型声称的结果。
     pub parameter_fault: Option<String>,
     pub commands_accepted: u64,
     pub commands_rejected: u64,

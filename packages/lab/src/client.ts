@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /** 私有持久Lab作业：显式提交幂等键、结构化状态、代次控制及四表消费。 */
+import {validateParameterModel,type ParameterModelCapture} from "./parameters.js";
 import { RynvekErrorCode, errorNameOf } from "@rynvek/core";
 
 import { type ExperimentSpec, type VariantSpec, type EcologyContract, toRequestBody } from "./spec.js";
@@ -119,6 +120,16 @@ export class LabClient {
       body.name ?? errorNameOf(code) ?? "Unknown",
       body.message ?? `HTTP ${res.status}`,
     );
+  }
+
+  /** Explicit source copy, requires the current owner's/directed editor's world.edit permission.
+   * Revocation stops future capture, not erasure of a source copy already authorized/exported. */
+  async captureParameterModel(worldId:string,signal?:AbortSignal):Promise<ParameterModelCapture>{
+    const res=await this.#fetch(`${this.#base}/api/v1/worlds/${encodeURIComponent(worldId)}/authoring/lab-model`,{...(signal?{signal}:{}),headers:{Authorization:`Bearer ${this.#token}`},cache:"no-store",redirect:"error",credentials:"omit"});
+    if(res.status!==200)throw await this.#error(res);
+    const result=await res.json() as ParameterModelCapture;
+    if(result.world_id!==worldId||typeof result.revision!=="string"||!/^\d+$/.test(result.revision)||BigInt(result.revision)>(1n<<64n)-1n||!/^[a-f0-9]{64}$/.test(result.model_digest))throw new Error("模型导出身份/修订/摘要非法");
+    validateParameterModel(result.model);return result;
   }
 
   /** 路由 17：提交实验（先在本地按服务端规则校验） */

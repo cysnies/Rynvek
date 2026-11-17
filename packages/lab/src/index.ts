@@ -14,3 +14,5 @@ export * from "./client.js";
 export * from "./design.js";
 export * from "./lineage.js";
 export * from "./spec.js";
+
+export * from "./parameters.js";

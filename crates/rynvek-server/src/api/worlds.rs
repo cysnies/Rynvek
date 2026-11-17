@@ -643,3 +643,28 @@ pub async fn compile_authoring_rule(
     response.headers_mut().insert(axum::http::header::VARY,axum::http::HeaderValue::from_static("Authorization, X-Rynvek-Studio-Grant"));
     Ok(response)
 }
+
+/// Only an authorized Studio source copy, not WorldRead/full-snapshot privilege.
+pub async fn lab_parameter_model(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    let (_, row, permit) = super::studio_collaboration::admission(&app, &headers, &id, false).await?;
+    let runtime = restore_runtime(&app, &row).await?;
+    let model = rynvek_rts::lab::ParameterModel::capture(&runtime.world().authoring).map_err(ApiError::bad_request)?;
+    let digest = model.digest();
+    let mut response = Json(serde_json::json!({"world_id":row.world_id.to_string(),
+        "revision":runtime.revision().to_string(),"model_digest":digest,"model":model}))
+    .into_response();
+    app.store().check_editor(row.world_id, permit).await?;
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    response.headers_mut().insert(
+        axum::http::header::VARY,
+        axum::http::HeaderValue::from_static("Authorization, X-Rynvek-Studio-Grant"),
+    );
+    Ok(response)
+}
