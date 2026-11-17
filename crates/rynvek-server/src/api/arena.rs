@@ -518,7 +518,7 @@ mod tests {
         let final_tick = candidate.tick;
         assert!(candidate.outcome.is_some());
         let record = TickRecord {
-            format: "rynvek-tick/1".into(),
+            format: "rynvek-tick/2".into(),
             base_revision: initial.revision(),
             base_root: initial.state_root(),
             target_tick: 1,

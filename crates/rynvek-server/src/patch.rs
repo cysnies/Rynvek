@@ -25,7 +25,9 @@ pub fn required_class(op: &WorldPatchOp) -> LiveEditSafetyClass {
             }
         }
         WorldPatchOp::PaintTerrainRect { .. } | WorldPatchOp::RemoveEntityTemplate { .. } => C::TickBoundarySafe,
-        WorldPatchOp::UpsertSeedGenome { .. } | WorldPatchOp::UpdateRuleModule { .. } => C::EpochBoundarySafe,
+        WorldPatchOp::UpsertSeedGenome { .. } | WorldPatchOp::UpdateRuleModule { .. } | WorldPatchOp::RemoveRuleModule { .. } => {
+            C::EpochBoundarySafe
+        }
     }
 }
 
@@ -67,8 +69,9 @@ pub fn validate(patch: &WorldPatch) -> Result<LiveEditSafetyClass, ApiError> {
             WorldPatchOp::UpsertSeedGenome { genome_slug, .. } if genome_slug.is_empty() => {
                 return Err(invalid(format!("第 {i} 条：genome_slug 为空")));
             }
-            WorldPatchOp::UpdateRuleModule { module_id, .. } if module_id.is_empty() => {
-                return Err(invalid(format!("第 {i} 条：module_id 为空")));
+            WorldPatchOp::UpdateRuleModule { module_id, .. } | WorldPatchOp::RemoveRuleModule { module_id }
+                if !rynvek_rts::world::authoring::valid_authoring_key(module_id) => {
+                return Err(invalid(format!("第 {i} 条：module_id 非法")));
             }
             _ => {}
         }

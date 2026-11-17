@@ -402,7 +402,7 @@ fn automatic_first_feeding_survives_serialized_tick_wal() {
         let mut next = original.candidate_tick().unwrap();
         next.finish_tick().unwrap();
         let record = TickRecord {
-            format: "rynvek-tick/1".into(),
+            format: "rynvek-tick/2".into(),
             base_revision,
             base_root,
             target_tick,

@@ -1224,7 +1224,7 @@ impl Host {
         let result = async {
             self.session.world.finish_tick().map_err(ApiError::from)?;
             let record = TickRecord {
-                format: "rynvek-tick/1".into(),
+                format: "rynvek-tick/2".into(),
                 base_revision: previous.revision(),
                 base_root: previous.state_root(),
                 target_tick: target,

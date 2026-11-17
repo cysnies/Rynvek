@@ -541,6 +541,42 @@ async fn studio_action_rule_enters_real_actor_epoch_and_committed_restore() {
     let restored = f.runtime().await;
     assert!(restored.world().authoring.rules.contains_key("control"));
     assert!(restored.world().units.values().all(|u| u.actions[0] == 128));
+    let mut deletion = patch(30, f.host.status().revision, 101);
+    deletion.safety_class = rynvek_world::LiveEditSafetyClass::EpochBoundarySafe;
+    deletion.operations = vec![WorldPatchOp::RemoveRuleModule { module_id: "control".into() }];
+    let pending = f.post(&deletion);
+    f.queued(1).await;
+    f.host.advance(3).await.unwrap();
+    assert!(!pending.is_finished(), "Epoch之前不能出现假删除回执");
+    f.host.advance(1).await.unwrap();
+    let response = pending.await.unwrap();
+    assert_eq!(response.status, 200, "{}", String::from_utf8_lossy(&response.body));
+    let ack = response.json().unwrap();
+    assert_eq!(ack["effective_tick"], 8);
+    assert_eq!(ack["report"]["rules_removed"], 1);
+    let deleted = f.runtime().await; // 从原始检查点 + Tick WAL恢复，非本地镜像
+    assert!(deleted.world().authoring.rules.is_empty());
+    assert_eq!(deleted.state_root(), f.host.status().state_root);
+    // 删除不倒写上一Tick动作；下一次原神经计算不再被模块覆盖。
+    f.host.advance(1).await.unwrap();
+    assert!(f.runtime().await.world().units.values().any(|u| u.actions[0] != 128));
+    let replayed_ack = f.post(&deletion).await.unwrap();
+    assert_eq!(replayed_ack.status, 200); // 活动Actor保留原patch_id幂等回执
+    assert_eq!(replayed_ack.json().unwrap(), ack);
+    let mut stale = deletion.clone();
+    stale.patch_id = [32; 16];
+    assert_eq!(f.post(&stale).await.unwrap().status, 409);
+    let mut restoration = input.clone();
+    restoration.patch_id = [31; 16];
+    restoration.base_authoring_revision = f.host.status().revision;
+    let pending = f.post(&restoration);
+    f.queued(1).await;
+    f.host.advance(3).await.unwrap();
+    assert_eq!(pending.await.unwrap().status, 200);
+    let restored_again = f.runtime().await;
+    assert_eq!(restored_again.state_root(), f.host.status().state_root);
+    assert_eq!(restored_again.world().authoring.rules, restored.world().authoring.rules);
+    assert!(restored_again.world().units.values().all(|u| u.actions[0] == 128));
     f.host.abort("短定向用例完成").await;
     f.server.shutdown().await;
 }
@@ -593,8 +629,8 @@ fn ecology_authoring_change_replays_same_wal_without_relaxing_normal_config_free
         .transact_authoring_at(3, |w| input.apply_at_boundary(w, 4))
         .unwrap();
     candidate.finish_tick().unwrap();
-    let record = TickRecord {
-        format: "rynvek-tick/1".into(),
+    let mut record = TickRecord {
+        format: "rynvek-tick/2".into(),
         base_revision: before.revision(),
         base_root: before.state_root(),
         target_tick: 4,
@@ -604,4 +640,6 @@ fn ecology_authoring_change_replays_same_wal_without_relaxing_normal_config_free
         inputs: vec![TickInput::Patch { patch: input, report }],
     };
     assert_eq!(record.replay(&before).unwrap().state_root(), candidate.state_root());
+    record.format = "rynvek-tick/1".into();
+    assert!(record.replay(&before).is_err(), "新回执结构不默默读取旧WAL版本");
 }

@@ -61,6 +61,10 @@ pub enum WorldPatchOp {
     RemoveEntityTemplate {
         template_id: String,
     },
+    /// 删除实际动作模块；与更新一样只允许在神经Epoch边界提交。
+    RemoveRuleModule {
+        module_id: String,
+    },
 }
 
 impl WorldPatchOp {
@@ -77,7 +81,9 @@ impl WorldPatchOp {
                 }
             }
             Self::PaintTerrainRect { .. } | Self::RemoveEntityTemplate { .. } => LiveEditSafetyClass::TickBoundarySafe,
-            Self::UpsertSeedGenome { .. } | Self::UpdateRuleModule { .. } => LiveEditSafetyClass::EpochBoundarySafe,
+            Self::UpsertSeedGenome { .. } | Self::UpdateRuleModule { .. } | Self::RemoveRuleModule { .. } => {
+                LiveEditSafetyClass::EpochBoundarySafe
+            }
         }
     }
 }
@@ -99,6 +105,8 @@ pub struct PatchApplyReport {
     pub genomes_updated: u32,
     pub params_updated: u32,
     pub rules_updated: u32,
+    /// 实际删除的动作模块数，不含目录模板或本地CRDT墓碑。
+    pub rules_removed: u32,
     pub templates_removed: u32,
     pub requires_fork: bool,
 }
@@ -173,6 +181,7 @@ impl WorldPatch {
             Ecology(EcologyContract),
             Genome(Genome),
             Rule(String, AuthoredRule),
+            RemoveRule(String),
             Remove(String),
         }
         let invalid = RynvekErrorCode::InvalidFileMagicOrVersion;
@@ -292,6 +301,15 @@ impl WorldPatch {
                     }
                     Prepared::Rule(module_id.clone(), checked_rule(rule_graph_json, *compiled_rir_blake3)?)
                 }
+                WorldPatchOp::RemoveRuleModule { module_id } => {
+                    if !rynvek_rts::world::authoring::valid_authoring_key(module_id) {
+                        return Err(invalid);
+                    }
+                    if !rule_ids.remove(module_id) {
+                        return Err(RynvekErrorCode::EntityNotFoundOrTombstoned);
+                    }
+                    Prepared::RemoveRule(module_id.clone())
+                }
                 WorldPatchOp::RemoveEntityTemplate { template_id } => {
                     let slug = template_id
                         .strip_prefix("genome/")
@@ -382,6 +400,13 @@ impl WorldPatch {
                     world.authoring.rules.insert(id.clone(), rule.clone());
                     world.authoring.rule_fault = None;
                     report.rules_updated += 1;
+                }
+                Prepared::RemoveRule(id) => {
+                    world.authoring.rules.remove(id);
+                    if world.authoring.rule_fault.as_ref().is_some_and(|(fault, _)| fault == id) {
+                        world.authoring.rule_fault = None;
+                    }
+                    report.rules_removed += 1;
                 }
                 Prepared::Remove(slug) => {
                     for f in &mut world.factions {

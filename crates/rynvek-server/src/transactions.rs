@@ -75,7 +75,7 @@ impl TickRecord {
     }
 
     pub fn replay(&self, runtime: &ArenaRuntime) -> Result<ArenaRuntime, RynvekErrorCode> {
-        if self.format != "rynvek-tick/1"
+        if self.format != "rynvek-tick/2"
             || runtime.revision() != self.base_revision
             || runtime.state_root() != self.base_root
             || runtime.tick.checked_add(1) != Some(self.target_tick)
@@ -194,7 +194,7 @@ impl TickCommitter {
                 continue;
             }
             if let Ok(record) = serde_json::from_slice::<TickRecord>(&bytes) {
-                if record.format != "rynvek-tick/1"
+                if record.format != "rynvek-tick/2"
                     || record.revision != commit.world_revision
                     || record.state_root != commit.state_root_blake3
                     || record.tick != commit.tick

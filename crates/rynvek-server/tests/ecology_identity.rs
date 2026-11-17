@@ -83,7 +83,7 @@ fn next_record(runtime: &ArenaRuntime) -> (ArenaRuntime, TickRecord) {
     let mut c = runtime.candidate_tick().unwrap();
     c.finish_tick().unwrap();
     let r = TickRecord {
-        format: "rynvek-tick/1".into(),
+        format: "rynvek-tick/2".into(),
         base_revision: runtime.revision(),
         base_root: runtime.state_root(),
         target_tick: runtime.tick + 1,

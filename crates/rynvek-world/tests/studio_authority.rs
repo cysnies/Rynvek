@@ -123,3 +123,48 @@ fn untrusted_genome_dimensions_and_forbidden_rule_components_are_rejected_withou
     let source = graph().replace("unit.actions.move_x", "energy.stored");
     assert!(compile_action_rule(&source).is_err());
 }
+
+#[test]
+fn rule_delete_recreate_is_epoch_atomic_and_preserves_unrelated_faults() {
+    let mut runtime = ArenaRuntime::new([26; 16], ArenaWorld::new(MatchConfig::pve(42, 1)));
+    let source = graph();
+    let hash = Blake3Hash::of(&rynvek_rules::encode_rir(&compile_action_rule(&source).unwrap())).0;
+    let update = |id: &str| WorldPatchOp::UpdateRuleModule {
+        module_id: id.into(), rule_graph_json: source.clone(), compiled_rir_blake3: hash,
+    };
+    let remove = |id: &str| WorldPatchOp::RemoveRuleModule { module_id: id.into() };
+    let create = patch(vec![update("control"), update("other")]);
+    runtime.transact_authoring_at(4, |w| create.apply_at_boundary(w, 4)).unwrap();
+    let before = runtime.state_root();
+    // 删除不存在模块、同包重复删除及坏摘要都必须预检整包回滚。
+    for ops in [vec![remove("control"), remove("missing")], vec![remove("control"), remove("control")],
+        vec![remove("control"), WorldPatchOp::UpdateRuleModule { module_id:"bad".into(), rule_graph_json:source.clone(), compiled_rir_blake3:[0;32] }],
+        vec![remove("bad/id")]] {
+        assert!(runtime.transact_authoring_at(8, |w| patch(ops).apply_at_boundary(w, 8)).is_err());
+        assert_eq!(runtime.state_root(), before);
+    }
+    let delete = patch(vec![remove("control")]);
+    assert_eq!(delete.operations[0].required_safety_class(), LiveEditSafetyClass::EpochBoundarySafe);
+    assert!(runtime.transact_authoring_at(5, |w| delete.apply_at_boundary(w, 5)).is_err());
+    // 删除不同模块不能掩盖现存模块故障；删除故障模块必须去掉失效引用。
+    let mut world = runtime.world().clone();
+    world.authoring.rule_fault = Some(("other".into(), 7));
+    let report = delete.apply_at_boundary(&mut world, 4).unwrap();
+    assert_eq!(report.rules_removed, 1);
+    assert_eq!(world.authoring.rule_fault, Some(("other".into(), 7)));
+    patch(vec![remove("other")]).apply_at_boundary(&mut world, 4).unwrap();
+    assert!(world.authoring.rule_fault.is_none());
+    let report = runtime.transact_authoring_at(8, |w| delete.apply_at_boundary(w, 8)).unwrap();
+    assert_eq!(report.rules_removed, 1);
+    assert!(!runtime.world().authoring.rules.contains_key("control"));
+    let checkpoint = runtime.checkpoint().unwrap();
+    let mut recovered = ArenaRuntime::restore([26;16], runtime.revision(), runtime.state_root(), &checkpoint.bytes).unwrap();
+    // 同包删除后重建按顺序检查，与撤销一样恢复精确源和编译摘要。
+    let restore = patch(vec![remove("other"), update("other"), update("control")]);
+    runtime.transact_authoring_at(12, |w| restore.apply_at_boundary(w, 12)).unwrap();
+    recovered.transact_authoring_at(12, |w| restore.apply_at_boundary(w, 12)).unwrap();
+    assert_eq!(runtime.state_root(), recovered.state_root());
+    assert_eq!(runtime.world().authoring.rules["control"].rule_graph_json, source);
+    assert_eq!(runtime.world().authoring.rules["control"].compiled_rir_blake3, hash);
+    assert!(runtime.world().units.values().all(|u| u.actions[0] == 128));
+}
