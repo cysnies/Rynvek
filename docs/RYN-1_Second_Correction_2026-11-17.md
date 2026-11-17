@@ -65,3 +65,33 @@ cargo test -p rynvek-server --test hub_verify rworld_publish_upload_and_fs_cas_r
 2. 贯通 Server/Native/WASM 同记录的根一致性与重连恢复；完善事件 WAL 和迁移，检查点克隆的正确性路径再按实测优化，不直接当作实时热路径。
 3. 挂载真实 Web Arena 页面和只读场景，复用现有框选/下令/建造及网络控制器，做真实新建局→操作→胜负→回放切片；浏览器验收交由父代理安排，本批不操作浏览器。
 4. 神经能量/吸收分泌/生死繁殖/遗传谱系的因果闭环、开放规则包实际注入和三方真实共局仍必须继续完成。没有以本批服务端修复代替这些设计目标。
+
+
+## PR2 门禁纠偏追加（2026-11-17，中国标准时间 UTC+8）
+
+### 失败证据与归因
+
+- PR2 仍 OPEN，修复起点为远端与本地相同的 `9180b729f65f50672afb053fd678c30fe558b881`，开始时工作区干净；没有把上面的 115 项针对性通过解释为完整 CI 通过。
+- 原失败 run：<https://github.com/cysnies/Rynvek/actions/runs/44015804731>，job `133813334580`。`gh run view ... --job ... --log-failed` 显示 2026-11-17 12:18:26（中国标准时间 UTC+8）在 **第一步 fmt** 返回 exit 1，尚未进入 clippy / 全工作区测试 / golden / plugin-fixtures / license / TS / Python / soak。不能将未执行步骤列作通过。
+- 原因是 8 个已有文件不符合仓库当前 Rust 1.87.0/rustfmt 配置：audio/lib、core/fixed、ecs/identity、ecs/soa、rts/brain、rts/tests/state_root_matrix、spatial/bvh、world/lib。逐文件比较证明这些文件在 PR2 修复起点与首批合并基线 `330a01a` 字节相同；这是本批继承的基线格式问题，不是 Runtime 事务逻辑回归，也没有环境故障证据。
+- 本地原样运行 `cargo fmt --all --check` 实际返回 1，修复后同一命令返回 0。没有改 rustfmt 配置，也没有把全局检查缩成仅检查改动文件。
+
+### 最小修复与兼容边界
+
+1. `d83b830`：仅用仓库冻结工具链格式化上述 8 文件。
+2. `a0cf3d5`：CI 前置编译还报告 3 项既有警告，保留它们会使下一步 `clippy -D warnings` 失败：将无仓库内调用方的 `FrameKind::TickCommit` 常量按 Rust 命名规则更名为 `FrameKind::TICK_COMMIT`；移除 Contact 接触索引中未读取的内部 `is_building` 标记（单位/建筑分桶仍保留，战斗模块使用的标记不变）；移除 partition 的未使用导入。
+3. 别名更名属于 Rust 源级 API 命名修正；外部源码若引用旧常量应改用 `FrameKind::Commit` 或 `FrameKind::TICK_COMMIT`。实际枚举 `Commit`、值 1、序列化以及 WAL 格式不变；已有日志帧 roundtrip 增补别名与 wire tag 断言。没有用新增 allow、降级 -D warnings 或改协议格式隐藏警告。
+4. CI workflow、门禁步骤、阈值、既有断言、许可证与 tier DAG 均不变；没有新增 skip / ignore。保留原有全部设计目标。
+
+### 本轮验证（与之前 115 项重叠，不能累加）
+
+公共环境仍为 `CARGO_TARGET_DIR=/workspace/rynvek/target CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2`，复用既有缓存。实际结果见本节后续记录及 PR2 最新远端 run；提交文档时本轮远端全门禁尚未验证，不能预报绿色。
+
+- `cargo fmt --all --check`：红测 exit 1 → 修复后 exit 0。
+- `cargo clippy -p rynvek-journal -p rynvek-rts -p rynvek-world --lib -- -D warnings`：通过。
+- `cargo clippy -p rynvek-server -p rynvek-engine --all-targets -- -D warnings`：通过，含本批服务端/引擎测试目标的编译检查，不代表实际运行这些测试。
+- `cargo test -p rynvek-journal -p rynvek-rts -p rynvek-world --lib`：6 + 84 + 16 = **106 通过**，0 失败、0 ignored，含本轮新增的日志帧别名/wire tag 断言；与之前的 115 项大量重叠，不简单累加。
+- `cargo clippy -p rynvek-audio -p rynvek-core -p rynvek-ecs -p rynvek-spatial -p rynvek-journal -p rynvek-rts -p rynvek-world --all-targets -- -D warnings`：本轮其他触及 crate 的全部目标预检通过，仍不是全工作区 clippy。
+- `git diff --check`：通过。收尾可用约 16GB；无安装下载、全工作区构建或删除旧 target/缓存/用户数据。
+
+本轮优先处理门禁，不夹带活动 ArenaSession/MatchHost 新功能。该共享队列仍待下一批先红后绿接入：统一 tick 排队、真实应用、检查点提交、幂等与失败原子性；活动宿主仍显式拒绝 HTTP 旁路编辑，不能称为全部 Runtime 已统一或 WebArena 已可玩。不合并 PR2、不请求审阅；直接向现有分支正常推送，后续是否可合并仍取决于真实完整 CI。
