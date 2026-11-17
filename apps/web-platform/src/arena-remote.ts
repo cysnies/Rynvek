@@ -11,6 +11,7 @@ export interface WorldRun {
 export interface RankedSeat {
   status:"matched"; principal_id:string; match_id:string; world_id:string;
   faction:number; mode:MatchMode; league:string; match_state:string; tick:number;
+  host:{state:"local"|"remote"|"recoverable";origin:string|null;expires_at_s:number|null};
 }
 export interface QueueContext {
   principal_id:string; league:"human"; ruleset_hash:string;
@@ -76,10 +77,22 @@ export class ArenaWorldClient {
     else if(!["cancelled","not_queued"].includes(r.status))throw new Error("未知匹配状态");
     return r;
   }
+  async connectRanked(match:string,principal:string,signal?:AbortSignal):Promise<RankedSeat>{
+    const id=uuid(match).toLowerCase();
+    const seat=await this.request<RankedSeat>(`matches/${id}/connect`,"POST",undefined,signal);
+    this.checkSeat(seat,principal);
+    if(seat.match_id!==id||seat.mode!=="PvP_Ranked"||seat.league!=="human")throw new Error("连接回执不是本人当前人类排位");
+    if(seat.host.state!=="local")throw new Error(seat.host.state==="remote"?`当前健康宿主位于 ${seat.host.origin}；请核对可信服务地址后手动切换并重新验证身份，未向该地址转发凭据。`:"宿主恢复尚未确认，请刷新后重试");
+    return seat;
+  }
   private checkSeat(seat:RankedSeat,principal:string):void{
     uuid(seat.match_id);uuid(seat.world_id);
-    if(seat.principal_id!==principal||![0,1].includes(seat.faction)||!["PvP_Ranked","PvE_Survival"].includes(seat.mode)
+    if(seat.principal_id!==principal||![0,1].includes(seat.faction)||seat.mode!=="PvP_Ranked"
       ||!Number.isSafeInteger(seat.tick)||seat.tick<0)throw new Error("真实身份/席位不匹配");
+    if(!seat.host||!["local","remote","recoverable"].includes(seat.host.state)
+      ||(seat.host.expires_at_s!==null&&(!Number.isSafeInteger(seat.host.expires_at_s)||seat.host.expires_at_s<0)))throw new Error("宿主发现回执非法");
+    if(seat.host.origin!==null){const u=new URL(seat.host.origin);if(!["http:","https:"].includes(u.protocol)||u.username||u.password||u.pathname!=="/"||u.search||u.hash)throw new Error("宿主只允许无凭据的HTTP(S) origin");}
+    if(seat.host.state==="remote"&&!seat.host.origin)throw new Error("远端宿主没有公布可信入口，请联系部署管理员");
   }
   async createCustom(title:string,mapSeed:number,signal?:AbortSignal):Promise<string>{
     if(!title.trim()||!Number.isSafeInteger(mapSeed)||mapSeed<0)throw new Error("私有自创标题/seed非法");

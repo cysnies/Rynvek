@@ -9,7 +9,7 @@ const transcript=JSON.parse(readFileSync(resolve(process.cwd(),"../../tests/aren
 const welcome=transcript[0].recv[0].message;
 const initial=transcript[5].recv.find((e:{to:string})=>e.to==="human:p0").message.observation;
 const world="10000000-0000-4000-8000-000000000001",match="10000000-0000-4000-8000-000000000002",hash="ab".repeat(32);
-const seat={status:"matched",principal_id:"902",faction:1,mode:"PvP_Ranked",league:"human",match_id:match,world_id:world,match_state:"Lobby",tick:1};
+const seat={status:"matched",principal_id:"902",faction:1,mode:"PvP_Ranked",league:"human",match_id:match,world_id:world,match_state:"Lobby",tick:1,host:{state:"local",origin:"http://srv",expires_at_s:1900000000}};
 const ctx=(status="idle",active:unknown=null)=>({principal_id:"902",ruleset_hash:hash,league:"human",status,active});
 class Socket extends EventTarget{
  static all:Socket[]=[];static rejectLease=false;sent:Record<string,unknown>[]=[];closed=false;
@@ -45,7 +45,7 @@ it("正式身份读取规则集后显式入队，真队列取消回执，不创�
  expect(writes).toEqual([{league:"human",ruleset_hash:hash,cancel:false,poll:false},{league:"human",ruleset_hash:hash,cancel:true,poll:false}]);expect(Socket.all).toHaveLength(0);
 });
 it("服务端席位决定身份和阵营，经原握手租约命令进入排位，断开不假称离队",async()=>{
- const store=vi.spyOn(Storage.prototype,"setItem");const f=vi.fn(async()=>Response.json(ctx("matched",seat)));await mount(f);
+ const store=vi.spyOn(Storage.prototype,"setItem");const f=vi.fn(async(url:unknown)=>Response.json(String(url).endsWith("/connect")?seat:ctx("matched",seat)));await mount(f);
  btn("rank-auth").click();await vi.waitFor(()=>expect(btn("rank-enter").disabled).toBe(false));btn("rank-enter").click();
  await vi.waitFor(()=>expect(btn("surrender").disabled).toBe(false));const socket=Socket.all[0]!;
  expect(socket.url).toContain(world);expect(socket.url).not.toContain("secret");expect(socket.sent[0]).toMatchObject({type:"hello",principal_id:"902",faction:1,capability_token:"rank-memory-secret"});
@@ -60,6 +60,17 @@ it("迟到身份回执不能在断开后恢复匹配身份",async()=>{
  let done!:(r:Response)=>void;const f=vi.fn(()=>new Promise<Response>(r=>{done=r}));await mount(f);btn("rank-auth").click();await vi.waitFor(()=>expect(f).toHaveBeenCalledTimes(1));btn("disconnect").click();done(Response.json(ctx("matched",seat)));await Promise.resolve();await Promise.resolve();expect(btn("rank-enter").disabled).toBe(true);expect(Socket.all).toHaveLength(0);
 });
 it("未获得控制租约不开放排位命令，错误身份/阵营回执在WS前拒绝",async()=>{
- let active={...seat,faction:8};const f=vi.fn(async()=>Response.json(ctx("matched",active)));await mount(f);btn("rank-auth").click();await vi.waitFor(()=>expect(document.getElementById("rank-status")?.textContent).toContain("不匹配"));expect(Socket.all).toHaveLength(0);
+ let active={...seat,faction:8};const f=vi.fn(async(url:unknown)=>Response.json(String(url).endsWith("/connect")?active:ctx("matched",active)));await mount(f);btn("rank-auth").click();await vi.waitFor(()=>expect(document.getElementById("rank-status")?.textContent).toContain("不匹配"));expect(Socket.all).toHaveLength(0);
  active={...seat};input("capability").value="rank-memory-secret";btn("rank-auth").click();await vi.waitFor(()=>expect(btn("rank-enter").disabled).toBe(false));Socket.rejectLease=true;btn("rank-enter").click();await vi.waitFor(()=>expect(document.getElementById("connection")?.textContent).toContain("未确认"));expect(btn("surrender").disabled).toBe(true);expect(Socket.all[0]?.sent.some(m=>m.type==="command")).toBe(false);
+});
+
+it("健康远端宿主只展示发现结果，不跨origin发Bearer或创建WS",async()=>{
+ const remote={...seat,host:{state:"remote",origin:"https://trusted-node.example",expires_at_s:1900000000}};
+ const f=vi.fn(async(url:unknown)=>{expect(String(url).startsWith("http://srv/")).toBe(true);return Response.json(String(url).endsWith("/connect")?remote:ctx("matched",remote));});
+ await mount(f);btn("rank-auth").click();await vi.waitFor(()=>expect(btn("rank-enter").disabled).toBe(false));btn("rank-enter").click();
+ await vi.waitFor(()=>expect(document.body.textContent).toContain("未向该地址转发凭据"));expect(Socket.all).toHaveLength(0);expect(btn("surrender").disabled).toBe(true);
+});
+it("断开后的迟到宿主恢复回执不得建立WS或重新激活身份",async()=>{
+ let done!:(r:Response)=>void;const f=vi.fn(async(url:unknown)=>String(url).endsWith("/connect")?await new Promise<Response>(r=>{done=r}):Response.json(ctx("matched",{...seat,host:{state:"recoverable",origin:null,expires_at_s:null}})));
+ await mount(f);btn("rank-auth").click();await vi.waitFor(()=>expect(btn("rank-enter").disabled).toBe(false));btn("rank-enter").click();await vi.waitFor(()=>expect(done).toBeTypeOf("function"));btn("disconnect").click();done(Response.json(seat));await Promise.resolve();await Promise.resolve();expect(Socket.all).toHaveLength(0);expect(btn("rank-enter").disabled).toBe(true);
 });
