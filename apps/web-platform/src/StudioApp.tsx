@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
+import {StudioCollaborationPanel} from "./StudioCollaborationPanel.js";
 import {ParameterRegistryPanel} from "./ParameterRegistryPanel.js";
 import {useEffect,useRef,useState} from "react";
 import {Button,Panel,ThemeProvider} from "@rynvek/ui";
@@ -16,17 +17,17 @@ export function StudioApp(){
   const [client,setClient]=useState<StudioClient|null>(null),[session,setSession]=useState<RemoteStudioSession|null>(null);
   const [committed,setCommitted]=useState<ReturnType<typeof snapshot>|null>(null);
   const [parameterMonitor,setParameterMonitor]=useState<{tick:number;revision:number;root:string;state:ParameterState}|null>(null);
-  const [busy,setBusy]=useState(false),[error,setError]=useState(""),[ack,setAck]=useState<AuthoringAck|null>(null),[version,bump]=useState(0);
+  const [busy,setBusy]=useState(false),[automatic,setAutomatic]=useState(false),[error,setError]=useState(""),[ack,setAck]=useState<AuthoringAck|null>(null),[version,bump]=useState(0);
   const [layout,setLayout]=useState(defaultStudioLayout),[parameter,setParameter]=useState(""),[value,setValue]=useState("{}");
   const [slug,setSlug]=useState(""),[genome,setGenome]=useState("{}"),[moduleId,setModuleId]=useState("control"),[rule,setRule]=useState(ruleExample);
   const [paint,setPaint]=useState({x0:0,y0:0,width:1,height:1,tile_kind:0});
   const epoch=useRef(0),request=useRef<AbortController|null>(null);
   useEffect(()=>()=>{epoch.current++;request.current?.abort()},[]);
-  function disconnect(){epoch.current++;request.current?.abort();setSession(null);setCommitted(null);setParameterMonitor(null);setClient(null);setAck(null);setToken("");setGenome("{}");setValue("{}");setRule(ruleExample);setSlug("");setParameter("");setError("");setBusy(false)}
+  function disconnect(){setAutomatic(false);epoch.current++;request.current?.abort();setSession(null);setCommitted(null);setParameterMonitor(null);setClient(null);setAck(null);setToken("");setGenome("{}");setValue("{}");setRule(ruleExample);setModuleId("control");setSlug("");setParameter("");setError("");setBusy(false)}
   async function perform(f:(signal:AbortSignal,live:()=>boolean)=>Promise<void>){
     request.current?.abort();const controller=new AbortController();request.current=controller;const own=++epoch.current;
     const live=()=>epoch.current===own&&!controller.signal.aborted;setBusy(true);setError("");
-    try{await f(controller.signal,live)}catch(e){if(live()){setError(String(e));if(session&&!session.valid){setSession(null);setCommitted(null);setParameterMonitor(null);setAck(null);setGenome("{}");setValue("{}");setRule(ruleExample);}}}finally{if(live())setBusy(false)}
+    try{await f(controller.signal,live)}catch(e){if(live()){setError(String(e));if(session&&!session.valid){disconnect();setError(String(e));}}}finally{if(live())setBusy(false)}
   }
   async function load(c:StudioClient,signal:AbortSignal,live:()=>boolean,worldId=world.trim()){
     const view=await c.view(worldId,signal);if(!live())return;
@@ -34,6 +35,8 @@ export function StudioApp(){
     const p=Object.keys(view.baseline.params??{}).find(k=>k!=="ecology.roles")??"";setParameter(p);setValue(view.baseline.params?.[p]??"{}");
     const g=Object.keys(view.baseline.genomes??{})[0]??"";setSlug(g);setGenome(g?JSON.stringify(JSON.parse(decodeGenome(view.baseline.genomes?.[g]??"")),null,2):"{}");
   }
+  const synchronize=()=>void perform(async(signal,live)=>{if(!session)return;await session.sync(signal);if(live()){setCommitted(snapshot(session));setParameterMonitor(null);bump(v=>v+1);}});
+  useEffect(()=>{if(!automatic||!session||!client||busy)return;const t=setTimeout(synchronize,1000);return()=>clearTimeout(t);},[automatic,session,client,busy,version]);
   const apply=(ops:readonly WorldPatchOp[])=>void perform(async(signal,live)=>{if(!session)return;const result=await session.edit(ops,signal);if(live()){setAck(result);setCommitted(snapshot(session));setParameterMonitor(null);bump(version+1)}});
   const flip=(redo:boolean)=>void perform(async(signal,live)=>{if(!session)return;const result=redo?await session.redoEdit(signal):await session.undoEdit(signal);if(live()){setAck(result);setCommitted(snapshot(session));setParameterMonitor(null);bump(version+1)}});
   const material=committed?.material;
@@ -48,7 +51,8 @@ export function StudioApp(){
   return <ThemeProvider><main className="lab-app"><style>{DOCK_STYLESHEET}</style><header><p>RYNVEK / STUDIO</p><h1>权威创作工作台</h1><a href="/arena">Arena</a> · <a href="/lab">Lab</a></header>
     <Panel title="连接私有世界"><div className="lab-controls"><label>服务origin<input aria-label="Studio服务地址" disabled={!!client||busy} value={origin} onChange={e=>setOrigin(e.target.value)}/></label><label>世界ID<input aria-label="世界ID" disabled={!!client||busy} value={world} onChange={e=>setWorld(e.target.value)}/></label>{!client?<><label>WorldEdit凭据<input aria-label="Studio令牌" type="password" autoComplete="off" value={token} onChange={e=>setToken(e.target.value)}/></label><Button disabled={busy||!token||!world} onClick={()=>void perform(async(s,l)=>load(new StudioClient(origin,token),s,l))}>连接权威世界</Button></>:<><Button disabled={busy} onClick={()=>void perform(async(s,l)=>load(client,s,l))}>刷新权威基线</Button><Button onClick={disconnect}>断开身份</Button></>}</div>{!client?<details><summary>创建当前格式私有实验世界</summary><p>沿用Lab显式角色建议（不是规范定值），可编辑；需WorldCreate权限。不是自动生成的演示世界。</p><label>标题<input aria-label="新世界标题" value={newTitle} onChange={e=>setNewTitle(e.target.value)}/></label><label>地图seed<input aria-label="地图seed" type="number" value={mapSeed} onChange={e=>setMapSeed(Number(e.target.value))}/></label><textarea aria-label="新世界生态JSON" rows={6} value={creationEcology} onChange={e=>setCreationEcology(e.target.value)}/><Button disabled={busy||!token} onClick={()=>void perform(async(signal,live)=>{const c=new StudioClient(origin,token);const id=await c.create(newTitle,mapSeed,creationEcology.trim()?JSON.parse(creationEcology):undefined,signal);if(!live())return;setWorld(id);try{await load(c,signal,live,id)}catch(e){throw new Error(`世界已创建 ${id}，连接失败：${String(e)}；不要重复创建`)}})}>创建私有世界并连接</Button></details>:null}<p>凭据只在内存，不放URL/存储。版本冲突/失败失效本地会话，刷新后再提交，不自动重试或覆盖他人。</p></Panel>
     {error?<p role="alert">{error}；若会话已失效，请刷新权威基线。</p>:null}
+    {session&&client?<StudioCollaborationPanel key={`${session.view.world_id}/${session.view.collaboration.grant_id??"owner"}`} client={client} session={session} busy={busy} work={perform} automatic={automatic} onAutomatic={setAutomatic} onSync={synchronize}/>:null}
     <Panel title="已提交状态"><p>{session?`世界 ${session.view.world_id} · Tick ${committed?.tick} · revision ${committed?.revision}`:"尚无权威基线"}</p><p className="rv-mono">{committed?.root}</p>{session?.view.rule_fault?<p role="alert">规则故障 {JSON.stringify(session.view.rule_fault)}（刷新获得最新事实）</p>:null}{session&&client?<p><a aria-label="在Arena运行当前世界" href={`/arena?world=${encodeURIComponent(session.view.world_id)}&api_origin=${encodeURIComponent(client.origin)}`}>在Arena运行/重连此已有世界</a>（只传世界ID/origin，不传凭据；在Arena重新输入正式身份。不另建practice。）</p>:null}<Button disabled={!session||busy||!session.undo.canUndo} onClick={()=>flip(false)}>权威撤销</Button><Button disabled={!session||busy||!session.undo.canRedo} onClick={()=>flip(true)}>权威重做</Button>{ack?<pre aria-label="权威提交回执">{JSON.stringify(ack,null,2)}</pre>:null}</Panel>
-    <div style={{height:750}}><DockWorkspace layout={layout} onLayoutChange={setLayout} panelTitle={id=>({world_editor:"地形与生命参数",neural_inspector:"真实基因与模板",rule_editor:"RuleGraph动作规则",timeline:"权威边界",rview_preview:"范围与后续"}[id]??id)} renderPanel={id=><div className="studio-panel">{id==="world_editor"?worldPanel:id==="neural_inspector"?genomePanel:id==="rule_editor"?rulePanel:id==="timeline"?<p>本工作台不提供假播放/单步。创作由原Actor在Tick/Epoch实际边界调度，可通过上方链接运行此已有世界；Arena提供原Actor命令与签名归档逐记录重演，不在编辑器内造第二世界。</p>:<p>当前未实现任意TS/rpack/.rview执行、多人协作流与一般W3；Lab持久作业已有独立真实入口。浏览器硬件未验，整体未完成。</p>}</div>}/></div>
+    <div style={{height:750}}><DockWorkspace layout={layout} onLayoutChange={setLayout} panelTitle={id=>({world_editor:"地形与生命参数",neural_inspector:"真实基因与模板",rule_editor:"RuleGraph动作规则",timeline:"权威边界",rview_preview:"范围与后续"}[id]??id)} renderPanel={id=><div className="studio-panel">{id==="world_editor"?worldPanel:id==="neural_inspector"?genomePanel:id==="rule_editor"?rulePanel:id==="timeline"?<p>本工作台不提供假播放/单步。创作由原Actor在Tick/Epoch实际边界调度，可通过上方链接运行此已有世界；Arena提供原Actor命令与签名归档逐记录重演，不在编辑器内造第二世界。</p>:<p>当前未实现任意TS/rpack/.rview执行与一般W3；当前协作为定向私有准入和原日志分页同步，不是离线自动合并或在线光标；Lab持久作业已有独立真实入口。浏览器硬件未验，整体未完成。</p>}</div>}/></div>
   </main></ThemeProvider>;
 }

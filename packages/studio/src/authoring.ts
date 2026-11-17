@@ -211,6 +211,19 @@ export class AuthoringDocument {
     return { applied: true, conflicts };
   }
 
+  /** 在线权威链按真实提交修订排序，而非相信协作者墙钟；patch ID/逆操作历史保留。 */
+  public integrateCommitted(input:WorldPatch,revision:number):IntegrateResult {
+    if(!Number.isSafeInteger(revision)||revision<1)throw new RangeError("提交修订非法");
+    const patch={...input,hlc:{wall_time_ms:revision,logical_counter:0,author_node_id:input.hlc.author_node_id}};
+    const id=patchIdHex(patch.patch_id);
+    if(!this.patches.has(id)){const result=this.integrate(patch);this.revisionOffset--;return result;}
+    // 本地已暂存的同ID在ack后定序；离线CRDT integrate仍保留原HLC语义。
+    this.patches.set(id,patch);
+    const restamp=<T>(map:Map<unknown,Write<T>[]>)=>{for(const h of map.values()){for(let i=0;i<h.length;i++){const w=h[i]!;if(w.stamp.patch===id)h[i]={...w,stamp:{...w.stamp,hlc:patch.hlc}};}h.sort((a,b)=>compareStamp(a.stamp,b.stamp));}};
+    restamp(this.params);restamp(this.tiles);restamp(this.catalogue);restamp(this.rules);restamp(this.removals);
+    return {applied:false,conflicts:[]};
+  }
+
   /** 整合一批补丁（顺序无关） */
   public integrateAll(patches: Iterable<WorldPatch>): WriteConflict[] {
     const out: WriteConflict[] = [];
