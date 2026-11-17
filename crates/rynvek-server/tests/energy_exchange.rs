@@ -26,15 +26,29 @@ async fn restored(server: &RunningServer, world_id: WireUuid) -> ArenaRuntime {
 
 #[tokio::test]
 async fn explicit_pve_energy_version_is_authoritative_private_and_replayable() {
-    run_energy_version("energy_exchange_v1", EcologyVersion::EnergyExchangeV1).await;
+    run_energy_version("energy_exchange_v1", EcologyVersion::EnergyExchangeV1, None).await;
 }
 
 #[tokio::test]
 async fn explicit_forager_budget_version_uses_real_actor_and_wal() {
-    run_energy_version("forager_budget_v2", EcologyVersion::ForagerBudgetV2).await;
+    run_energy_version("forager_budget_v2", EcologyVersion::ForagerBudgetV2, None).await;
 }
 
-async fn run_energy_version(name: &str, version: EcologyVersion) {
+#[tokio::test]
+async fn explicit_basal_survival_contract_really_kills_fed_foragers_in_actor_and_wal() {
+    // 实验数值特意高于单Tick真实摄食量；不是声称v1规定了这一平衡值。
+    let params = serde_json::from_value(
+        json!({"activation":"after_first_uptake","basal_cost_micro_per_tick":2_000_000,"reserve_ticks":4}),
+    )
+    .unwrap();
+    run_energy_version("forager_budget_v2", EcologyVersion::ForagerBudgetV2, Some(params)).await;
+}
+
+async fn run_energy_version(
+    name: &str,
+    version: EcologyVersion,
+    survival: Option<rynvek_rts::world::ecology::ForagerSurvivalContract>,
+) {
     let server = start_server(false).await;
     let base = server.base_url();
     let owner = register(&base, "energy-owner", "human", 101).await;
@@ -52,7 +66,7 @@ async fn run_energy_version(name: &str, version: EcologyVersion) {
         "POST",
         &url,
         Some(&owner.token),
-        &json!({"title":"真实能量交换","template":"arena_pve","map_seed":57,"visibility":"Public","ecology":name}),
+        &json!({"title":"真实能量交换","template":"arena_pve","map_seed":57,"visibility":"Public","ecology":name,"forager_survival":survival}),
     )
     .await
     .unwrap();
@@ -91,6 +105,7 @@ async fn run_energy_version(name: &str, version: EcologyVersion) {
         .unwrap();
     let mut config = MatchConfig::pve(57, 1);
     config.ecology = Some(version);
+    config.forager_survival = survival;
     let host = server
         .state
         .attach_world_host(MatchSpec {
@@ -190,7 +205,21 @@ async fn run_energy_version(name: &str, version: EcologyVersion) {
         assert_eq!(replayed.ecology, original.ecology);
     }
     let eco = original.ecology.as_ref().unwrap();
-    assert!(eco.bodies.values().any(|b| b.account.received_q > 0));
+    if survival.is_some() {
+        assert!(
+            eco.remains.values().any(|b| b.account.received_q > 0),
+            "真实Actor必须产生已进食后的代谢死亡，不能只保存参数"
+        );
+        for (id, body) in eco.remains.iter().filter(|(_, b)| b.account.received_q > 0) {
+            assert!(!original.units.contains_key(id));
+            assert_eq!(body.account.dissipated_q, body.account.received_q);
+            assert_eq!(body.account.stored_q, 0);
+            assert_eq!(body.account.returned_q, 0);
+            assert!(body.account.is_conserved());
+        }
+    } else {
+        assert!(eco.bodies.values().any(|b| b.account.received_q > 0));
+    }
     assert!(eco.bodies.values().all(|b| b.account.is_conserved()));
     let viewer = register(&base, "energy-viewer", "human", 102).await;
     let public = client::get(&url, Some(&viewer.token)).await.unwrap();
@@ -288,4 +317,33 @@ fn budget_denial_and_real_refeeding_survive_serialized_tick_wal() {
     assert_eq!(a.unfunded_q, 0);
     assert!(a.is_conserved());
     assert_ne!(original.units[&id].brain.state_root(), before);
+}
+
+#[tokio::test]
+async fn survival_contract_cannot_sneak_into_legacy_or_invalid_worlds() {
+    let server = start_server(false).await;
+    let base = server.base_url();
+    let owner = register(&base, "survival-validation", "human", 105).await;
+    let url = format!("{base}/api/v1/worlds");
+    let params = json!({"activation":"after_first_uptake","basal_cost_micro_per_tick":1000,"reserve_ticks":4});
+    for ecology in [serde_json::Value::Null, json!("energy_exchange_v1")] {
+        let res = client::send_json(
+            "POST",
+            &url,
+            Some(&owner.token),
+            &json!({"title":"拒绝隐式升级","template":"arena_pve","ecology":ecology,"forager_survival":params}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(res.status, 400);
+    }
+    for bad in [
+        json!({"activation":"after_first_uptake","reserve_ticks":4}),
+        json!({"activation":"after_first_uptake","basal_cost_micro_per_tick":0,"reserve_ticks":4}),
+        json!({"activation":"after_first_uptake","basal_cost_micro_per_tick":u32::MAX,"reserve_ticks":u32::MAX}),
+    ] {
+        let res=client::send_json("POST",&url,Some(&owner.token),&json!({"title":"拒绝非法代谢参数","template":"arena_pve","ecology":"forager_budget_v2","forager_survival":bad})).await.unwrap();
+        assert_eq!(res.status, 400);
+    }
+    server.shutdown().await;
 }

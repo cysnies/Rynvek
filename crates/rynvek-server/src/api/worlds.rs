@@ -120,6 +120,8 @@ struct CreateWorld {
     /// 仅 PvE 新世界显式启用；既有世界和排位绝不自动改变规则。
     #[serde(default)]
     ecology: Option<rynvek_rts::world::ecology::EcologyVersion>,
+    #[serde(default)]
+    forager_survival: Option<rynvek_rts::world::ecology::ForagerSurvivalContract>,
 }
 
 /// `.rworld` 上传时通过查询串传递的元数据（请求体是二进制包）
@@ -165,6 +167,8 @@ pub async fn create(
             return Err(ApiError::bad_request("未认证的能量规则仅可用于PvE新世界"));
         }
         config.ecology = req.ecology;
+        config.forager_survival = req.forager_survival;
+        config.validate_energy_contract().map_err(ApiError::bad_request)?;
         let manifest = serde_json::json!({ "template": req.template, "config": config });
         (req.title, req.org_id, req.visibility, config, mode, manifest)
     } else if content_type.starts_with(rynvek_world::rworld::RWORLD_MEDIA_TYPE)
