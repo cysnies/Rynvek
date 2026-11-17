@@ -52,6 +52,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/worlds/{world_id}/commits", get(worlds::commits))
         .route("/api/v1/worlds/{world_id}/fork", post(worlds::fork))
         .route("/api/v1/worlds/{world_id}/patches", post(worlds::patches))
+        .route("/api/v1/worlds/{world_id}/authoring", get(worlds::authoring))
+        .route(
+            "/api/v1/worlds/{world_id}/authoring/compile-rule",
+            post(worlds::compile_authoring_rule),
+        )
         .route("/api/v1/worlds/{world_id}/stream", get(worlds::stream))
         .route("/api/v1/matches/queue", post(matches::queue))
         .route("/api/v1/matches/{match_id}", get(matches::get_match))

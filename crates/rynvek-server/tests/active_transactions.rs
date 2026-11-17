@@ -195,7 +195,9 @@ async fn active_http_queue_commit_conflict_restore_and_replay() {
     let response = request.await.unwrap();
     assert_eq!(response.status, 200, "{}", String::from_utf8_lossy(&response.body));
     assert_eq!(response.json().unwrap()["effective_tick"], 1);
-    engine.transact_at(1, |w| input.apply_at_boundary(w, 1)).unwrap();
+    engine
+        .transact_authoring_at(1, |w| input.apply_at_boundary(w, 1))
+        .unwrap();
     assert_eq!(
         engine.state_root(),
         f.host.status().state_root,
@@ -366,7 +368,7 @@ async fn commands_and_patches_share_ordered_tick_and_signed_completion() {
     engine.command(rynvek_rts::FactionId(0), &command).unwrap();
     let paint = patch(11, 0, 100);
     engine
-        .transact_at(0, |world| paint.apply_at_boundary(world, 1))
+        .transact_authoring_at(0, |world| paint.apply_at_boundary(world, 1))
         .unwrap();
     engine.finish_tick().unwrap();
     let bytes = serde_json::to_vec(&env).unwrap();
@@ -514,4 +516,92 @@ async fn periodic_checkpoint_and_wal_suffix_restore_the_same_runtime() {
     assert_eq!(restored.state_root(), f.host.status().state_root);
     f.host.abort("周期锚点用例结束").await;
     f.server.shutdown().await;
+}
+
+#[tokio::test]
+async fn studio_action_rule_enters_real_actor_epoch_and_committed_restore() {
+    let f = Fixture::new().await;
+    let source=json!({"format":"rynvek.rule-graph.v1","name":"活动动作","writes":[{"component":"unit.actions.move_x","ty":"Q8_8"}],"nodes":[{"op":"ConstQ8_8","imm":"128"},{"op":"EmitComponentWrite","component":"unit.actions.move_x","args":[0]}]}).to_string();
+    let module = rynvek_rts::world::authoring::compile_action_rule(&source).unwrap();
+    let digest = rynvek_core::Blake3Hash::of(&rynvek_rules::encode_rir(&module)).0;
+    let mut input = patch(29, 0, 100);
+    input.safety_class = rynvek_world::LiveEditSafetyClass::EpochBoundarySafe;
+    input.operations = vec![WorldPatchOp::UpdateRuleModule {
+        module_id: "control".into(),
+        rule_graph_json: source,
+        compiled_rir_blake3: digest,
+    }];
+    let pending = f.post(&input);
+    f.queued(1).await;
+    assert!(!pending.is_finished());
+    f.host.advance(4).await.unwrap();
+    let response = pending.await.unwrap();
+    assert_eq!(response.status, 200, "{}", String::from_utf8_lossy(&response.body));
+    assert_eq!(response.json().unwrap()["effective_tick"], 4);
+    let restored = f.runtime().await;
+    assert!(restored.world().authoring.rules.contains_key("control"));
+    assert!(restored.world().units.values().all(|u| u.actions[0] == 128));
+    f.host.abort("短定向用例完成").await;
+    f.server.shutdown().await;
+}
+
+#[test]
+fn ecology_authoring_change_replays_same_wal_without_relaxing_normal_config_freeze() {
+    use rynvek_rts::world::ecology::{EcologyContract, RoleEnergyContract};
+    use rynvek_server::transactions::{TickInput, TickRecord};
+    let mut config = MatchConfig::pve(42, 1);
+    let role = RoleEnergyContract {
+        basal_cost_micro_per_tick: 100,
+        reserve_ticks: 4,
+        birth_energy_milli: 1000,
+        movement_cost_micro_per_tile: 100,
+        synapse_maintenance_micro_per_tick: 1,
+        natural_reproduction: true,
+        replication_mutation_rate_permille: 50,
+    };
+    config.ecology = Some(EcologyContract::single(rynvek_rts::UnitKind::Forager, role));
+    let mut before = ArenaRuntime::new([95; 16], rynvek_rts::ArenaWorld::new(config));
+    for _ in 0..3 {
+        before.step().unwrap();
+    }
+    let mut input = patch(31, before.revision(), 100);
+    input.safety_class = rynvek_world::LiveEditSafetyClass::EpochBoundarySafe;
+    let mut next = role;
+    next.birth_energy_milli = 1200;
+    next.replication_mutation_rate_permille = 0;
+    input.operations = vec![WorldPatchOp::SetWorldParam {
+        key_path: "ecology.roles.unit.forager".into(),
+        new_value_json: serde_json::to_string(&next).unwrap(),
+    }];
+    let mut ordinary = before.clone();
+    assert!(
+        ordinary
+            .transact_at(3, |w| {
+                w.config
+                    .ecology
+                    .as_mut()
+                    .unwrap()
+                    .roles
+                    .insert(rynvek_rts::UnitKind::Forager, next);
+                Ok(())
+            })
+            .is_err()
+    );
+    assert_eq!(ordinary.state_root(), before.state_root());
+    let mut candidate = before.candidate_tick().unwrap();
+    let report = candidate
+        .transact_authoring_at(3, |w| input.apply_at_boundary(w, 4))
+        .unwrap();
+    candidate.finish_tick().unwrap();
+    let record = TickRecord {
+        format: "rynvek-tick/1".into(),
+        base_revision: before.revision(),
+        base_root: before.state_root(),
+        target_tick: 4,
+        tick: candidate.tick,
+        revision: candidate.revision(),
+        state_root: candidate.state_root(),
+        inputs: vec![TickInput::Patch { patch: input, report }],
+    };
+    assert_eq!(record.replay(&before).unwrap().state_root(), candidate.state_root());
 }

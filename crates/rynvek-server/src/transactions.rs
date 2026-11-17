@@ -89,7 +89,8 @@ impl TickRecord {
                 TickInput::Command { faction, command, .. } => candidate.command(FactionId(*faction), command)?,
                 TickInput::Patch { patch, report } => {
                     if patched
-                        || patch.base_authoring_revision != self.base_revision
+                        || patch.base_authoring_revision > self.base_revision
+                        || patch.base_authoring_revision < runtime.world().authoring.last_edit_revision
                         || candidate.outcome.is_some()
                         || report.requires_fork
                     {
@@ -97,7 +98,8 @@ impl TickRecord {
                     }
                     patched = true;
                     let tick = candidate.tick;
-                    let actual = candidate.transact_at(tick, |w| patch.apply_at_boundary(w, self.target_tick))?;
+                    let actual =
+                        candidate.transact_authoring_at(tick, |w| patch.apply_at_boundary(w, self.target_tick))?;
                     if &actual != report {
                         return Err(RynvekErrorCode::Blake3ChecksumMismatch);
                     }

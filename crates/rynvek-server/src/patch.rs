@@ -19,7 +19,7 @@ pub fn required_class(op: &WorldPatchOp) -> LiveEditSafetyClass {
             match key_path.split('.').next().unwrap_or_default() {
                 "presentation" | "visual" | "ui" | "audio" => C::HotSafePresentation,
                 "field" | "economy" | "buildings" | "units" => C::TickBoundarySafe,
-                "neural" | "rules" => C::EpochBoundarySafe,
+                "neural" | "rules" | "ecology" => C::EpochBoundarySafe,
                 // `world.*` 与所有未登记命名空间：最保守
                 _ => C::RequiresForkRestart,
             }

@@ -621,7 +621,7 @@ async fn ryn1_http_patch_commits_real_simulation_or_rejects_without_changes() {
     ]))
     .unwrap();
     engine
-        .transact_at(1, |arena| operation.apply_at_boundary(arena, 1))
+        .transact_authoring_at(1, |arena| operation.apply_at_boundary(arena, 1))
         .unwrap();
     assert_eq!(engine.state_root(), latest.state_root_blake3);
     for _ in 0..4 {
@@ -774,7 +774,7 @@ async fn ryn1_private_checkpoint_survives_host_recreation() {
     );
     let operation: rynvek_world::WorldPatch = serde_json::from_value(patch(1)).unwrap();
     expected
-        .transact_at(8, |world| operation.apply_at_boundary(world, 8))
+        .transact_authoring_at(8, |world| operation.apply_at_boundary(world, 8))
         .unwrap();
     let applied = send(&second.base_url(), "POST", &path, t, patch(1)).await;
     assert_eq!(applied.status, 200, "{}", String::from_utf8_lossy(&applied.body));
@@ -856,5 +856,88 @@ async fn ecology_lab_exports_private_real_lineage_energy_and_structured_status()
         .status,
         400
     );
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn studio_authoring_real_params_genome_rule_template_commit_and_private_restore() {
+    use base64::Engine as _;
+    let server = start_server(false).await;
+    let base = server.base_url();
+    let owner = register(&base, "studio-owner", "human", 71).await;
+    let other = register(&base, "studio-other", "human", 72).await;
+    let t = Some(owner.token.as_str());
+    let role = json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":true,"replication_mutation_rate_permille":50});
+    let created = send(
+        &base,
+        "POST",
+        "/api/v1/worlds",
+        t,
+        json!({"title":"真实创作","template":"arena_pve","map_seed":42,"ecology":{"roles":{"unit.forager":role}}}),
+    )
+    .await
+    .json()
+    .unwrap();
+    let wid = created["world_id"].as_str().unwrap();
+    let read = format!("/api/v1/worlds/{wid}/authoring");
+    let path = format!("/api/v1/worlds/{wid}/patches");
+    let compile = format!("{read}/compile-rule");
+    assert_eq!(get(&base, &read, Some(&other.token)).await.status, 404);
+    let view_response = get(&base, &read, t).await;
+    assert_eq!(view_response.status, 200);
+    assert_eq!(view_response.header("cache-control"), Some("private, no-store"));
+    let view = view_response.json().unwrap();
+    let original = view["baseline"]["genomes"]["seed.forager.v1"].as_str().unwrap();
+    let bytes = base64::engine::general_purpose::STANDARD.decode(original).unwrap();
+    let mut genome: Value = serde_json::from_slice(&bytes).unwrap();
+    genome["slug"] = json!("studio.custom");
+    genome["w_in"][0] = json!(37);
+    let source=json!({"format":"rynvek.rule-graph.v1","name":"工作台动作","writes":[{"component":"unit.actions.move_x","ty":"Q8_8"}],"nodes":[{"op":"ConstQ8_8","imm":"128"},{"op":"EmitComponentWrite","component":"unit.actions.move_x","args":[0]}]}).to_string();
+    assert_eq!(
+        send(
+            &base,
+            "POST",
+            &compile,
+            Some(&other.token),
+            json!({"rule_graph_json":source})
+        )
+        .await
+        .status,
+        404
+    );
+    let compiled = send(&base, "POST", &compile, t, json!({"rule_graph_json":source})).await;
+    assert_eq!(compiled.status, 200, "{}", String::from_utf8_lossy(&compiled.body));
+    let hash = compiled.json().unwrap()["compiled_rir_blake3"].clone();
+    let mut updated = role.clone();
+    updated["replication_mutation_rate_permille"] = json!(0);
+    updated["birth_energy_milli"] = json!(1200);
+    let patch = json!({"patch_id":vec![22;16],"base_authoring_revision":0,"hlc":{"wall_time_ms":1,"logical_counter":0,"author_node_id":1},"safety_class":"EpochBoundarySafe","operations":[
+        {"SetWorldParam":{"key_path":"ecology.roles.unit.forager","new_value_json":updated.to_string()}},
+        {"UpsertSeedGenome":{"genome_slug":"studio.custom","genome_bytes_b64":base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&genome).unwrap())}},
+        {"UpdateRuleModule":{"module_id":"control","rule_graph_json":source,"compiled_rir_blake3":hash}},
+        {"RemoveEntityTemplate":{"template_id":"genome/seed.forager.v1"}}
+    ]});
+    let result = send(&base, "POST", &path, t, patch.clone()).await;
+    assert_eq!(result.status, 200, "{}", String::from_utf8_lossy(&result.body));
+    let ack = result.json().unwrap();
+    assert_eq!(ack["report"]["rules_updated"], 1);
+    // 此读取重新从真实已提交检查点恢复，不使用浏览器CRDT镜像。
+    let restored = get(&base, &read, t).await.json().unwrap();
+    assert_eq!(restored["revision"], ack["world_revision"]);
+    assert_eq!(restored["state_root"], ack["state_root"]);
+    assert!(restored["baseline"]["genomes"].get("seed.forager.v1").is_none());
+    assert!(restored["baseline"]["genomes"].get("studio.custom").is_some());
+    assert_eq!(restored["baseline"]["rules"]["control"]["compiled_rir_blake3"], hash);
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            restored["baseline"]["params"]["ecology.roles.unit.forager"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
+        updated
+    );
+    assert_eq!(send(&base, "POST", &path, t, patch).await.status, 409);
+    assert_eq!(get(&base, &read, t).await.json().unwrap(), restored);
     server.shutdown().await;
 }

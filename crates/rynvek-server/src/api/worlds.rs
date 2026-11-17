@@ -446,7 +446,7 @@ pub async fn patches(
     let (_, scheduled_tick) = crate::patch::schedule(patch.safety_class, world.latest_tick);
     let effective_tick = scheduled_tick.unwrap_or(world.latest_tick);
     let report = runtime
-        .transact_at(effective_tick, |arena| patch.apply_at_boundary(arena, effective_tick))
+        .transact_authoring_at(effective_tick, |arena| patch.apply_at_boundary(arena, effective_tick))
         .map_err(|e| ApiError::new(e, "补丁未应用：整包事务已拒绝").with_status(StatusCode::UNPROCESSABLE_ENTITY))?;
     let checkpoint = runtime
         .checkpoint()
@@ -540,4 +540,81 @@ pub fn axum_link(socket: WebSocket) -> Link {
         Err(e) => Err(NetError::Transport(e.to_string())),
     });
     Link::from_messages(TransportKind::WebSocket, Box::pin(sink), stream)
+}
+
+/// Studio私有创作基线：读取已提交的同一Actor/快照/WAL权威世界，不泄露给只读玩家。
+pub async fn authoring(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
+    use base64::Engine as _;
+    use std::collections::BTreeMap;
+    let subject = app.require(&headers, CapabilityScope::WorldEdit).await?;
+    let row = load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
+    let runtime = restore_runtime(&app, &row).await?;
+    let world = runtime.world();
+    // 通用补丁面向共享种子目录；不同阵营私有定向繁育目录不伪装成同一可撤销基线。
+    let mut genomes = BTreeMap::new();
+    if let Some(first) = world.factions.first() {
+        for (slug, g) in &first.genomes {
+            if world.factions.iter().all(|f| f.genomes.get(slug) == Some(g)) {
+                genomes.insert(
+                    slug.clone(),
+                    base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(g).expect("基因JSON")),
+                );
+            }
+        }
+    }
+    let templates: Vec<_> = genomes.keys().map(|s| format!("genome/{s}")).collect();
+    let mut params = BTreeMap::new();
+    if let Some(ecology) = &world.config.ecology {
+        params.insert(
+            "ecology.roles".to_string(),
+            serde_json::to_string(&ecology.roles).unwrap(),
+        );
+        for (kind, role) in &ecology.roles {
+            let key = serde_json::to_value(kind).unwrap();
+            params.insert(
+                format!("ecology.roles.{}", key.as_str().unwrap()),
+                serde_json::to_string(role).unwrap(),
+            );
+        }
+    }
+    let rules: BTreeMap<_, _> = world
+        .authoring
+        .rules
+        .iter()
+        .map(|(id, r)| {
+            (
+                id,
+                serde_json::json!({"rule_graph_json":r.rule_graph_json,"compiled_rir_blake3":r.compiled_rir_blake3}),
+            )
+        })
+        .collect();
+    let mut response=Json(serde_json::json!({"world_id":row.world_id.to_string(),"revision":runtime.revision(),"tick":world.tick,"state_root":hex(&runtime.state_root()),"rule_fault":world.authoring.rule_fault,"baseline":{"width":world.map.width,"height":world.map.height,"terrain":world.map.tiles.iter().map(|t|*t as u8).collect::<Vec<_>>(),"params":params,"genomes":genomes,"rules":rules,"templates":templates}})).into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    Ok(response)
+}
+#[derive(Debug, Deserialize)]
+pub struct CompileActionRule {
+    pub rule_graph_json: String,
+}
+/// 服务端真实编译与RIR摘要；同一编译器再次验证PATCH，不信任浏览器自报摘要。
+pub async fn compile_authoring_rule(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<CompileActionRule>,
+) -> ApiResult<Response> {
+    let subject = app.require(&headers, CapabilityScope::WorldEdit).await?;
+    load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
+    let module = rynvek_rts::world::authoring::compile_action_rule_detailed(&body.rule_graph_json)
+        .map_err(|e| ApiError::new(e.code, e.message))?;
+    let hash = rynvek_core::Blake3Hash::of(&rynvek_rules::encode_rir(&module));
+    let mut response=Json(serde_json::json!({"compiled_rir_blake3":hash.0,"gas_estimate":module.gas_estimate,"bindings":rynvek_rts::world::authoring::ACTION_COMPONENTS})).into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    Ok(response)
 }

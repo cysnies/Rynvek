@@ -1094,7 +1094,9 @@ impl Host {
                 }
                 return Ok(None);
             }
-            if patch.base_authoring_revision != self.session.world.revision() {
+            if patch.base_authoring_revision > self.session.world.revision()
+                || patch.base_authoring_revision < self.session.world.authoring.last_edit_revision
+            {
                 return Err(conflict("编辑基于过期修订"));
             }
             let bytes = serde_json::to_vec(&patch).expect("可序列化").len();
@@ -1180,7 +1182,8 @@ impl Host {
                 PendingInput::Patch(id) => {
                     let pending = self.patches.remove(&id).expect("排程引用存在");
                     let result = if patched
-                        || pending.patch.base_authoring_revision != previous.revision()
+                        || pending.patch.base_authoring_revision > previous.revision()
+                        || pending.patch.base_authoring_revision < previous.authoring.last_edit_revision
                         || self.session.world.outcome.is_some()
                     {
                         Err(conflict("同一基线已改变，补丁冲突"))
@@ -1188,7 +1191,7 @@ impl Host {
                         let tick = self.session.world.tick;
                         self.session
                             .world
-                            .transact_at(tick, |world| pending.patch.apply_at_boundary(world, target))
+                            .transact_authoring_at(tick, |world| pending.patch.apply_at_boundary(world, target))
                             .map_err(ApiError::from)
                     };
                     match result {
