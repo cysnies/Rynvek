@@ -206,5 +206,8 @@ fn fog_index_never_rounds_a_hidden_unit_into_the_adjacent_visible_cell() {
     obs.visibility[1] = 1;
     let mut engine = engine();
     engine.handle_command(frame(obs)).unwrap();
-    assert_eq!(engine.frame_scene().layer_instances(RenderLayer::Organisms).len(), count);
+    assert_eq!(
+        engine.frame_scene().layer_instances(RenderLayer::Organisms).len(),
+        count
+    );
 }

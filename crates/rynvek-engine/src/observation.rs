@@ -117,11 +117,7 @@ pub fn scene(obs: &FactionObservation, mask: RenderLayerMask) -> FrameScene {
     for unit in &obs.units {
         let p = position(unit.position);
         if unit.faction != obs.faction
-            && !visible(
-                obs,
-                (unit.position.x.0 >> 32) as u32,
-                (unit.position.y.0 >> 32) as u32,
-            )
+            && !visible(obs, (unit.position.x.0 >> 32) as u32, (unit.position.y.0 >> 32) as u32)
         {
             continue;
         }
