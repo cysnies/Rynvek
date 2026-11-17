@@ -430,7 +430,10 @@ impl AppState {
             .fixed_map_seed
             .unwrap_or_else(|| u64::from_le_bytes(match_id.0[8..16].try_into().expect("8 字节")) >> 1);
         let config = MatchConfig::duel(map_seed);
-        let initial_root = *ArenaWorld::new(config.clone()).state_hash().as_bytes();
+        let runtime = rynvek_rts::ArenaRuntime::new(world_id.0, ArenaWorld::new(config.clone()));
+        let checkpoint = runtime.checkpoint().map_err(ApiError::from)?;
+        let initial_root = checkpoint.state_root;
+        let snapshot = self.inner.world_snapshots.put(&checkpoint.bytes)?;
         let owner = pairing.players[0].principal_id;
         let store = self.store();
         let mut seats = Vec::new();
@@ -445,7 +448,7 @@ impl AppState {
                 kind: p.kind,
             });
         }
-        let empty_journal = self.inner.blobs.put(b"")?;
+        let empty_journal = self.inner.world_snapshots.put(b"")?;
         store
             .insert_world(
                 WorldRow {
@@ -472,7 +475,7 @@ impl AppState {
                     parent_revision: None,
                     state_root_blake3: initial_root,
                     journal_segment_cid: empty_journal.0,
-                    snapshot_cid: None,
+                    snapshot_cid: Some(snapshot.0),
                 },
             )
             .await?;
@@ -505,7 +508,7 @@ impl AppState {
                     .collect(),
             )
             .await?;
-        let handle = host::spawn_match(
+        let handle = host::spawn_runtime(
             MatchSpec {
                 match_id,
                 world_id,
@@ -516,7 +519,14 @@ impl AppState {
             },
             self.host_config(),
             self.inner.events.clone(),
-        );
+            runtime,
+            Some(crate::transactions::TickCommitter {
+                store: self.store().clone(),
+                snapshots: self.inner.world_snapshots.clone(),
+                world_id,
+                fencing_token: 1,
+            }),
+        )?;
         {
             let mut reg = self.registry();
             reg.by_match.insert(match_id, handle.clone());
@@ -532,6 +542,76 @@ impl AppState {
             serde_json::json!({ "league": pairing.league, "principals": seats.iter().map(|s| s.principal_id).collect::<Vec<_>>() }),
         )
         .await;
+        Ok(handle)
+    }
+
+    /// 服务端启动/恢复既有创作世界；调用方须先建立对局及席位记录，不对外暴露任意认领接口。
+    pub async fn attach_world_host(&self, spec: MatchSpec) -> ApiResult<MatchHandle> {
+        if self
+            .registry()
+            .by_world(&spec.world_id)
+            .is_some_and(|h| !h.status().state.is_terminal())
+        {
+            return Err(crate::transactions::conflict("世界已有本地活动宿主"));
+        }
+        let (row, participants) = self
+            .store()
+            .get_match(spec.match_id)
+            .await?
+            .ok_or_else(|| ApiError::not_found("对局不存在"))?;
+        if row.world_id != spec.world_id
+            || spec.seats.iter().any(|seat| {
+                !participants
+                    .iter()
+                    .any(|p| p.principal_id == seat.principal_id && p.faction_id == i16::from(seat.faction))
+            })
+        {
+            return Err(crate::transactions::conflict("对局记录与宿主席位不一致"));
+        }
+        let world = self
+            .store()
+            .get_world(spec.world_id)
+            .await?
+            .ok_or_else(|| ApiError::not_found("世界不存在"))?;
+        if row.match_state.is_terminal()
+            || row.game_mode != world.game_mode
+            || row.ruleset_blake3 != spec.ruleset_hash
+            || participants.len() != spec.seats.len()
+            || spec.seats.len() != usize::from(spec.config.players)
+        {
+            return Err(crate::transactions::conflict("对局模式、规则或完整席位与世界不一致"));
+        }
+        let runtime = crate::api::worlds::restore_runtime(self, &world).await?;
+        if runtime.config != spec.config {
+            return Err(crate::transactions::conflict("不能用模板替换恢复的世界配置"));
+        }
+        let token = self
+            .store()
+            .claim_world(
+                world.world_id,
+                world.latest_revision,
+                world.fencing_token,
+                "rynvek-server".into(),
+            )
+            .await?;
+        let handle = host::spawn_runtime(
+            spec.clone(),
+            self.host_config(),
+            self.inner.events.clone(),
+            runtime,
+            Some(crate::transactions::TickCommitter {
+                store: self.store().clone(),
+                snapshots: self.inner.world_snapshots.clone(),
+                world_id: world.world_id,
+                fencing_token: token,
+            }),
+        )?;
+        let mut reg = self.registry();
+        reg.by_match.insert(spec.match_id, handle.clone());
+        reg.by_world.insert(spec.world_id, spec.match_id);
+        for seat in &spec.seats {
+            reg.by_principal.insert(seat.principal_id, spec.match_id);
+        }
         Ok(handle)
     }
 
@@ -612,6 +692,20 @@ async fn persist_state(state: &AppState, match_id: WireUuid, to: MatchState, tic
 
 async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) -> ApiResult<()> {
     let store = state.store();
+    // 世界已经由 Actor 的 Tick CAS 提交；终局任务只能确认，不能再造无检查点的假修订。
+    let world = store
+        .get_world(c.world_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("世界不存在"))?;
+    let commits = store.list_commits(c.world_id).await?;
+    if world.latest_tick != c.total_ticks
+        || world.latest_state_root != c.final_state_root
+        || !commits
+            .last()
+            .is_some_and(|commit| commit.world_revision == world.latest_revision && commit.snapshot_cid.is_some())
+    {
+        return Err(crate::transactions::conflict("终局与已提交权威检查点不一致"));
+    }
     let replay_cid = state.inner.blobs.put(&c.replay)?;
     let Some((mut row, participants)) = store.get_match(c.match_id).await? else {
         return Err(ApiError::not_found("对局不存在"));
@@ -636,62 +730,63 @@ async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) ->
     row.completed_at_unix_s = Some(unix_now_s());
     row.started_at_unix_s = row.started_at_unix_s.or(row.completed_at_unix_s);
 
-    // Glicko-2：两人局，胜 1 / 平 0.5 / 负 0
-    let mut ratings = Vec::new();
-    for p in &participants {
-        ratings.push(store.get_rating(p.principal_id, c.league).await?);
-    }
-    if let [a, b] = ratings.as_slice() {
-        let score_a = match c.winner_faction {
-            Some(w) if i16::from(w) == participants[0].faction_id => 1.0,
-            Some(_) => 0.0,
-            None => 0.5,
-        };
-        let (na, nb) = glicko2::update_pair(a.glicko(), b.glicko(), score_a, glicko2::DEFAULT_TAU);
-        for ((p, old), new) in participants.iter().zip([a, b]).zip([na, nb]) {
+    if row.game_mode == "PvP_Ranked" {
+        // Glicko-2：两人局，胜 1 / 平 0.5 / 负 0
+        let mut ratings = Vec::new();
+        for p in &participants {
+            ratings.push(store.get_rating(p.principal_id, c.league).await?);
+        }
+        if let [a, b] = ratings.as_slice() {
+            let score_a = match c.winner_faction {
+                Some(w) if i16::from(w) == participants[0].faction_id => 1.0,
+                Some(_) => 0.0,
+                None => 0.5,
+            };
+            let (na, nb) = glicko2::update_pair(a.glicko(), b.glicko(), score_a, glicko2::DEFAULT_TAU);
+            for ((p, old), new) in participants.iter().zip([a, b]).zip([na, nb]) {
+                let final_score = c
+                    .scores
+                    .iter()
+                    .find(|s| i16::from(s.0) == p.faction_id)
+                    .map(|s| s.2)
+                    .unwrap_or_default();
+                store
+                    .update_participant(ParticipantRow {
+                        final_score,
+                        rating_delta: Some(new.rating - old.rating),
+                        ..p.clone()
+                    })
+                    .await?;
+                store
+                    .put_rating(RatingRow {
+                        principal_id: p.principal_id,
+                        league: c.league,
+                        rating: new.rating,
+                        deviation: new.deviation,
+                        volatility: new.volatility,
+                        matches_played: old.matches_played + 1,
+                    })
+                    .await?;
+            }
+        }
+    } else {
+        // 自定义世界可以创作编辑，但不能据此制造排位分数。
+        for participant in &participants {
             let final_score = c
                 .scores
                 .iter()
-                .find(|s| i16::from(s.0) == p.faction_id)
-                .map(|s| s.2)
-                .unwrap_or_default();
+                .find(|s| i16::from(s.0) == participant.faction_id)
+                .map_or(0, |s| s.2);
             store
                 .update_participant(ParticipantRow {
                     final_score,
-                    rating_delta: Some(new.rating - old.rating),
-                    ..p.clone()
-                })
-                .await?;
-            store
-                .put_rating(RatingRow {
-                    principal_id: p.principal_id,
-                    league: c.league,
-                    rating: new.rating,
-                    deviation: new.deviation,
-                    volatility: new.volatility,
-                    matches_played: old.matches_played + 1,
+                    rating_delta: None,
+                    ..participant.clone()
                 })
                 .await?;
         }
     }
     store.update_match(row).await?;
-    // 世界提交链：revision 1 = 终局状态根，日志段指向签名回放
-    if let Some(world) = store.get_world(c.world_id).await? {
-        store
-            .append_commit(
-                CommitRow {
-                    world_id: c.world_id,
-                    world_revision: world.latest_revision + 1,
-                    tick: c.total_ticks,
-                    parent_revision: Some(world.latest_revision),
-                    state_root_blake3: c.final_state_root,
-                    journal_segment_cid: replay_cid.0,
-                    snapshot_cid: None,
-                },
-                world.fencing_token,
-            )
-            .await?;
-    }
     {
         let mut reg = state.registry();
         reg.by_principal.retain(|_, m| *m != c.match_id);

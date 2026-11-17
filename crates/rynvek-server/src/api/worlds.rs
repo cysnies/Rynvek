@@ -368,44 +368,14 @@ pub async fn fork(
     Ok((StatusCode::CREATED, Json(world_json(&row))).into_response())
 }
 
-async fn restore_runtime(app: &AppState, world: &WorldRow) -> ApiResult<ArenaRuntime> {
-    let commit = app
-        .store()
-        .list_commits(world.world_id)
-        .await?
-        .into_iter()
-        .find(|c| c.world_revision == world.latest_revision)
-        .ok_or_else(|| {
-            ApiError::new(
-                RynvekErrorCode::SchemaMigrationPathNotFound,
-                "缺失权威提交，拒绝从模板猜测",
-            )
-        })?;
-    let cid = commit.snapshot_cid.ok_or_else(|| {
-        ApiError::new(
-            RynvekErrorCode::SchemaMigrationPathNotFound,
-            "旧世界没有完整检查点，需要显式迁移",
-        )
-    })?;
-    let bytes = app.inner.world_snapshots.get(&rynvek_core::Blake3Hash(cid))?;
-    let runtime = ArenaRuntime::restore(world.world_id.0, world.latest_revision, world.latest_state_root, &bytes)
-        .map_err(|e| ApiError::new(e, "权威检查点与世界元数据不一致"))?;
-    if runtime.world().tick != world.latest_tick
-        || commit.tick != world.latest_tick
-        || commit.state_root_blake3 != world.latest_state_root
-    {
-        return Err(ApiError::new(
-            RynvekErrorCode::Blake3ChecksumMismatch,
-            "检查点 Tick 或根不一致",
-        ));
-    }
-    Ok(runtime)
+pub(crate) async fn restore_runtime(app: &AppState, world: &WorldRow) -> ApiResult<ArenaRuntime> {
+    crate::transactions::restore_committed(app.store(), app.inner.world_snapshots.as_ref(), world).await
 }
 
 /// `08 POST /api/v1/worlds/{world_id}/patches`（`world.edit`）：请求体为规范 10.2 `WorldPatch`
 ///
 /// 在私有检查点上运行真实领域事务，提交成功后才返回 applied。
-/// 当前仅支持非实时托管世界；活动对局拒绝旁路编辑，不能制造第二份权威。
+/// 活动宿主拥有编辑队列；只有缺失本地宿主却仍有租约时拒绝旁路，不能制造第二份权威。
 pub async fn patches(
     State(app): State<AppState>,
     headers: HeaderMap,
@@ -425,6 +395,26 @@ pub async fn patches(
         .with_status(StatusCode::UNPROCESSABLE_ENTITY)
     })?;
     let required = crate::patch::validate(&patch)?;
+    let active = app.registry().by_world(&world.world_id);
+    if let Some(host) = active {
+        let applied = host.apply_patch(patch.clone()).await?;
+        return Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "applied", "state_root": crate::ids::hex(&applied.state_root),
+                "report": applied.report, "world_id": world.world_id.to_string(), "world_revision": applied.revision,
+                "patch_cid": crate::ids::hex(&applied.patch_cid), "required_class": required,
+                "scheduled_for": "applied_tick_boundary", "effective_tick": applied.effective_tick, "forked_from": null,
+            })),
+        )
+            .into_response());
+    }
+    if world.lease_holder_node.is_some() {
+        return Err(ApiError::new(
+            RynvekErrorCode::StructuralMutationConflict,
+            "宿主租约仍在，不允许恢复旁路权威",
+        ));
+    }
     if patch.base_authoring_revision != world.latest_revision {
         return Err(ApiError::new(
             RynvekErrorCode::StructuralMutationConflict,
@@ -432,20 +422,6 @@ pub async fn patches(
                 "补丁基于修订 {}，世界已到 {}",
                 patch.base_authoring_revision, world.latest_revision
             ),
-        ));
-    }
-    if app
-        .inner
-        .registry
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .by_world(&world.world_id)
-        .is_some()
-        || world.lease_holder_node.is_some()
-    {
-        return Err(ApiError::new(
-            RynvekErrorCode::StructuralMutationConflict,
-            "活动宿主必须通过自己的权威队列编辑，拒绝旁路补丁",
         ));
     }
     if patch.safety_class == LiveEditSafetyClass::RequiresForkRestart {

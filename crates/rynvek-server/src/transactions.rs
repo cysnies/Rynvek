@@ -5,7 +5,7 @@
 
 use crate::{
     error::{ApiError, ApiResult},
-    store::{CommitRow, Store},
+    store::{CommitRow, Store, WorldRow},
 };
 use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use rynvek_protocol::WireUuid;
@@ -137,12 +137,28 @@ impl std::fmt::Debug for TickCommitter {
     }
 }
 
+/// 每 300 个仿真 Tick 一个完整锚点，其余提交只保存可重放输入，避免每秒数十份全量快照。
+pub const CHECKPOINT_INTERVAL: u64 = 300;
+
 impl TickCommitter {
     pub async fn persist(&self, runtime: &ArenaRuntime, record: &TickRecord) -> ApiResult<()> {
-        let cp = runtime
-            .checkpoint()
-            .map_err(|e| ApiError::new(e, "编码 Tick 检查点失败"))?;
-        let snapshot = self.snapshots.put(&cp.bytes)?;
+        let root = runtime.state_root();
+        if runtime.world_id() != self.world_id.0
+            || record.revision != runtime.revision()
+            || record.tick != runtime.tick
+            || record.state_root != root
+            || record.base_revision.checked_add(1) != Some(record.revision)
+        {
+            return Err(conflict("Tick 记录与候选元数据不一致"));
+        }
+        let snapshot = if runtime.tick % CHECKPOINT_INTERVAL == 0 || runtime.outcome.is_some() {
+            let checkpoint = runtime
+                .checkpoint()
+                .map_err(|e| ApiError::new(e, "编码 Tick 检查点失败"))?;
+            Some(self.snapshots.put(&checkpoint.bytes)?.0)
+        } else {
+            None
+        };
         let journal = self.snapshots.put(&serde_json::to_vec(record).expect("可序列化"))?;
         for input in &record.inputs {
             if let TickInput::Patch { patch, .. } = input {
@@ -153,12 +169,12 @@ impl TickCommitter {
             .append_commit(
                 CommitRow {
                     world_id: self.world_id,
-                    world_revision: cp.revision,
-                    tick: cp.tick,
+                    world_revision: runtime.revision(),
+                    tick: runtime.tick,
                     parent_revision: Some(record.base_revision),
-                    state_root_blake3: cp.state_root,
+                    state_root_blake3: root,
                     journal_segment_cid: journal.0,
-                    snapshot_cid: Some(snapshot.0),
+                    snapshot_cid: snapshot,
                 },
                 self.fencing_token,
             )
@@ -212,4 +228,75 @@ impl TickCommitter {
         }
         Ok(None)
     }
+}
+
+/// 最近完整锚点加有界 Tick 后缀恢复；未知/损坏的日志、断链及旧占位世界全部拒绝。
+pub async fn restore_committed(store: &Store, snapshots: &dyn BlobStore, world: &WorldRow) -> ApiResult<ArenaRuntime> {
+    let commits: Vec<_> = store
+        .list_commits(world.world_id)
+        .await?
+        .into_iter()
+        .filter(|c| c.world_revision <= world.latest_revision)
+        .collect();
+    let latest = commits.last().ok_or_else(|| conflict("缺少权威提交"))?;
+    if latest.world_revision != world.latest_revision
+        || latest.tick != world.latest_tick
+        || latest.state_root_blake3 != world.latest_state_root
+    {
+        return Err(conflict("世界元数据与提交链不一致"));
+    }
+    let (index, anchor) = commits
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, c)| c.snapshot_cid.is_some())
+        .ok_or_else(|| {
+            ApiError::new(
+                RynvekErrorCode::SchemaMigrationPathNotFound,
+                "旧世界没有完整锚点，需要显式迁移",
+            )
+        })?;
+    if commits.len() - index - 1 > CHECKPOINT_INTERVAL as usize {
+        return Err(conflict("缺少周期检查点，拒绝无界重放"));
+    }
+    let cid = anchor.snapshot_cid.expect("已筛选锚点");
+    let bytes = snapshots.get(&Blake3Hash(cid))?;
+    if Blake3Hash::of(&bytes).0 != cid {
+        return Err(conflict("检查点 CID 不一致"));
+    }
+    let mut runtime = ArenaRuntime::restore(
+        world.world_id.0,
+        anchor.world_revision,
+        anchor.state_root_blake3,
+        &bytes,
+    )
+    .map_err(|e| ApiError::new(e, "完整锚点与身份/修订/根不一致"))?;
+    if runtime.tick != anchor.tick {
+        return Err(conflict("完整锚点 Tick 不一致"));
+    }
+    for commit in commits.iter().skip(index + 1) {
+        let bytes = snapshots.get(&Blake3Hash(commit.journal_segment_cid))?;
+        if Blake3Hash::of(&bytes).0 != commit.journal_segment_cid {
+            return Err(conflict("Tick 日志 CID 不一致"));
+        }
+        let record: TickRecord =
+            serde_json::from_slice(&bytes).map_err(|_| conflict("未知 Tick 日志，需要显式迁移"))?;
+        if Some(record.base_revision) != commit.parent_revision
+            || record.revision != commit.world_revision
+            || record.tick != commit.tick
+            || record.state_root != commit.state_root_blake3
+        {
+            return Err(conflict("Tick 日志元数据不一致"));
+        }
+        runtime = record
+            .replay(&runtime)
+            .map_err(|e| ApiError::new(e, "Tick 后缀重放失败"))?;
+    }
+    if runtime.revision() != world.latest_revision
+        || runtime.tick != world.latest_tick
+        || runtime.state_root() != world.latest_state_root
+    {
+        return Err(conflict("恢复结果与最新权威根不一致"));
+    }
+    Ok(runtime)
 }

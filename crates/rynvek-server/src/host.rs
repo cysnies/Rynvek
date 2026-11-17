@@ -27,6 +27,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
+use crate::transactions::{PatchApplied, TickCommitter, TickInput, TickRecord, conflict};
 use rynvek_agent::{AgentError, PrincipalKind, SystemClock};
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_engine::arena::{ARENA_PROTOCOL, ArenaClientMessage, ArenaServerMessage, ArenaSession, map_info};
@@ -36,8 +37,9 @@ use rynvek_network::replication::{Replicator, visible_records};
 use rynvek_network::visibility::VisibilityGrid;
 use rynvek_network::{Frame, FrameEncoder, NetError};
 use rynvek_protocol::{CommandEnvelope, WireChannelId, WireUuid};
-use rynvek_rts::{FactionId, MatchConfig, MatchOutcome, RtsEvent};
+use rynvek_rts::{ArenaRuntime, ArenaWorld, FactionId, MatchConfig, MatchOutcome, RtsEvent, RuntimeCheckpoint};
 use rynvek_security::{BehaviorMonitor, CommandGate, CommandGateConfig, League, PrincipalKindCode, ServerSigningKey};
+use rynvek_world::{LiveEditSafetyClass, WorldPatch};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -49,6 +51,9 @@ use crate::store::{MatchState, NewAudit};
 pub const DEFAULT_TICK_RATE_HZ: u32 = 30;
 /// 每局 Actor 收件箱容量
 const INBOX_CAPACITY: usize = 1024;
+/// 排程输入同时受字节预算约束，不能用少量巨型载荷绕过计数上限。
+const MAX_QUEUED_BYTES: usize = 4 << 20;
+const MAX_PATCH_WAITERS: usize = 64;
 /// 连接被取代 / 对局结束时 Disconnect 的错误码（0 = 正常关闭）
 const NORMAL_CLOSE: u32 = 0;
 
@@ -139,6 +144,9 @@ pub struct HostStatus {
     pub state: MatchState,
     pub tick: u64,
     pub connections: usize,
+    pub pending_inputs: usize,
+    pub revision: u64,
+    pub state_root: [u8; 32],
 }
 
 /// 入座成功
@@ -183,6 +191,10 @@ pub struct QueryReply {
 }
 
 enum HostMsg {
+    Patch {
+        patch: WorldPatch,
+        reply: oneshot::Sender<Result<PatchApplied, ApiError>>,
+    },
     Join {
         principal_id: u64,
         faction: u32,
@@ -225,6 +237,7 @@ pub struct MatchHandle {
 impl std::fmt::Debug for HostMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Patch { .. } => "Patch",
             Self::Join { .. } => "Join",
             Self::Frame { .. } => "Frame",
             Self::Violation { .. } => "Violation",
@@ -240,6 +253,15 @@ fn ended() -> ApiError {
 }
 
 impl MatchHandle {
+    pub async fn apply_patch(&self, patch: WorldPatch) -> Result<PatchApplied, ApiError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostMsg::Patch { patch, reply })
+            .await
+            .map_err(|_| ended())?;
+        rx.await.map_err(|_| ended())?
+    }
+
     pub fn status(&self) -> HostStatus {
         *self.status.borrow()
     }
@@ -318,11 +340,32 @@ pub fn resume_token(secret: &[u8; 32], match_id: &WireUuid, principal_id: u64, f
 
 /// 启动一局
 pub fn spawn_match(spec: MatchSpec, cfg: HostConfig, events: mpsc::UnboundedSender<HostEvent>) -> MatchHandle {
+    let mut runtime = ArenaRuntime::new(spec.world_id.0, ArenaWorld::new(spec.config.clone()));
+    runtime.enable_command_log();
+    spawn_runtime(spec, cfg, events, runtime, None).expect("新建规范世界可编码")
+}
+
+/// 恢复、HTTP 和流连接共用同一个 Actor；不从配置重建传入的权威状态。
+pub fn spawn_runtime(
+    spec: MatchSpec,
+    cfg: HostConfig,
+    events: mpsc::UnboundedSender<HostEvent>,
+    mut runtime: ArenaRuntime,
+    committer: Option<TickCommitter>,
+) -> Result<MatchHandle, ApiError> {
+    let genesis = runtime.checkpoint().map_err(|e| ApiError::new(e, "宿主初态不可编码"))?;
+    if runtime.world_id() != spec.world_id.0 || runtime.config != spec.config {
+        return Err(conflict("宿主规范与检查点身份不一致"));
+    }
+    runtime.enable_command_log();
     let (tx, rx) = mpsc::channel(INBOX_CAPACITY);
     let (status_tx, status) = watch::channel(HostStatus {
         state: MatchState::Created,
-        tick: 0,
+        tick: runtime.tick,
         connections: 0,
+        pending_inputs: 0,
+        revision: runtime.revision(),
+        state_root: runtime.state_root(),
     });
     let handle = MatchHandle {
         match_id: spec.match_id,
@@ -332,8 +375,7 @@ pub fn spawn_match(spec: MatchSpec, cfg: HostConfig, events: mpsc::UnboundedSend
         tx,
         status,
     };
-    let mut session = ArenaSession::new(spec.config.clone(), SystemClock::default());
-    session.world.enable_command_log();
+    let session = ArenaSession::from_runtime(runtime, SystemClock::default());
     let host = Host {
         gate: CommandGate::new(cfg.gate),
         monitor: BehaviorMonitor::new(),
@@ -341,6 +383,11 @@ pub fn spawn_match(spec: MatchSpec, cfg: HostConfig, events: mpsc::UnboundedSend
         conns: BTreeMap::new(),
         next_conn: 1,
         scheduled: BTreeMap::new(),
+        patches: BTreeMap::new(),
+        committer,
+        genesis,
+        records: Vec::new(),
+        seen_commands: BTreeSet::new(),
         state: MatchState::Created,
         joined: BTreeSet::new(),
         status_tx,
@@ -349,7 +396,7 @@ pub fn spawn_match(spec: MatchSpec, cfg: HostConfig, events: mpsc::UnboundedSend
         cfg,
     };
     tokio::spawn(host.run(rx));
-    handle
+    Ok(handle)
 }
 
 struct Conn {
@@ -365,6 +412,17 @@ struct Pending {
     principal_id: u64,
     key: String,
     message: ArenaClientMessage,
+    bytes: usize,
+}
+
+enum PendingInput {
+    Command(Box<Pending>),
+    Patch([u8; 16]),
+}
+struct PendingPatch {
+    patch: WorldPatch,
+    replies: Vec<oneshot::Sender<Result<PatchApplied, ApiError>>>,
+    bytes: usize,
 }
 
 struct Host {
@@ -376,7 +434,12 @@ struct Host {
     conns: BTreeMap<u64, Conn>,
     next_conn: u64,
     /// 目标 Tick → 待执行命令（到达顺序）
-    scheduled: BTreeMap<u64, Vec<Pending>>,
+    scheduled: BTreeMap<u64, Vec<PendingInput>>,
+    patches: BTreeMap<[u8; 16], PendingPatch>,
+    committer: Option<TickCommitter>,
+    genesis: RuntimeCheckpoint,
+    records: Vec<TickRecord>,
+    seen_commands: BTreeSet<(u64, String)>,
     state: MatchState,
     joined: BTreeSet<u64>,
     status_tx: watch::Sender<HostStatus>,
@@ -420,6 +483,28 @@ fn win_reason_text(outcome: &Option<MatchOutcome>) -> (Option<u8>, Option<String
 
 impl Host {
     async fn run(mut self, mut rx: mpsc::Receiver<HostMsg>) {
+        if let Some(committer) = &self.committer {
+            match committer.records().await {
+                Ok(records) => {
+                    for record in records {
+                        for input in record.inputs {
+                            if let TickInput::Command {
+                                principal_id,
+                                idempotency_key,
+                                ..
+                            } = input
+                            {
+                                self.seen_commands.insert((principal_id, idempotency_key));
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    self.abort(&format!("恢复幂等日志失败：{error}"));
+                    return;
+                }
+            }
+        }
         self.transition(MatchState::Lobby);
         let hz = self.cfg.driver.hz();
         let mut ticker = tokio::time::interval(Duration::from_secs_f64(1.0 / f64::from(hz.max(1))));
@@ -431,10 +516,10 @@ impl Host {
             let in_lobby = matches!(self.state, MatchState::Lobby | MatchState::Ready);
             tokio::select! {
                 msg = rx.recv() => match msg {
-                    Some(m) => self.on_msg(m),
+                    Some(m) => self.on_msg(m).await,
                     None => break,
                 },
-                _ = ticker.tick(), if realtime_running => self.tick_once(),
+                _ = ticker.tick(), if realtime_running => self.tick_once().await,
                 _ = async { tokio::time::sleep_until(lobby_deadline.expect("有截止时间")).await },
                     if in_lobby && lobby_deadline.is_some() =>
                 {
@@ -446,9 +531,17 @@ impl Host {
             }
         }
         // 终局后继续应答收件箱中残留的请求（全部以 "对局已结束" 拒绝），然后退出
+        for (_, pending) in std::mem::take(&mut self.patches) {
+            for reply in pending.replies {
+                let _ = reply.send(Err(ended()));
+            }
+        }
         rx.close();
         while let Some(m) = rx.recv().await {
             match m {
+                HostMsg::Patch { reply, .. } => {
+                    let _ = reply.send(Err(ended()));
+                }
                 HostMsg::Join { reply, .. } => {
                     let _ = reply.send(Err(ended()));
                 }
@@ -465,6 +558,9 @@ impl Host {
             state: self.state,
             tick: self.session.world.tick,
             connections: self.conns.len(),
+            pending_inputs: self.scheduled.values().map(Vec::len).sum(),
+            revision: self.session.world.revision(),
+            state_root: self.session.world.state_root(),
         });
     }
 
@@ -491,8 +587,9 @@ impl Host {
         }));
     }
 
-    fn on_msg(&mut self, msg: HostMsg) {
+    async fn on_msg(&mut self, msg: HostMsg) {
         match msg {
+            HostMsg::Patch { patch, reply } => self.enqueue_patch(patch, reply).await,
             HostMsg::Join {
                 principal_id,
                 faction,
@@ -504,15 +601,7 @@ impl Host {
                 let _ = reply.send(r);
             }
             HostMsg::Frame { conn, frame } => self.on_frame(conn, frame),
-            HostMsg::Violation { conn, error } => {
-                let pid = self.conns.get(&conn).map(|c| c.principal_id);
-                self.audit(
-                    pid,
-                    "stream.protocol_violation",
-                    serde_json::json!({ "error": error.to_string() }),
-                );
-                self.disconnect(conn, error.code().code().into(), &error.to_string());
-            }
+            HostMsg::Violation { conn, error } => self.violation(conn, error),
             HostMsg::Leave { conn } => self.drop_conn(conn),
             HostMsg::Advance { ticks, reply } => {
                 let r = if self.cfg.driver != TickDriver::Manual {
@@ -521,7 +610,7 @@ impl Host {
                     Err(ApiError::forbidden(format!("对局处于 {:?}，不能推进", self.state)))
                 } else {
                     for _ in 0..ticks {
-                        self.tick_once();
+                        self.tick_once().await;
                         if self.state.is_terminal() {
                             break;
                         }
@@ -671,22 +760,32 @@ impl Host {
         self.drop_conn(conn);
     }
 
+    fn violation(&mut self, conn: u64, error: NetError) {
+        let pid = self.conns.get(&conn).map(|c| c.principal_id);
+        self.audit(
+            pid,
+            "stream.protocol_violation",
+            serde_json::json!({ "error": error.to_string() }),
+        );
+        self.disconnect(conn, error.code().code().into(), &error.to_string());
+    }
+
     fn on_frame(&mut self, conn: u64, frame: Frame) {
         let Some(c) = self.conns.get(&conn) else { return };
         let principal_id = c.principal_id;
         let payload = match frame.decoded_payload() {
             Ok(p) => p,
-            Err(e) => return self.on_msg(HostMsg::Violation { conn, error: e }),
+            Err(e) => return self.violation(conn, e),
         };
         match frame.channel() {
             WireChannelId::Control => self.on_control(conn, &payload),
             WireChannelId::Command => self.on_command(conn, principal_id, &payload),
             WireChannelId::Query => self.on_query(conn, principal_id, &payload),
             WireChannelId::Telemetry => {}
-            WireChannelId::Event | WireChannelId::StateStream => self.on_msg(HostMsg::Violation {
+            WireChannelId::Event | WireChannelId::StateStream => self.violation(
                 conn,
-                error: NetError::Payload("Event / StateStream 通道只允许服务端下行".into()),
-            }),
+                NetError::Payload("Event / StateStream 通道只允许服务端下行".into()),
+            ),
         }
     }
 
@@ -710,11 +809,11 @@ impl Host {
                 }
             }
             Ok(ControlBody::Disconnect(_)) => self.drop_conn(conn),
-            Ok(_) => self.on_msg(HostMsg::Violation {
+            Ok(_) => self.violation(
                 conn,
-                error: NetError::Payload("握手后不允许再次发送 Hello / 服务端消息".into()),
-            }),
-            Err(error) => self.on_msg(HostMsg::Violation { conn, error }),
+                NetError::Payload("握手后不允许再次发送 Hello / 服务端消息".into()),
+            ),
+            Err(error) => self.violation(conn, error),
         }
     }
 
@@ -761,6 +860,15 @@ impl Host {
             }
         };
         let key = env.idempotency_key.to_string();
+        if self.seen_commands.contains(&(principal_id, key.clone())) {
+            return self.reject(
+                conn,
+                principal_id,
+                Some(key),
+                RynvekErrorCode::StructuralMutationConflict,
+                "命令幂等键已提交".into(),
+            );
+        }
         if let Err(e) = self.gate.check_command(principal_id, &env, tick) {
             return self.reject(conn, principal_id, Some(key), e.code, e.message);
         }
@@ -800,17 +908,44 @@ impl Host {
             principal_id,
             key,
             message: env.payload,
+            bytes: payload.len(),
         };
-        if env.target_tick > tick {
-            self.scheduled.entry(env.target_tick).or_default().push(pending);
+        if matches!(
+            pending.message,
+            ArenaClientMessage::AcquireLease { .. } | ArenaClientMessage::ReleaseLease { .. }
+        ) && env.target_tick <= tick
+        {
+            let (p, envelopes) = self.execute(pending);
+            self.deliver(p, envelopes, tick);
+        } else if self.scheduled.values().map(Vec::len).sum::<usize>() >= INBOX_CAPACITY
+            || self.queued_bytes().saturating_add(pending.bytes) > MAX_QUEUED_BYTES
+        {
+            self.reject(
+                conn,
+                principal_id,
+                Some(pending.key),
+                RynvekErrorCode::StructuralMutationConflict,
+                "Tick 输入队列已满".into(),
+            );
         } else {
-            self.execute(pending);
+            self.scheduled
+                .entry(env.target_tick.max(tick.saturating_add(1)))
+                .or_default()
+                .push(PendingInput::Command(Box::new(pending)));
+            self.publish();
         }
     }
 
-    fn execute(&mut self, p: Pending) {
-        let envelopes = self.session.handle(&p.principal_id.to_string(), p.message);
-        for env in envelopes {
+    fn execute(&mut self, p: Pending) -> (Pending, Vec<rynvek_engine::arena::Envelope>) {
+        let envelopes = self.session.handle(&p.principal_id.to_string(), p.message.clone());
+        (p, envelopes)
+    }
+
+    fn deliver(&mut self, p: Pending, envelopes: Vec<rynvek_engine::arena::Envelope>, tick: u64) {
+        for mut env in envelopes {
+            if let ArenaServerMessage::Ack { tick: applied, .. } = &mut env.message {
+                *applied = tick;
+            }
             if let ArenaServerMessage::Ack { error: Some(_), .. } = &env.message {
                 self.monitor.on_rejected(p.principal_id, self.session.world.tick);
             }
@@ -915,20 +1050,230 @@ impl Host {
         }
     }
 
-    fn tick_once(&mut self) {
+    fn queued_bytes(&self) -> usize {
+        self.scheduled
+            .values()
+            .flatten()
+            .map(|input| match input {
+                PendingInput::Command(p) => p.bytes,
+                PendingInput::Patch(id) => self.patches.get(id).map_or(0, |p| p.bytes),
+            })
+            .fold(0usize, usize::saturating_add)
+    }
+
+    async fn enqueue_patch(&mut self, patch: WorldPatch, reply: oneshot::Sender<Result<PatchApplied, ApiError>>) {
+        let result = async {
+            if self.state != MatchState::Running {
+                return Err(conflict("宿主不是 Running"));
+            }
+            let committer = self
+                .committer
+                .as_ref()
+                .ok_or_else(|| conflict("宿主未配置持久化，不能确认编辑"))?;
+            let world = committer
+                .store
+                .get_world(self.spec.world_id)
+                .await?
+                .ok_or_else(|| conflict("世界不存在"))?;
+            if world.game_mode == "PvP_Ranked" {
+                return Err(ApiError::forbidden("排位对局禁止运行中创作编辑"));
+            }
+            crate::patch::validate(&patch)?;
+            if patch.safety_class == LiveEditSafetyClass::RequiresForkRestart {
+                return Err(conflict("分叉重启必须走显式分叉"));
+            }
+            if let Some(receipt) = committer.patch_receipt(&patch).await? {
+                return Ok(Some(receipt));
+            }
+            if let Some(queued) = self.patches.get(&patch.patch_id) {
+                if queued.patch != patch {
+                    return Err(conflict("同一 patch_id 不能替换载荷"));
+                }
+                if queued.replies.len() >= MAX_PATCH_WAITERS {
+                    return Err(conflict("同一补丁的等待者已满"));
+                }
+                return Ok(None);
+            }
+            if patch.base_authoring_revision != self.session.world.revision() {
+                return Err(conflict("编辑基于过期修订"));
+            }
+            let bytes = serde_json::to_vec(&patch).expect("可序列化").len();
+            if self.scheduled.values().map(Vec::len).sum::<usize>() >= INBOX_CAPACITY
+                || self.queued_bytes().saturating_add(bytes) > MAX_QUEUED_BYTES
+            {
+                return Err(conflict("Tick 输入队列已满"));
+            }
+            let (_, target) = crate::patch::schedule(patch.safety_class, self.session.world.tick);
+            let tick = target
+                .unwrap_or(self.session.world.tick.saturating_add(1))
+                .max(self.session.world.tick.saturating_add(1));
+            self.scheduled
+                .entry(tick)
+                .or_default()
+                .push(PendingInput::Patch(patch.patch_id));
+            self.patches.insert(
+                patch.patch_id,
+                PendingPatch {
+                    patch: patch.clone(),
+                    replies: Vec::new(),
+                    bytes,
+                },
+            );
+            Ok(None)
+        }
+        .await;
+        match result {
+            Ok(Some(receipt)) => {
+                let _ = reply.send(Ok(receipt));
+            }
+            Ok(None) => {
+                self.patches
+                    .get_mut(&patch.patch_id)
+                    .expect("已排队")
+                    .replies
+                    .push(reply);
+                self.publish();
+            }
+            Err(error) => {
+                let _ = reply.send(Err(error));
+            }
+        }
+    }
+
+    async fn tick_once(&mut self) {
         if self.state != MatchState::Running {
             return;
         }
-        // 1) 执行目标 Tick 已到的排程命令（Phase 01 入队）
-        let tick = self.session.world.tick;
-        let later = self.scheduled.split_off(&(tick + 1));
+        let candidate = match self.session.world.candidate_tick() {
+            Ok(candidate) => candidate,
+            Err(_) => {
+                self.abort("无法准备权威 Tick");
+                return;
+            }
+        };
+        let previous = std::mem::replace(&mut self.session.world, candidate);
+        let target = previous.tick + 1;
+        let later = self.scheduled.split_off(&target.saturating_add(1));
         let due = std::mem::replace(&mut self.scheduled, later);
-        for p in due.into_values().flatten() {
-            self.execute(p);
+        let mut inputs = Vec::new();
+        let mut commands = Vec::new();
+        let mut patches = Vec::new();
+        let mut patched = false;
+        for input in due.into_values().flatten() {
+            match input {
+                PendingInput::Command(p) => {
+                    let before = self.session.world.command_log().len();
+                    let principal_id = p.principal_id;
+                    let idempotency_key = p.key.clone();
+                    commands.push(self.execute(*p));
+                    inputs.extend(
+                        self.session.world.command_log()[before..]
+                            .iter()
+                            .map(|c| TickInput::Command {
+                                faction: c.faction.0,
+                                command: c.command.clone(),
+                                principal_id,
+                                idempotency_key: idempotency_key.clone(),
+                            }),
+                    );
+                }
+                PendingInput::Patch(id) => {
+                    let pending = self.patches.remove(&id).expect("排程引用存在");
+                    let result = if patched
+                        || pending.patch.base_authoring_revision != previous.revision()
+                        || self.session.world.outcome.is_some()
+                    {
+                        Err(conflict("同一基线已改变，补丁冲突"))
+                    } else {
+                        let tick = self.session.world.tick;
+                        self.session
+                            .world
+                            .transact_at(tick, |world| pending.patch.apply_at_boundary(world, target))
+                            .map_err(ApiError::from)
+                    };
+                    match result {
+                        Ok(report) => {
+                            patched = true;
+                            inputs.push(TickInput::Patch {
+                                patch: pending.patch.clone(),
+                                report: report.clone(),
+                            });
+                            patches.push((pending, report));
+                        }
+                        Err(error) => {
+                            for reply in pending.replies {
+                                let _ = reply.send(Err(error.clone()));
+                            }
+                        }
+                    }
+                }
+            }
         }
-        // 2) 推进权威世界
-        let events = self.session.step_world(1);
+        let result = async {
+            self.session.world.finish_tick().map_err(ApiError::from)?;
+            let record = TickRecord {
+                format: "rynvek-tick/1".into(),
+                base_revision: previous.revision(),
+                base_root: previous.state_root(),
+                target_tick: target,
+                tick: self.session.world.tick,
+                revision: self.session.world.revision(),
+                state_root: self.session.world.state_root(),
+                inputs,
+            };
+            if let Some(committer) = &self.committer {
+                committer.persist(&self.session.world, &record).await?;
+            }
+            Ok::<_, ApiError>(record)
+        }
+        .await;
+        let record = match result {
+            Ok(record) => record,
+            Err(error) => {
+                self.session.world = previous;
+                for (p, _) in commands {
+                    self.reject(
+                        p.conn,
+                        p.principal_id,
+                        Some(p.key),
+                        RynvekErrorCode::StructuralMutationConflict,
+                        "权威 Tick 未提交".into(),
+                    );
+                }
+                for (pending, _) in patches {
+                    for reply in pending.replies {
+                        let _ = reply.send(Err(conflict("权威 Tick 未提交")));
+                    }
+                }
+                self.abort(&format!("持久化失败，停止宿主而不发布候选：{error}"));
+                return;
+            }
+        };
         let now = self.session.world.tick;
+        for (p, envelopes) in commands {
+            self.deliver(p, envelopes, now);
+        }
+        for (pending, _) in patches {
+            let receipt = record
+                .patch_receipt(&pending.patch)
+                .expect("刚提交记录可解析")
+                .expect("包含补丁");
+            for reply in pending.replies {
+                let _ = reply.send(Ok(receipt.clone()));
+            }
+        }
+        for input in &record.inputs {
+            if let TickInput::Command {
+                principal_id,
+                idempotency_key,
+                ..
+            } = input
+            {
+                self.seen_commands.insert((*principal_id, idempotency_key.clone()));
+            }
+        }
+        self.records.push(record);
+        let events = self.session.drain_visible_events();
         // 3) 每连接：迷雾裁剪状态包 + 本阵营事件
         let mut dead = Vec::new();
         for (id, c) in &mut self.conns {
@@ -983,8 +1328,15 @@ impl Host {
                 league: self.spec.league,
             })
             .collect();
-        let recorded = replay::record(
+        let recorded = replay::record_runtime(
             world,
+            replay::RuntimeReplay {
+                world_id: self.spec.world_id.0,
+                initial_revision: self.genesis.revision,
+                initial_root: self.genesis.state_root,
+                initial_snapshot: self.genesis.bytes.clone(),
+                ticks: self.records.clone(),
+            },
             self.spec.match_id.to_string(),
             self.spec.world_id.to_string(),
             crate::ids::hex(&self.spec.ruleset_hash),
@@ -1010,7 +1362,7 @@ impl Host {
             league: self.spec.league,
             outcome: world.outcome.clone(),
             total_ticks: world.tick,
-            final_state_root: *world.state_hash().as_bytes(),
+            final_state_root: world.state_root(),
             scores: self
                 .spec
                 .seats
