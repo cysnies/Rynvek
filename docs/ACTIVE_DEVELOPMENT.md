@@ -5,6 +5,28 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第三十八批：一般参数模型持久Lab/W3与真实四表（从main cd34b4e继续）
+
+**主体继续，整体未完成。** 已闭合真实Studio源捕获 → 不可变有界参数模型/精确单轴×seed扫描 → 原Engine Phase07 → 原持久Lab作业/fenced完整run恢复 → 私有四表 → 原UI/TS SDK真实消费。不是toy runner、只有schema的面板或任意W3/TS/rpack/物理ECS。入口/规格/命令/边界详见[LAB_PARAMETER_EXPERIMENTS.md](LAB_PARAMETER_EXPERIMENTS.md)。
+
+### 实际入口与当前语义
+
+- `/lab` → 本人LabSubmit/LabRead → 实验模型「Studio一般参数实体」→ 输入已在`/studio`真实创建模型的世界ID → 显式导入（额外WorldEdit及所有者/当前定向编辑准入）→ 核对源/outputs → param原始整数扫描、多seed/Tick/间隔 → 原UUID幂等提交/发现/取消/重试/下载。未知响应保留原规格对账；断连清私有草稿/结果及迟到源，不等于取消服务端。
+- 新GET `worlds/{id}/authoring/lab-model`只复制参数源码，不开放WorldRead、完整快照/归档或Arena控制；复用Studio准入并在返回前重验。模板初值从Tick 0算，不复制当前动态态；撤权阻止新导出，不承诺追回曾授权源副本。新作业绑定不可变模型、原spec_digest及模型digest，后续编辑源不改既有实验。
+- parameters profile明确0阵营/无原生身体，原ArenaWorld.step执行原Phase07/参数暂存写/总gas与规范Tick，不运行RTS经济/战斗/胜负。state/param与I32/Q8_8/Bool完全复用原结构/编译器/权限/资源；256KiB模型、1–16输出、原256run/108000Tick及总200000参数采样行，坏模型/写冲突/越界拒绝。
+- 真四表：runs有最终Tick/root/model_digest/真实故障；metrics长行给实际实例/组件/类型/原始整数，非参数模型的RTS指标为null；lineage空（无自然出生事实）；energy.enabled=false不是零耗/守恒证明。UI按runs选run、绘制实际参数轨迹、不画假零能量或伪谱系图；原分析5000行/表上限保留，完整原分页/Parquet可取。
+- 复用原owner隔离、租约/fence、取消/重试代次与私有四CID原子completed，无新DB治理框架。完整run检查点恢复，未完成run从种子重算，不是Tick WAL断点续跑。Arena/10、CURRENT_10、WAL/2不变；Lab kernel/3明确结果/执行语义升级，旧kernel检查点拒绝混算，无自动迁移，旧数据/CAS/历史不删。
+
+### 必要快验与未验
+
+**38个不同直接用例通过（新增9，其余受影响规格/列/原入口定向回归，重跑不累计）**：Engine/快照/真实四表3；真正本机认证HTTP→Node Studio/TS SDK→私有源/真实模型扫描→原run检查点→同Store重建→四表下载/owner隔离1；SDK28；React JSDOM6。真实服务的total轨迹2/4与6/12源于rate=1/3，不造出生/能量。最终源取消/显示细化后仅2个参数UI用例再次复核。server必要check、rts受影响tests仅类型编译、Studio/Lab tsc build、web tsc --noEmit、Python包装器语法及diff检查通过；未跑全workspace/Clippy/license/SBOM/soak/CI轮询。
+
+恢复为同MemoryStore/真实私有磁盘CAS、新AppState/HTTP服务，首个真实run检查点手工登记再释放旧租约；不是实际硬杀worker、Memory跨OS进程、PG多机/断电灾备。生产仍需原PG/持久共享CAS/稳定鉴权。真实浏览器/GPU-WASM/PG实库/并发SQL/硬件/断电长稳未验；未重建Python扩展/pyarrow新场景、WASM/Vite，不对其报通过。无公共发行/外部部署/新依赖/外部模型收费或策略绕过；Pi仍设计借鉴、未引源码。
+
+### 下一主体继续
+
+**下一优先完整生命成本：攻击/修复/分泌/生长合成与仍缺计算计价**，显式契约/来源→原池实付→真实行动/死亡/根与恢复，不无限磨Lab。随后正式音频采样/空间化、视觉registry/制品；一般规则世界/TS-rpack/.rview、独立Agent赛道/真实LLM及协作presence/离线多主等仍保留。主体全齐后集中全面验收，不宣称全项目完成。
+
 ## 第三十七批：定向私有Studio协作、原日志同步与撤权恢复（从main dc7af6c继续）
 
 **主体继续，整体未完成。** 选择先闭合协作高价值段：真实所有者授权正式多编辑者 → 自己的鉴权/不可变grant版本 → 原Studio/CRDT选择性撤销 → 原Actor/规范修订/原日志同步 → 撤权/断线失效清理及新连接恢复。直接编辑上一批一般参数模型，不是本地多窗口假同步，不联系第三方、不公开世界。一般模型Lab/W3/四表消费尚未接，下一优先补；详细API/真实命令与边界见[STUDIO_COLLABORATION.md](STUDIO_COLLABORATION.md)。
@@ -559,9 +581,10 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 | 已推进，仍有边界 | 第三十三批Lab持久提交/发现、租约fencing、取消/重试幂等、run检查点恢复、私有四表原子发布与原工作台/TS SDK | 本机HTTP/Node与同Store重建通过，非PG实库灾备/硬杀恢复；未完成run从种子重算，单作业汇总仍在内存 |
 | 已推进，仍有边界 | 第三十四批Pi参考受控Adapter、独立持久运行/事件/预算、真工具收据、双控制进程取消续跑 | 设计借鉴非Pi代码复用；同源私有包/明确本地测试provider，不冒称LLM/独立注册Agent或PG灾备 |
 | 已推进，仍有边界 | 第三十五批私有程序化音效制品真实Arena消费 | 正式采样/分轨/空间化、设备听验仍欠 |
-| 已推进，仍有边界 | 第三十六批非既有角色参数实体模板/实例/绑定、原Engine执行、规范root/COMP/WAL与Studio/SDK | 有界I32/Q8_8/Bool RuleGraph，不是任意TS/rpack或物理ECS；Arena/10旧格式拒绝、Lab模型消费仍欠 |
+| 已推进，仍有边界 | 第三十六批非既有角色参数实体模板/实例/绑定、原Engine执行、规范root/COMP/WAL与Studio/SDK | 有界I32/Q8_8/Bool RuleGraph，不是任意TS/rpack或物理ECS；Arena/10旧格式拒绝；第三十八批已接有界模型Lab，仍非任意脚本 |
 | 已推进，仍有边界 | 第三十七批所有者定向源码编辑准入、原日志协作/选择性撤销、撤权与断线重连 | 单权威链/显式同步非离线多主；PG/浏览器未验，presence/光标/大历史索引仍欠 |
-| 下一主体优先 | 一般参数模型Lab/W3真实作业和四表，再完整生命成本/音频与视觉制品 | 复用真实权威模型，不以协作完成冒称一般实验消费或全产品完成 |
+| 已推进，仍有边界 | 第三十八批一般参数模型→持久Lab/W3扫描→原四表/UI SDK真实消费 | 无原生身体/自然谱系/生命账；bounded RuleGraph不是任意TS/rpack，真HTTP/同Store重建非PG灾备 |
+| 下一主体优先 | 完整生命成本，再正式音频采样/空间化与视觉制品 | 显式来源/计价→原池真实支付→行动/死亡/根恢复，不无限磨Lab或治理 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付定向私有Studio多编辑者授权/原日志同步/选择性撤销与撤权恢复；下一补一般模型Lab/W3真实作业/四表，再按依赖补完整生命成本、正式采样/空间化与视觉制品等欠项，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
+本阶段交付一般参数模型从真实Studio源到原Engine/持久Lab扫描/私有四表/UI SDK的消费链；下一优先完整生命成本，再正式采样/空间化与视觉制品等欠项，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。

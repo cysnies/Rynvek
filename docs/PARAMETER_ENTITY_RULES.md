@@ -4,7 +4,7 @@
 
 2026-11-18，中国标准时间 UTC+8；第三十六批。
 
-第三十七批已接所有者定向多编辑者准入和原日志同步，见[STUDIO_COLLABORATION.md](STUDIO_COLLABORATION.md)。模型本身仍为下述有界profile，未因此变成一般Lab/物理ECS。
+第三十七批已接所有者定向多编辑者准入和原日志同步，见[STUDIO_COLLABORATION.md](STUDIO_COLLABORATION.md)。第三十八批已接[同一模型的持久Lab扫描与原四表](LAB_PARAMETER_EXPERIMENTS.md)，模型本身仍为下述有界profile，不是任意W3脚本/物理ECS。
 
 ## 操作与SDK
 
@@ -36,7 +36,7 @@ parameterRegistryOp('bindings', 'counter.step', {
 
 定义在AuthoringState/config_root；动态值/serial/故障在原entity_root和必需COMP。整包投影预检引用/类型/资源后才修改原世界，失败不涂地或部分改状态。原Runtime/Actor/Store/CAS/fencing/TickRecord不另造一套。唯一当前Arena为`rynvek-arena/10`/`CURRENT_10`；旧/9快照与WAL原数据不删除，但新内核拒绝自动打开/无声迁移，没有兼容读层或转换器。规范默认根因此改变，历史golden和全面门禁待主体齐后集中验收，未称全套通过。
 
-Lab执行语义升级为`rynvek-lab-kernel/2`，原profile检查拒绝混用旧run检查点；未实现旧作业迁移，也未把一般参数模板导入Lab ExperimentSpec/四表。该下一产品消费缺口明确保留。
+第三十六批Lab执行语义曾升为`rynvek-lab-kernel/2`。第三十八批现行为`/3`，已接参数模型ExperimentSpec/持久扫描与四表，原profile检查仍拒绝混用旧run检查点；不迁移或删除旧作业。
 
 ## 本批直接快验
 
@@ -51,4 +51,4 @@ pnpm --dir apps/web-platform exec tsc --noEmit
 
 本批10个不同直接用例全部通过，重跑不重复累计：world2、真实服务1、CRDT2、原Studio UI5。必要server编译、Studio SDK tsc build、web tsc --noEmit及diff检查通过，真实服务最终于2026-11-18 03:14:01中国标准时间完成。首次快验发现SDK原生模板ID解析尚未接受parameter命名空间，已修实际解析而非放松测试；服务夹具最初未握手就推进Lobby，已按原真实WS开局路径修正，未绕Running约束。详细最终结果在ACTIVE_DEVELOPMENT与同一Page。真实服务快验用正式注册/认证HTTP、Node SDK与原Arena WebSocket握手启动原Actor，编辑/undo/redo后从初始COMP逐条原TickRecord replay核对末根和动态态，再从检查点续跑同根；匿名/他人/公共CID路径隔离。原生2项覆盖类型/引用/资源/重复写/整包原子性与动态根/恢复。CRDT2项、原Studio JSDOM5项验证入口/选择性撤销/断开清理。
 
-MemoryStore/私有CAS/WAL回放不是PostgreSQL多机灾备或服务端硬杀重启；未验真实浏览器、GPU/WASM通用参数执行、硬件/断电/长稳。未运行全workspace、Clippy、license、SBOM、soak或CI轮询。项目尚未完成；下一协作与一般模型Lab/W3消费、完整生命成本等依赖持续推进。
+MemoryStore/私有CAS/WAL回放不是PostgreSQL多机灾备或服务端硬杀重启；未验真实浏览器、GPU/WASM通用参数执行、硬件/断电/长稳。未运行全workspace、Clippy、license、SBOM、soak或CI轮询。项目尚未完成；协作与有界模型Lab已由第三十七/三十八批接通；下一完整生命成本、正式音频采样/空间化与视觉制品等依赖持续推进。

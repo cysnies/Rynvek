@@ -67,3 +67,7 @@ pnpm --dir apps/web-platform exec tsc --noEmit
 节点上下文重建测试保留同MemoryStore、真实私有磁盘CAS和稳定测试签名器，重新启动本机HTTP服务、读取原准入/日志/模型；不是Memory跨OS进程持久性、硬杀/PG多机灾备。PG SQL只Rust编译，未连实库；生产跨进程需原PG/持久共享私有CAS/稳定鉴权。真实浏览器、PG迁移/并发SQL、故障分区/断电/长稳、大历史容量未验；JSDOM只验表单和生命周期。无全workspace/Clippy/license/SBOM/soak/CI轮询或网络策略绕过。
 
 一般参数模型Lab/W3导入与四表统计**仍未接通**，本阶段优先完成独立高价值协作治理，不冒称已完成实验消费；这是下一主体阶段。完整生命成本、一般TS/rpack/.rview、音频采样/空间化和视觉制品等仍欠，全项目未完成。
+
+## 第三十八批后续消费
+
+新增只读`GET worlds/{id}/authoring/lab-model`同样复用当前Studio源码准入并在返回前重验permit；复制已允许读取的参数模型子集，不授予WorldRead/全快照或控制。原`/lab`与SDK可显式导入、扫描并消费原Engine持久作业四表，见[LAB_PARAMETER_EXPERIMENTS.md](LAB_PARAMETER_EXPERIMENTS.md)。上文一般模型Lab未接及kernel/2是第三十七批历史边界；现行kernel/3。已经授权导出的源副本不能追溯收回。下一完整生命成本及音频/视觉欠项继续，不因协作或实验切片称全项目完成。
