@@ -259,3 +259,43 @@ pub async fn parquet(
     )
         .into_response())
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RowsQuery {
+    pub table: String,
+    #[serde(default)]
+    pub offset: u32,
+    pub limit: Option<usize>,
+}
+/// 私有工作台页直接解码同一CID的Parquet，不重跑仿真、不维护影子结果。
+pub async fn rows(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<RowsQuery>,
+) -> ApiResult<Response> {
+    let exp = owned_experiment(&app, &headers, &id).await?;
+    let table = LabTable::parse(&q.table).ok_or_else(|| ApiError::bad_request("未知结果表"))?;
+    let limit = q.limit.unwrap_or(250);
+    if !(1..=500).contains(&limit) {
+        return Err(ApiError::bad_request("limit必须在1..=500"));
+    }
+    let cid = exp
+        .tables
+        .get(table.name())
+        .and_then(|h| parse_hex::<32>(h))
+        .ok_or_else(|| ApiError::not_found("结果尚未产出"))?;
+    let bytes = app.inner.blobs.get(&rynvek_core::hash::Blake3Hash(cid))?;
+    let page =
+        tokio::task::spawn_blocking(move || rynvek_rts::lab::arrow_io::parquet_page(bytes, q.offset as usize, limit))
+            .await
+            .map_err(|e| ApiError::bad_request(format!("读取结果失败：{e}")))?
+            .map_err(ApiError::bad_request)?;
+    Ok((
+        [(header::CACHE_CONTROL, "private, no-store")],
+        Json(serde_json::json!({
+            "exp_id":id,"table":table.name(),"cid":crate::ids::hex(&cid),"page":page
+        })),
+    )
+        .into_response())
+}

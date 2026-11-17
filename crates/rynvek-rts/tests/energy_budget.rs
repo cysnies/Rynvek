@@ -16,6 +16,7 @@ fn budget_world() -> (ArenaWorld, rynvek_rts::EntitySerial) {
             movement_cost_micro_per_tile: 0,
             synapse_maintenance_micro_per_tick: 0,
             natural_reproduction: true,
+            replication_mutation_rate_permille: 50,
         },
     ));
     let mut w = ArenaWorld::with_map(

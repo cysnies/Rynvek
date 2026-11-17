@@ -11,11 +11,12 @@ publish.workspace = true
 
 [features]
 # Lab 结果的 Arrow RecordBatch / Parquet 编码（服务端 Lab 作业与 Python 绑定启用）
-arrow = ["dep:arrow", "dep:parquet"]
+arrow = ["dep:arrow", "dep:parquet", "dep:bytes"]
 
 [dependencies]
 arrow = { workspace = true, optional = true }
 blake3.workspace = true
+bytes = { version = "1", optional = true }
 parquet = { workspace = true, optional = true }
 rynvek-core.workspace = true
 rynvek-ecs.workspace = true
@@ -27,8 +28,6 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-# Parquet 读回测试（parquet 的 ChunkReader 由 bytes::Bytes 实现）
-bytes = "1"
 tempfile.workspace = true
 
 [lints]

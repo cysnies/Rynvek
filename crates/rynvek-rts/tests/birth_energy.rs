@@ -20,6 +20,7 @@ fn ready_world(vats: usize) -> (ArenaWorld, Vec<EntitySerial>) {
             movement_cost_micro_per_tile: 0,
             synapse_maintenance_micro_per_tick: 0,
             natural_reproduction: true,
+            replication_mutation_rate_permille: 50,
         },
     ));
     // 无营养地形，不依靠Move、Harvest或测试注入身体能量掩盖出生空池。

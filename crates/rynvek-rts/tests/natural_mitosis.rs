@@ -16,6 +16,7 @@ fn world() -> ArenaWorld {
             movement_cost_micro_per_tile: 0,
             synapse_maintenance_micro_per_tick: 0,
             natural_reproduction: true,
+            replication_mutation_rate_permille: 50,
         },
     ));
     let mut w = ArenaWorld::with_map(
@@ -266,4 +267,37 @@ fn candidate_birth_rollback_checkpoint_replay_and_ancestry_after_death_are_real(
     let restored = ArenaRuntime::restore([105; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
     assert_eq!(restored.ecology, original.ecology);
     assert_eq!(restored.state_root(), original.state_root());
+}
+
+#[test]
+fn w3_zero_replication_mutation_is_consumed_by_real_natural_birth_not_only_echoed() {
+    let mut w = ready_parent_world();
+    let before = w.canonical_state().config_root;
+    w.config
+        .ecology
+        .as_mut()
+        .unwrap()
+        .roles
+        .get_mut(&UnitKind::Forager)
+        .unwrap()
+        .replication_mutation_rate_permille = 0;
+    assert_ne!(before, w.canonical_state().config_root);
+    let parents = w.units.clone();
+    w.step();
+    assert!(!w.ecology.as_ref().unwrap().births.is_empty());
+    for (child, birth) in &w.ecology.as_ref().unwrap().births {
+        let mut expected = parents[&birth.parent].genome.clone();
+        expected.slug = format!("mitosis.{}", child.0);
+        expected.generation += 1;
+        assert_eq!(w.units[child].genome, expected, "0‰必须由真实复制消费，不能只回显配置");
+    }
+    w.config
+        .ecology
+        .as_mut()
+        .unwrap()
+        .roles
+        .get_mut(&UnitKind::Forager)
+        .unwrap()
+        .replication_mutation_rate_permille = 1001;
+    assert!(w.config.validate_energy_contract().is_err());
 }

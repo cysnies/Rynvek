@@ -32,6 +32,7 @@ export interface RoleEnergyContract {
   readonly movement_cost_micro_per_tile:number;
   readonly synapse_maintenance_micro_per_tick:number;
   readonly natural_reproduction:boolean;
+  readonly replication_mutation_rate_permille:number;
 }
 export interface EcologyContract {readonly roles:Readonly<Partial<Record<EnergyUnitKind,RoleEnergyContract>>>}
 
@@ -120,8 +121,9 @@ export function validateSpec(spec: ExperimentSpec): void {
       const kinds=["unit.forager","unit.striker","unit.carapace","unit.spitter","unit.weaver","unit.leviathan"];
       for (const [kind,role] of Object.entries(c.roles)) {
         if(!kinds.includes(kind)||!role||typeof role!=="object"||Array.isArray(role)) throw new SpecError("未知角色或非法生命成本对象");
-        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction"];
+        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction","replication_mutation_rate_permille"];
         if(keys.some(k=>!Object.prototype.hasOwnProperty.call(role,k))||Object.keys(role).some(k=>!keys.includes(k))) throw new SpecError("角色成本必须完整显式配置");
+        if(!Number.isInteger(role.replication_mutation_rate_permille)||role.replication_mutation_rate_permille<0||role.replication_mutation_rate_permille>1000)throw new SpecError("复制突变率必须在0..=1000‰");
         if(typeof role.natural_reproduction!=="boolean") throw new SpecError("自然繁殖许可必须为boolean");
         for(const [key,value] of Object.entries(role)) {
           if(key==="natural_reproduction")continue;

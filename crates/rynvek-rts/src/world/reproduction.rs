@@ -10,7 +10,7 @@ use super::{
 use crate::{
     EntitySerial, Vec2,
     brain::UnitBrain,
-    evolution::{DEFAULT_MUTATION_RATE_PERMILLE, EvolutionRng, mutate},
+    evolution::{EvolutionRng, mutate},
 };
 use rynvek_neural::metabolism::EnergyAccount;
 use std::collections::BTreeSet;
@@ -117,9 +117,9 @@ impl ArenaWorld {
         let mut genome = unit.genome.clone();
         genome.generation = generation;
         genome.slug = format!("mitosis.{}", self.next_serial);
-        // 使用既有Philox变异算子与既有默认率；不交叉选优，不继承运行时脑/免费脉冲。
+        // 使用既有Philox变异算子与角色显式W3复制突变率；不交叉选优，不继承运行时脑/免费脉冲。
         let mut rng = EvolutionRng::for_mitosis(self.config.world_seed, self.tick, u64::from(self.next_serial));
-        mutate(&mut genome, DEFAULT_MUTATION_RATE_PERMILLE, &mut rng);
+        mutate(&mut genome, contract.replication_mutation_rate_permille, &mut rng);
         let Ok(brain) = UnitBrain::from_genome(&genome) else {
             return;
         };

@@ -35,6 +35,7 @@ class RoleEnergyContract:
     movement_cost_micro_per_tile: int
     synapse_maintenance_micro_per_tick: int
     natural_reproduction: bool
+    replication_mutation_rate_permille: int
 
 
 @dataclass(frozen=True)

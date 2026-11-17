@@ -145,9 +145,12 @@ pub fn crossover(fitter: &Genome, other: &Genome, rng: &mut EvolutionRng) -> Gen
     child
 }
 
-/// 权重与拓扑突变
+/// 权重与拓扑概率算子；自然复制允许0‰消融，定向繁育区间由其入口约束。
 pub fn mutate(g: &mut Genome, rate_permille: u32, rng: &mut EvolutionRng) {
-    let rate = rate_permille.clamp(MUTATION_RATE_RANGE_PERMILLE.0, MUTATION_RATE_RANGE_PERMILLE.1);
+    let rate = rate_permille.min(1000);
+    if rate == 0 {
+        return;
+    }
     for slot in 0..g.slot_count() {
         let w = g.slot_weight(slot);
         if w == 0 || !rng.chance_permille(rate) {
@@ -238,7 +241,11 @@ pub fn baldwin_assimilate(g: &mut Genome, delta: &[i16], alpha_permille: i64) {
 /// 一次完整繁育：交叉 → 突变 → 命名
 pub fn breed(fitter: &Genome, other: &Genome, rate_permille: u32, rng: &mut EvolutionRng, slug: String) -> Genome {
     let mut child = crossover(fitter, other, rng);
-    mutate(&mut child, rate_permille, rng);
+    mutate(
+        &mut child,
+        rate_permille.clamp(MUTATION_RATE_RANGE_PERMILLE.0, MUTATION_RATE_RANGE_PERMILLE.1),
+        rng,
+    );
     enforce_page_limit(&mut child);
     child.slug = slug;
     child

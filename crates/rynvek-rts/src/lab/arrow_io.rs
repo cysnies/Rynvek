@@ -417,3 +417,79 @@ mod tests {
         assert_eq!(feature_names_array().len(), 24);
     }
 }
+
+/// 来自既有CAS Parquet的有界页面；64/128位整数作为十进制字符串，不经JS浮点。
+#[derive(Debug, serde::Serialize)]
+pub struct TablePage {
+    pub total_rows: usize,
+    pub offset: usize,
+    pub next_offset: Option<usize>,
+    pub columns: Vec<String>,
+    pub rows: Vec<serde_json::Value>,
+}
+pub fn parquet_page(bytes: Vec<u8>, offset: usize, limit: usize) -> Result<TablePage, String> {
+    use arrow::array::Array;
+    use serde_json::{Value, json};
+    if !(1..=500).contains(&limit) {
+        return Err("分页limit必须在1..=500".into());
+    }
+    let builder = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes))
+        .map_err(|e| e.to_string())?;
+    let total_rows = usize::try_from(builder.metadata().file_metadata().num_rows()).map_err(|e| e.to_string())?;
+    let columns = builder.schema().fields().iter().map(|f| f.name().clone()).collect();
+    let mut rows = Vec::new();
+    if offset < total_rows {
+        let reader = builder
+            .with_offset(offset)
+            .with_limit(limit)
+            .with_batch_size(limit)
+            .build()
+            .map_err(|e| e.to_string())?;
+        for batch in reader {
+            let batch = batch.map_err(|e| e.to_string())?;
+            for i in 0..batch.num_rows() {
+                let mut row = serde_json::Map::new();
+                for (field, col) in batch.schema().fields().iter().zip(batch.columns()) {
+                    let v = if col.is_null(i) {
+                        Value::Null
+                    } else {
+                        macro_rules! val {
+                            ($ty:ty) => {
+                                col.as_any()
+                                    .downcast_ref::<$ty>()
+                                    .ok_or("Parquet列类型不符")?
+                                    .value(i)
+                            };
+                        }
+                        match field.data_type() {
+                            DataType::UInt8 => json!(val!(UInt8Array)),
+                            DataType::UInt32 => json!(val!(UInt32Array)),
+                            DataType::UInt64 => json!(val!(UInt64Array).to_string()),
+                            DataType::Int64 => json!(val!(Int64Array).to_string()),
+                            DataType::Decimal128(_, 0) => json!(val!(Decimal128Array).to_string()),
+                            DataType::Boolean => json!(val!(BooleanArray)),
+                            DataType::Utf8 => json!(val!(StringArray)),
+                            DataType::FixedSizeBinary(32) => json!(
+                                val!(FixedSizeBinaryArray)
+                                    .iter()
+                                    .map(|b| format!("{b:02x}"))
+                                    .collect::<String>()
+                            ),
+                            _ => return Err("结果表包含不支持的当前列类型".into()),
+                        }
+                    };
+                    row.insert(field.name().clone(), v);
+                }
+                rows.push(Value::Object(row));
+            }
+        }
+    }
+    let end = offset.saturating_add(rows.len());
+    Ok(TablePage {
+        total_rows,
+        offset,
+        next_offset: (end < total_rows).then_some(end),
+        columns,
+        rows,
+    })
+}

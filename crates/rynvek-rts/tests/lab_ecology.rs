@@ -12,7 +12,7 @@ fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
       "name":"真实自然谱系", "seeds":[57],"ticks":600,"sample_every":300,
       "variants":[{"label":"自然复制", "policy":"ecology", "ecology":{"roles":{"unit.forager":{
         "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
-      ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}}]
+      ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50}}}}]
     }))
     .unwrap();
     spec.validate().unwrap();
@@ -65,11 +65,33 @@ fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
 fn ecology_experiment_cannot_silently_enable_ranked_or_incomplete_contract() {
     for variant in [
         serde_json::json!({"label":"x","policy":"ecology"}),
-        serde_json::json!({"label":"x","mode":"duel","ecology":{"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}}),
+        serde_json::json!({"label":"x","mode":"duel","ecology":{"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50}}}}),
     ] {
         let spec: ExperimentSpec =
             serde_json::from_value(serde_json::json!({"name":"bad","seeds":[1],"ticks":1,"variants":[variant]}))
                 .unwrap();
         assert!(spec.validate().is_err());
     }
+}
+
+#[test]
+fn workbench_page_preserves_decimal128_and_64bit_values_without_floating_point() {
+    use rynvek_rts::lab::{EnergyRow, ExperimentResult};
+    let exact = 1u128 << 96;
+    let result = ExperimentResult {
+        energy: vec![EnergyRow {
+            enabled: true,
+            tick: u64::MAX,
+            received_q: exact,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let bytes = arrow_io::to_parquet(&arrow_io::table_batch(&result, LabTable::Energy).unwrap()).unwrap();
+    let page = arrow_io::parquet_page(bytes.clone(), 0, 1).unwrap();
+    assert_eq!(page.rows[0]["received_q"], exact.to_string());
+    assert_eq!(page.rows[0]["tick"], u64::MAX.to_string());
+    let empty = arrow_io::parquet_page(bytes, 1, 1).unwrap();
+    assert!(empty.rows.is_empty());
+    assert!(empty.next_offset.is_none());
 }

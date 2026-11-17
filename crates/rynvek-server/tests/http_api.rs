@@ -794,9 +794,9 @@ async fn ecology_lab_exports_private_real_lineage_energy_and_structured_status()
     let spec = json!({"name":"自然家谱","seeds":[57],"ticks":600,"sample_every":300,
     "variants":[{"label":"自然复制","policy":"ecology","ecology":{"roles":{"unit.forager":{
       "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
-    ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true},"unit.striker":{
+    ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50},"unit.striker":{
         "basal_cost_micro_per_tick":100,"reserve_ticks":4,"birth_energy_milli":1000,
-        "movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":false
+        "movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":false,"replication_mutation_rate_permille":50
       }}}}]});
     let response = send(
         &base,
@@ -828,6 +828,33 @@ async fn ecology_lab_exports_private_real_lineage_energy_and_structured_status()
         &get(&base, &format!("{pq}?table=energy"), Some(&other.token)).await,
         404,
         0x2002,
+    );
+    for table in ["runs", "metrics", "lineage", "energy"] {
+        let url = format!("{path}/rows?table={table}&limit=1");
+        let rows = get(&base, &url, Some(&owner.token)).await;
+        assert_eq!(rows.status, 200);
+        assert_eq!(rows.header("cache-control"), Some("private, no-store"));
+        let rows = rows.json().unwrap();
+        assert_eq!(rows["cid"], job["tables"][table]);
+        assert_eq!(rows["page"]["rows"].as_array().unwrap().len(), 1);
+        assert_error(&get(&base, &url, Some(&other.token)).await, 404, 0x2002);
+        if table == "lineage" {
+            assert!(rows["page"]["rows"][0]["born_tick"].is_string());
+            assert_eq!(rows["page"]["rows"][0]["genome"].as_str().unwrap().len(), 64);
+        }
+        if table == "energy" {
+            assert!(rows["page"]["rows"][0]["received_q"].is_string());
+        }
+    }
+    assert_eq!(
+        get(
+            &base,
+            &format!("{path}/rows?table=energy&limit=501"),
+            Some(&owner.token)
+        )
+        .await
+        .status,
+        400
     );
     server.shutdown().await;
 }

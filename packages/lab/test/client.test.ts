@@ -112,3 +112,15 @@ it("结构化实验状态可直接用于工作台而不解析404消息",async()=
   expect(job.status).toBe("completed");
   expect(calls[0]?.url).toBe("http://srv/api/v1/lab/experiments/e%2F1");
 });
+
+// 仅传输夹具：生产工作台不生成实验或四表替代数据。
+it("四表分页保持大整数原文，拒绝错身份、错CID及不前进/越界页面",async()=>{
+  const q=(2n**96n).toString();
+  const result={exp_id:"private",table:"energy",cid:CID,page:{total_rows:1,offset:0,next_offset:null,columns:["stored_q"],rows:[{stored_q:q}]}};
+  const {fetch,calls}=scripted([()=>json(200,result),()=>json(200,{...result,exp_id:"other"}),()=>json(200,{...result,cid:"not-cid"}),()=>json(200,{...result,page:{...result.page,rows:[null]}}),()=>json(200,{...result,page:{...result.page,total_rows:0}}),()=>json(200,{...result,page:{...result.page,total_rows:2}})]);
+  const client=new LabClient({baseUrl:"http://srv",token:"owner",fetch});
+  expect((await client.rows("private","energy")).page.rows[0]?.stored_q).toBe(q);
+  expect(calls[0]?.init?.cache).toBe("no-store");
+  for(let i=0;i<5;i++)await expect(client.rows("private","energy")).rejects.toThrow("非法分页");
+  await expect(client.rows("private","energy",0,501)).rejects.toThrow("分页边界");expect(calls).toHaveLength(6);
+});

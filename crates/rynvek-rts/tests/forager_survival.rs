@@ -5,7 +5,7 @@ use rynvek_rts::commands::{RtsCommand, UnitSelector};
 use rynvek_rts::{ArenaMap, ArenaRuntime, ArenaWorld, FactionId, FieldId, MatchConfig, TerrainTileKind, UnitKind};
 
 fn contract(cost: u32, reserve: u32) -> serde_json::Value {
-    serde_json::json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":cost,"reserve_ticks":reserve,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}})
+    serde_json::json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":cost,"reserve_ticks":reserve,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50}}})
 }
 fn world(cost: u32, reserve: u32) -> (ArenaWorld, rynvek_rts::EntitySerial) {
     let mut cfg = serde_json::to_value(MatchConfig::pve(57, 1)).unwrap();
@@ -143,7 +143,7 @@ fn survival_parameters_are_bound_validated_and_not_implicitly_enabled() {
     assert_ne!(changed.canonical_state().config_root, root);
     for bad in [
         serde_json::Value::Null,
-        serde_json::json!({"roles":{"unit.forager":{"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}),
+        serde_json::json!({"roles":{"unit.forager":{"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50}}}),
         contract(0, 4),
         contract(u32::MAX, u32::MAX),
     ] {

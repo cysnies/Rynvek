@@ -43,6 +43,12 @@ export interface ExperimentRecord {
   readonly error: string | null;
 }
 
+export interface LabRows {
+  readonly exp_id:string;readonly table:LabTable;readonly cid:string;
+  readonly page:{readonly total_rows:number;readonly offset:number;readonly next_offset:number|null;
+    readonly columns:readonly string[];readonly rows:readonly Record<string,unknown>[]};
+}
+
 /** 下载到的 Parquet 表 */
 export interface ParquetTable {
   readonly table: LabTable;
@@ -126,8 +132,9 @@ export class LabClient {
   }
 
   /** 路由 17：提交实验（先在本地按服务端规则校验） */
-  async submit(spec: ExperimentSpec): Promise<ExperimentRecord> {
+  async submit(spec: ExperimentSpec, signal?:AbortSignal): Promise<ExperimentRecord> {
     const res = await this.#fetch(`${this.#base}/api/v1/lab/experiments`, {
+      ...(signal ? {signal}:{}),
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.#token}` },
       body: JSON.stringify(toRequestBody(spec)),
@@ -137,18 +144,35 @@ export class LabClient {
   }
 
   /** 私有作业状态/进度/四张结果表CID；未知或非所有者均为404。 */
-  async getExperiment(expId:string):Promise<ExperimentRecord> {
+  async getExperiment(expId:string,signal?:AbortSignal):Promise<ExperimentRecord> {
     const res=await this.#fetch(`${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}`,{
-      headers:{Authorization:`Bearer ${this.#token}`}
+      ...(signal?{signal}:{}),headers:{Authorization:`Bearer ${this.#token}`}
     });
     if(res.status!==200) throw await this.#error(res);
     return await res.json() as ExperimentRecord;
   }
 
+  /** 直接读取同一CAS四表的有界页面；不在浏览器重跑仿真或经浮点解码。 */
+  async rows(expId:string,table:LabTable,offset=0,limit=250,signal?:AbortSignal):Promise<LabRows> {
+    if(!Number.isSafeInteger(offset)||offset<0||offset>0xffff_ffff||!Number.isInteger(limit)||limit<1||limit>500)throw new Error("无效分页边界");
+    const res=await this.#fetch(`${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}/rows?table=${table}&offset=${offset}&limit=${limit}`,{
+      ...(signal?{signal}:{}),headers:{Authorization:`Bearer ${this.#token}`},cache:"no-store"
+    });
+    if(res.status!==200)throw await this.#error(res);
+    const result=await res.json() as LabRows;
+    const p=result.page;
+    if(result.exp_id!==expId||result.table!==table||! /^[a-f0-9]{64}$/.test(result.cid)||!p
+      ||!Number.isSafeInteger(p.total_rows)||p.total_rows<0||p.offset!==offset||!Array.isArray(p.rows)||p.rows.length>limit||!p.rows.every(r=>r!==null&&typeof r==="object"&&!Array.isArray(r))
+      ||p.rows.length>Math.max(0,p.total_rows-offset)||(p.next_offset===null&&offset+p.rows.length<p.total_rows)
+      ||!Array.isArray(p.columns)||!p.columns.every(c=>typeof c==="string")
+      ||(p.next_offset!==null&&(p.next_offset!==offset+p.rows.length||p.next_offset<=offset||p.next_offset>=p.total_rows)))throw new Error("服务器返回非法分页身份或边界");
+    return result;
+  }
+
   /** 路由 18：下载一次；未就绪返回 `{ pending: 消息 }` */
-  async tryParquet(expId: string, table: LabTable = "metrics"): Promise<ParquetTable | { pending: string }> {
+  async tryParquet(expId: string, table: LabTable = "metrics", signal?:AbortSignal): Promise<ParquetTable | { pending: string }> {
     const url = `${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}/parquet?table=${table}`;
-    const res = await this.#fetch(url, { headers: { Authorization: `Bearer ${this.#token}` } });
+    const res = await this.#fetch(url, { ...(signal?{signal}:{}), cache:"no-store", headers: { Authorization: `Bearer ${this.#token}` } });
     if (res.status === 200) {
       const bytes = new Uint8Array(await res.arrayBuffer());
       if (!isParquet(bytes)) throw new LabApiError(200, 0, "InvalidParquet", "响应体不是 Parquet 文件");
@@ -174,7 +198,7 @@ export class LabClient {
     let waited = 0;
     for (;;) {
       if (opts.signal?.aborted) throw new Error("已取消等待 Lab 实验结果");
-      const r = await this.tryParquet(expId, opts.table ?? "metrics");
+      const r = await this.tryParquet(expId, opts.table ?? "metrics",opts.signal);
       if (!("pending" in r)) return r;
       opts.onPending?.(r.pending);
       if (waited >= timeout) {

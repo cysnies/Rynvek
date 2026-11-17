@@ -22,11 +22,15 @@ pub struct RoleEnergyContract {
     pub movement_cost_micro_per_tile: u32,
     pub synapse_maintenance_micro_per_tick: u32,
     pub natural_reproduction: bool,
+    pub replication_mutation_rate_permille: u32,
 }
 impl RoleEnergyContract {
     pub fn validate(self) -> Result<(), &'static str> {
         if self.birth_energy_milli == 0 || self.basal_cost_micro_per_tick == 0 {
             return Err("出生投入和基础代谢必须显式大于0");
+        }
+        if self.replication_mutation_rate_permille > 1000 {
+            return Err("复制突变率必须在0..=1000‰");
         }
         self.reserve_q().ok_or("代谢预留超出精确表示范围")?;
         Ok(())
@@ -354,6 +358,7 @@ mod role_energy_tests {
             movement_cost_micro_per_tile: 11,
             synapse_maintenance_micro_per_tick: 1,
             natural_reproduction: false,
+            replication_mutation_rate_permille: 50,
         }
     }
     fn world(roles: BTreeMap<UnitKind, RoleEnergyContract>) -> ArenaWorld {

@@ -62,6 +62,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/hub/blobs/{blake3_hex}", get(hub::blob))
         .route("/api/v1/lab/experiments", post(lab::submit))
         .route("/api/v1/lab/experiments/{exp_id}", get(lab::status))
+        .route("/api/v1/lab/experiments/{exp_id}/rows", get(lab::rows))
         .route("/api/v1/lab/experiments/{exp_id}/parquet", get(lab::parquet))
         .route("/api/v1/user/data-export", post(user::data_export))
         .route("/api/v1/user/account", delete(user::delete_account))
