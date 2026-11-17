@@ -8,6 +8,15 @@ export interface WorldRun {
   world_id:string;match_id:string;principal_id:string;faction:number;mode:MatchMode;
   match_state:string;tick:number;recovered:boolean;
 }
+export interface RankedSeat {
+  status:"matched"; principal_id:string; match_id:string; world_id:string;
+  faction:number; mode:MatchMode; league:string; match_state:string; tick:number;
+}
+export interface QueueContext {
+  principal_id:string; league:"human"; ruleset_hash:string;
+  status:"idle"|"queued"|"matched"; active:RankedSeat|null;
+}
+export type QueueReply = RankedSeat | {status:"queued";position:number;rating:number} | {status:"cancelled"|"not_queued"};
 export interface PlaybackFrame {
   match_id:string;world_id:string;faction:number;mode:MatchMode;initial_tick:number;final_tick:number;
   tick:number;revision:string;state_root:string;initial_revision:string;initial_state_root:string;target_tick:number;ready:boolean;
@@ -39,6 +48,26 @@ export class ArenaWorldClient {
     const result=await this.request<WorldRun>(`worlds/${requested}/arena`,"POST",undefined,signal);
     if(result.world_id!==requested||!/^\d+$/.test(result.principal_id)||result.faction!==0||result.mode!=="PvE_Survival")throw new Error("真实席位/世界回执不一致，停止连接");
     uuid(result.match_id);return result;
+  }
+  async queueContext(signal?:AbortSignal):Promise<QueueContext>{
+    const c=await this.request<QueueContext>("matches/queue","GET",undefined,signal);
+    if(!/^[1-9]\d*$/.test(c.principal_id)||c.league!=="human"||!/^[0-9a-f]{64}$/.test(c.ruleset_hash)
+      ||!["idle","queued","matched"].includes(c.status)||(c.status==="matched")!==Boolean(c.active))throw new Error("匹配身份/规则集回执不合法");
+    if(c.active)this.checkSeat(c.active,c.principal_id);
+    return c;
+  }
+  async queue(ruleset:string,cancel:boolean,principal:string,signal?:AbortSignal,poll=false):Promise<QueueReply>{
+    if(!/^[0-9a-f]{64}$/.test(ruleset))throw new Error("必须先读取当前规则集");
+    const r=await this.request<QueueReply>("matches/queue","POST",{league:"human",ruleset_hash:ruleset,cancel,poll},signal);
+    if(r.status==="matched")this.checkSeat(r,principal);
+    else if(r.status==="queued"){if(!Number.isSafeInteger(r.position)||r.position<1||!Number.isFinite(r.rating))throw new Error("队列回执不合法");}
+    else if(!["cancelled","not_queued"].includes(r.status))throw new Error("未知匹配状态");
+    return r;
+  }
+  private checkSeat(seat:RankedSeat,principal:string):void{
+    uuid(seat.match_id);uuid(seat.world_id);
+    if(seat.principal_id!==principal||![0,1].includes(seat.faction)||!["PvP_Ranked","PvE_Survival"].includes(seat.mode)
+      ||!Number.isSafeInteger(seat.tick)||seat.tick<0)throw new Error("真实身份/席位不匹配");
   }
   streamURL(world:string):string{const url=new URL(`/api/v1/worlds/${uuid(world)}/stream?format=arena-json`,this.origin);url.protocol=url.protocol==="https:"?"wss:":"ws:";return url.toString();}
   hello(message:ArenaClientMessage):object{if(!this.token)throw new Error("身份已断开");return message.type==="hello"?{...message,capability_token:this.token}:message;}

@@ -9,16 +9,17 @@ import { WebSocketTransport, buildingSpec, rawToFloat, type BuildingKind, type A
 import { buildCommandPanelView, mountCommandPanel } from "./arena-command-panel.js";
 import { fogAt, project, unproject, viewScale, type Viewport } from "./arena-view.js";
 import { mountArenaRenderer } from "./arena-renderer.js";
-import { ArenaWorldClient, ReplayObservationTransport, type WorldRun, type PlaybackFrame } from "./arena-remote.js";
+import { ArenaWorldClient, ReplayObservationTransport, type WorldRun, type PlaybackFrame, type QueueContext } from "./arena-remote.js";
 import "./browser.css";
 
 const gpuRequested = new URLSearchParams(location.search).get("renderer") === "webgpu";
 
 const mount=document.querySelector<HTMLDivElement>("#app")!;
-mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</span></h1><span id="connection" class="chip">等待开始</span><span class="mode muted">单人 PvE · 原世界权威 · 非排位</span><span id="renderer" class="chip">${gpuRequested?"WebGPU Worker 待连接":"临时 Canvas2D"}</span><a class="chip" href="/studio">Studio 创作</a><a class="chip" href="/lab">Lab 实验台</a><button id="start" class="primary">开始本地练习</button></header>
+mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</span></h1><span id="connection" class="chip">等待开始</span><span id="arena-mode" class="mode muted">已有世界 PvE / 正式人类排位</span><span id="renderer" class="chip">${gpuRequested?"WebGPU Worker 待连接":"临时 Canvas2D"}</span><a class="chip" href="/studio">Studio 创作</a><a class="chip" href="/lab">Lab 实验台</a><button id="start" class="primary">开始本地练习</button></header>
 <section class="panel arena-connect"><h2>运行 Studio 已有世界 / 原 Actor</h2><div class="buttons"><label>服务 origin <input id="api-origin" aria-label="Arena服务地址" autocomplete="off"></label><label>世界ID <input id="world-id" aria-label="Arena世界ID" autocomplete="off"></label><label>WorldEdit / MatchPlay 凭据 <input id="capability" aria-label="Arena令牌" type="password" autocomplete="off"></label><button id="connect-world" class="primary">运行/重连此世界</button><button id="disconnect">断开身份</button></div><p class="muted">只运行此ID的真实单人PvE世界，不另建演示。凭据只在内存与握手帧，绝不放URL/存储；请核对服务地址。刷新后重新输入同一身份重连。关闭页面不是暂停，终局世界不重置。</p></section>
+<section class="panel arena-connect"><h2>真实人类排位 / HUMAN RANKED</h2><div class="buttons"><button id="rank-auth">验证排位身份 / 找回席位</button><button id="rank-join" disabled>进入人类排位队列</button><button id="rank-refresh" disabled>刷新队列/席位</button><button id="rank-cancel" disabled>退出排队</button><button id="rank-enter" disabled>连接已匹配席位 / 重连</button></div><p id="rank-status" role="status">未验证；使用上方服务 origin 与正式凭据，不创建临时玩家。</p><p class="muted">显式入队才匹配真实已注册对手；无人则等待，不生成机器人。双方连接后原宿主自动开局，无伪准备按钮。排位按原服务规则公开对局元数据/签名归档，不把自创世界送入排位。断开身份/离页只停止本地追踪，不保证离队或暂停：请先按「退出排队」并等回执；已匹配须重连后完成对局/投降。队列/席位发现目前限本节点，未实现跨节点持久恢复。</p></section>
 <main class="layout"><section class="world"><div class="worldbar"><span>WORLD / <span id="clock">TICK —</span></span><span id="pointer">只读阵营视图</span></div><canvas id="world" tabindex="0" aria-label="Rynvek 战争迷雾地图，左键选择、右键命令"></canvas><div class="metrics"><span class="metric">生物质<b id="biomass">—</b></span><span class="metric">通量<b id="flux">—</b></span><span class="metric">神经胶<b id="neurogel">—</b></span><span class="metric">人口<b id="supply">—</b></span><span class="metric">波次<b id="wave">—</b></span></div></section>
-<aside class="sidebar"><section class="panel"><h2>指挥 / CONTROL</h2><div class="buttons"><button id="select" disabled>全选己方单位</button><button id="home" disabled>主脑居中</button><button id="harvest" disabled>采集 → 点目标</button><button id="move" disabled>移动 → 点目标</button><button disabled title="当前权威协议不提供暂停">暂停未开放</button></div><p id="selection" class="muted">尚未选择</p><p id="intent">开始后，左键点选或拖框；右键移动。黄绿色为营养沼泽，工蜂右键自动采集。</p><p id="outcome" class="outcome"></p></section>
+<aside class="sidebar"><section class="panel"><h2>指挥 / CONTROL</h2><div class="buttons"><button id="select" disabled>全选己方单位</button><button id="home" disabled>主脑居中</button><button id="release-control" disabled>交还控制租约</button><button id="claim-control" disabled>重新申请控制</button><button id="harvest" disabled>采集 → 点目标</button><button id="move" disabled>移动 → 点目标</button><button disabled title="当前权威协议不提供暂停">暂停未开放</button></div><p id="selection" class="muted">尚未选择</p><p id="intent">开始后，左键点选或拖框；右键移动。黄绿色为营养沼泽，工蜂右键自动采集。</p><p id="outcome" class="outcome"></p></section>
 <section class="panel"><h2>建造 / BUILD</h2><div id="build" class="build"></div><p class="muted">${gpuRequested?"GPU 黄色轮廓仅表示落点意图，不表示可建；权限、占地、资源和科技由服务器最终验证。":"选择建筑后点地图；黄色框仅为落点预览，权限、占地、资源和科技由服务器最终验证。"}Esc / 右键取消。</p></section>
 <section class="panel" id="command-panel" aria-label="生产科技信标操作面板"></section>
 <section class="panel"><h2>签名归档逐记录重演 / REPLAY</h2><p>真实已提交创作锚点 + 实际运行WAL + TickRecord重演后的阵营观测。服务端验签；只读，无控制租约。完整终根未到达前不声称全片验证。</p><div class="buttons"><button id="watch-replay" disabled>打开真实回放</button><button id="play-replay" disabled>播放</button><button id="pause-replay" disabled>暂停/停止定位</button><button id="close-replay" disabled>关闭回放</button></div><label>目标Tick<input id="replay-tick" aria-label="回放目标Tick" type="number" min="0" value="0" disabled></label><button id="seek-replay" disabled>定位（有界重演）</button><p id="replay-status" role="status">未装载归档</p><p class="muted">倒退从真实初态重新演算，每请求最多120条记录，可停止；不是插值/伪帧。首帧是实际已提交Studio状态，不伪造编辑过程帧；完整保留运行期及恢复前的真实WAL。</p></section>
@@ -37,12 +38,15 @@ let session:Session|null=null;
 let generation=0,request:AbortController|null=null,disposed=false,animationFrame=0;
 interface Playing {cursor:string;frame:PlaybackFrame;source:ReplayObservationTransport;session:Session;own:number;busy:boolean;playing:boolean;stop:boolean;timer:ReturnType<typeof setTimeout>|null;request:AbortController|null}
 let playback:Playing|null=null;
+let rankClient:ArenaWorldClient|null=null,rankContext:QueueContext|null=null;
+let rankEpoch=0,rankBusy=false,rankRequest:AbortController|null=null,rankTimer:ReturnType<typeof setTimeout>|null=null;
+
 const input=(id:string)=>el(id) as HTMLInputElement;
 const query=new URLSearchParams(location.search);
 input("world-id").value=query.get("world")??"";
 input("api-origin").value=query.get("api_origin")??location.origin;
 const alternative=new URL("/arena",location.origin);if(query.get("world"))alternative.searchParams.set("world",query.get("world")!);if(query.get("api_origin"))alternative.searchParams.set("api_origin",query.get("api_origin")!);if(!gpuRequested)alternative.searchParams.set("renderer","webgpu");(el("switch-renderer") as HTMLAnchorElement).href=alternative.toString();
-let connected=false,initialized=false,starting=false;
+let connected=false,linked=false,initialized=false,starting=false;
 let lastNotice:object|null=null;
 let armed:"Move"|"Harvest"|null=null;
 let pointer:[number,number]=[0,0];
@@ -72,11 +76,14 @@ function controls():void{
   const active=connected && !arena?.client.observation?.outcome;
   for(const id of ["select","home","harvest","move","surrender"]) button(id).disabled=!active;
   for(const b of document.querySelectorAll<HTMLButtonElement>("[data-game]"))b.disabled=!active;
+  button("release-control").disabled=!active||!arena?.client.lease;
+  button("claim-control").disabled=connected||!linked||starting||!!playback||!!arena?.client.observation?.outcome;
   const ended=!!arena?.client.observation?.outcome||session?.match_state==="Completed";
   button("replay").disabled=!ended||!session;
   button("watch-replay").disabled=!ended||!session||starting||!!playback;
-  button("start").disabled=starting || (connected && !ended);
-  button("connect-world").disabled=starting || (connected && !ended);
+  button("start").disabled=starting || (connected && !ended) || !!rankClient || rankBusy;
+  button("connect-world").disabled=starting || (connected && !ended) || !!rankClient || rankBusy;
+  rankControls();
   refreshPanel();
   button("play-replay").disabled=!playback||playback.busy||playback.playing;
   button("pause-replay").disabled=!playback||(!playback.busy&&!playback.playing);
@@ -108,13 +115,13 @@ function clearRuntime():void{
   const old=playback;playback=null;
   if(old){old.stop=true;old.playing=false;old.request?.abort();if(old.timer)clearTimeout(old.timer);void old.session.client.closePlayback(old.session.match_id,old.cursor).catch(()=>{});}
   gpuRenderer?.dispose();gpuRenderer=null;arena?.dispose();arena=null;socket?.close();socket=null;
-  connected=false;initialized=false;armed=null;drag=null;lastNotice=null;
+  connected=false;linked=false;initialized=false;armed=null;drag=null;lastNotice=null;
   for(const id of ["biomass","flux","neurogel","supply","wave"])el(id).textContent="—";
   el("clock").textContent="TICK —";el("outcome").textContent="";el("selection").textContent="尚未选择";
   el("replay-status").textContent="未装载归档";
 }
 function disconnect():void{
-  generation++;clearRuntime();session?.client.destroy();session=null;
+  resetRank();generation++;clearRuntime();session?.client.destroy();session=null;
   input("capability").value="";starting=false;logLines=[];el("log").textContent="身份已断开；未暂停服务器，也未把未确认命令算成功。";
   el("connection").textContent="身份已断开";controls();
 }
@@ -145,12 +152,16 @@ async function connectLive(info:Session,own:number,signal:AbortSignal):Promise<v
   current.client.on(event=>{if(own!==generation||arena!==current)return;if(event.type==="observation"){
     if(!initialized){current.controller.jumpToNexus();current.ui.camera.zoom=1.8;initialized=true;}display();
   }if(event.type==="error")note(event.error.message);if(event.type==="lease_revoked"||(event.type==="lease"&&!event.lease)){connected=false;el("connection").textContent="控制租约已结束 / 可按原世界重连";controls();}});
-  ws.onclose=()=>{if(own!==generation||socket!==ws)return;connected=false;if(!current.client.observation?.outcome){el("connection").textContent="连接关闭 / 同一世界重连";note("连接已关闭；没有把未确认命令标为成功。原Actor/席位继续按规则运行。");}controls();};
-  await deadline(current.client.connect(),"身份/席位握手");
+  ws.onclose=()=>{if(own!==generation||socket!==ws)return;connected=false;linked=false;if(!current.client.observation?.outcome){el("connection").textContent="连接关闭 / 同一世界重连";note("连接已关闭；没有把未确认命令标为成功。原Actor/席位继续按规则运行。");}controls();};
+  const welcome=await deadline(current.client.connect(),"身份/席位握手");
+  if(welcome.faction!==info.faction||welcome.mode!==info.mode)throw new Error("服务器握手与已认证席位不一致");
+  linked=true;
   if(own!==generation||signal.aborted)return;
   await deadline(current.client.acquireLease("Sovereign"),"控制租约");
   if(own!==generation||signal.aborted)return;
-  connected=true;el("connection").textContent="原世界仿真中 / 已获控制租约";
+  connected=true;el("connection").textContent=info.mode==="PvP_Ranked"?"排位席位已连接 / 租约确认；等待双方连接或原局继续":"原世界仿真中 / 已获控制租约";
+  button("surrender").textContent=info.mode==="PvP_Ranked"?"投降排位（计入真实结果）":"结束练习（投降）";
+  el("arena-mode").textContent=info.mode==="PvP_Ranked"?`真实人类排位 · 阵营 ${info.faction}`:"已有世界单人 PvE · 非排位";
   note(`${info.recovered?"已从持久提交恢复":"已连接"}世界 ${info.world_id}；真实阵营观测/命令回执，不替换模板。`);controls();mountGpu(current,info);
 }
 async function start(authored=false):Promise<void>{
@@ -183,6 +194,68 @@ async function start(authored=false):Promise<void>{
     note(`${String(error)}；已有世界开局可能已提交，请按同一世界重连，不重复创建世界。`);}}
   finally{if(previous&&session?.client!==previous.client)previous.client.destroy();if(own===generation){starting=false;request=null;controls();}}
 }
+function rankControls():void{
+  const locked=rankBusy||starting||connected||!!playback;
+  button("rank-auth").disabled=locked||!!rankClient;
+  button("rank-join").disabled=locked||!rankContext||rankContext.status!=="idle";
+  button("rank-refresh").disabled=locked||!rankClient;
+  button("rank-cancel").disabled=locked||rankContext?.status!=="queued";
+  button("rank-enter").disabled=locked||!rankContext?.active;
+}
+function resetRank():void{
+  rankEpoch++;rankRequest?.abort();rankRequest=null;if(rankTimer)clearTimeout(rankTimer);rankTimer=null;
+  rankClient?.destroy();rankClient=null;rankContext=null;rankBusy=false;
+  el("rank-status").textContent="身份已清空；未声称离队成功或暂停对局。用同一正式身份重新验证可找回本节点队列/席位。";
+}
+function showRank():void{
+  const c=rankContext;if(!c)return;
+  el("rank-status").textContent=`已认证主体 ${c.principal_id} · human · ${c.status==="queued"?"真实排队中，等待另一注册玩家":c.active?`对局 ${c.active.match_id} / 世界 ${c.active.world_id} / 阵营 ${c.active.faction} / ${c.active.match_state}`:"未排队"} · ruleset ${c.ruleset_hash}`;
+}
+async function rankAction(action:"auth"|"join"|"refresh"|"cancel"):Promise<void>{
+  if(rankBusy||connected||starting||playback)return;
+  if(rankTimer)clearTimeout(rankTimer);rankTimer=null;
+  const own=rankEpoch;rankBusy=true;const pending=new AbortController();rankRequest=pending;controls();
+  // 请求有界；超时不能证明入队/取消未提交，停止追踪并用只读刷新对账。
+  const timer=setTimeout(()=>pending.abort(),8000);
+  try{
+    if(action==="auth"){
+      rankClient=new ArenaWorldClient(input("api-origin").value.trim(),input("capability").value.trim());
+      input("capability").value="";
+    }
+    const client=rankClient;if(!client)throw new Error("先验证正式身份");
+    if(action==="join"||action==="cancel"||(action==="refresh"&&rankContext?.status==="queued")){
+      const c=rankContext;if(!c)throw new Error("先读取当前规则集和身份");
+      const reply=await client.queue(c.ruleset_hash,action==="cancel",c.principal_id,pending.signal,action==="refresh");
+      if(own!==rankEpoch)return;
+      if(reply.status==="matched")note("配对已提交，退出排队不能撤销对局；请连接真实席位。");
+    }
+    const context=await client.queueContext(pending.signal);if(own!==rankEpoch)return;
+    rankContext=context;showRank();
+    if(context.status==="queued")rankTimer=setTimeout(()=>{void rankAction("refresh");},3000);
+  }catch(error){if(own===rankEpoch){
+    el("rank-status").textContent=`匹配请求未确认：${String(error)}。不自动重试写入；刷新或重新验证同一身份对账。`;
+    if(action==="auth"){rankClient?.destroy();rankClient=null;rankContext=null;}
+  }}finally{clearTimeout(timer);if(own===rankEpoch){rankBusy=false;rankRequest=null;controls();}}
+}
+async function enterRanked():Promise<void>{
+  if(rankBusy||starting||connected||playback||!rankClient||!rankContext?.active)return;
+  const client=rankClient,identity=rankContext.principal_id;rankBusy=true;controls();
+  const e=rankEpoch,pending=new AbortController();rankRequest=pending;
+  const timer=setTimeout(()=>pending.abort(),8000);
+  try{
+    // 进入前重新读取服务端席位，绝不相信输入的主体/阵营或陈旧匹配回执。
+    const c=await client.queueContext(pending.signal);if(e!==rankEpoch)return;
+    rankContext=c;showRank();const seat=c.active;
+    if(!seat||c.principal_id!==identity||seat.mode!=="PvP_Ranked"||seat.league!=="human")throw new Error("没有当前人类排位席位；已有自创世界请走原世界入口");
+    generation++;clearRuntime();if(session?.client!==client)session?.client.destroy();
+    const info:Session={...seat,client,practice:false,recovered:false};session=info;
+    starting=true;const own=generation;request=pending;
+    await connectLive(info,own,pending.signal);
+  }catch(error){if(e===rankEpoch){connected=false;clearRuntime();note(String(error));el("connection").textContent="排位连接未确认；请刷新席位后重连";}}
+  finally{clearTimeout(timer);if(e===rankEpoch){rankBusy=false;starting=false;rankRequest=null;request=null;controls();}}
+}
+for(const [id,action] of [["rank-auth","auth"],["rank-join","join"],["rank-refresh","refresh"],["rank-cancel","cancel"]] as const)button(id).onclick=()=>{void rankAction(action);};
+button("rank-enter").onclick=()=>{void enterRanked();};
 button("start").onclick=()=>{void start(false);};
 button("connect-world").onclick=()=>{void start(true);};
 button("disconnect").onclick=disconnect;
@@ -238,6 +311,8 @@ button("watch-replay").onclick=()=>{void watchReplay();};
 button("seek-replay").onclick=()=>{if(playback)void seekReplay(playback,Number(input("replay-tick").value));};
 button("play-replay").onclick=()=>{void playReplay();};button("pause-replay").onclick=pauseReplay;
 button("close-replay").onclick=()=>{generation++;clearRuntime();el("connection").textContent="回放已关闭 / 可按原世界重连";controls();};
+button("release-control").onclick=()=>{const current=arena;if(!connected||!current||playback)return;void deadline(current.client.releaseLease(),"交还控制").then(()=>{if(arena!==current)return;connected=false;note("服务器已确认交还租约；连接只读，可重新申请控制，不代表暂停或退出对局。");controls();}).catch(error=>note(String(error)));};
+button("claim-control").onclick=()=>{const current=arena,own=generation;if(!linked||!current||playback||starting)return;starting=true;controls();void deadline(current.client.acquireLease("Sovereign"),"重新申请控制").then(()=>{if(own!==generation||arena!==current)return;connected=true;note("服务器已重新确认控制租约；后续命令使用当前 fencing。");}).catch(error=>{if(own===generation)note(String(error));}).finally(()=>{if(own===generation){starting=false;controls();}});};
 button("select").onclick=()=>{if(arena?.client.observation){arena.ui.selection=new Set(arena.client.observation.units.filter(u=>u.faction===arena!.client.identity.faction).map(u=>u.id));display();}};
 button("home").onclick=()=>arena?.controller.jumpToNexus();
 for(const [id,order] of [["harvest","Harvest"],["move","Move"]] as const)button(id).onclick=()=>{armed=order;if(arena)arena.ui.buildMode=null;el("intent").textContent=`${order==="Move"?"移动":"采集"}：左键点击目标地块`;};
@@ -260,7 +335,8 @@ canvas.onkeydown=e=>{if(!arena)return;if(!connected&&!(["Home","ArrowUp","ArrowD
 bindCanvasInput();
 if(!gpuRequested&&!ctx){el("renderer").textContent="Canvas2D 不可用";note("无法取得 Canvas2D 上下文，没有生成替代世界。");}
 window.addEventListener("pagehide",()=>{disposed=true;cancelAnimationFrame(animationFrame);disconnect();});
-window.addEventListener("pageshow",e=>{if(e.persisted){disposed=false;draw();}});
+window.addEventListener("pageshow",e=>{if(e.persisted){disposed=false;controls();
+draw();}});
 const terrainColors=["#27362b","#3b4547","#536c32","#6e3b28","#171d1b"];
 function draw():void{
   if(disposed)return;
@@ -298,4 +374,5 @@ function draw():void{
   }else{ctx.fillStyle="#91a091";ctx.font="16px sans-serif";ctx.textAlign="center";ctx.fillText("连接已有Studio世界，或显式开始本地练习",w/2,h/2);ctx.textAlign="start";}
   animationFrame=requestAnimationFrame(draw);
 }
+controls();
 draw();
