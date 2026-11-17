@@ -127,3 +127,31 @@ describe("Worker 侧胶水", () => {
     expect(scope.out).toEqual([]);
   });
 });
+
+it("WASM 初始化拒绝时报告错误并停止，不留下永久拒绝的静默消息队列", async () => {
+  const scope = new FakeScope();
+  const wasm = new FakeWasmWorker();
+  wasm.init = async () => { throw new Error("初始化失败反例"); };
+  const loop = runEngineWorker(scope, wasm);
+  scope.send({ type: "ENGINE_INIT", canvas: new FakeOffscreen(3), width: 4, height: 4, gpuMode: "required" });
+  await flush();
+  expect(loop.stopped).toBe(true);
+  expect(scope.out).toEqual([[{ type: "ENGINE_ERROR", code: 0x3003, message: "Worker 调用失败：初始化失败反例" }]]);
+  scope.send({ type: "STEP", ticks: 1 });
+  await flush();
+  expect(wasm.calls).toHaveLength(0);
+});
+
+it("WASM 帧异常只报告一次并停止重调度", async () => {
+  const scope = new FakeScope();
+  const wasm = new FakeWasmWorker();
+  const loop = runEngineWorker(scope, wasm);
+  scope.send({ type: "ENGINE_INIT", canvas: new FakeOffscreen(4), width: 4, height: 4, gpuMode: "required" });
+  await flush(); wasm.finishInit(); await flush();
+  wasm.frame = () => { throw new Error("帧失败反例"); };
+  scope.runFrame(16);
+  expect(loop.stopped).toBe(true);
+  expect(scope.raf).toHaveLength(0);
+  loop.frame(32);
+  expect(scope.out).toEqual([[READY_GPU], [{ type: "ENGINE_ERROR", code: 0x3003, message: "Worker 调用失败：帧失败反例" }]]);
+});

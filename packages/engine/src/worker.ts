@@ -77,10 +77,17 @@ export function runEngineWorker(
     if (engine.phase() === "shut-down") stopped = true;
   };
 
+  const fail = (error: unknown): void => {
+    if (stopped) return;
+    stopped = true;
+    scope.postMessage([{ type: "ENGINE_ERROR", code: 0x3003,
+      message: `Worker 调用失败：${error instanceof Error ? error.message : String(error)}` }]);
+  };
+
   const frame = (t: number): void => {
     if (stopped) return;
-    emit(scope, engine.frame(t));
-    checkStopped();
+    try { emit(scope, engine.frame(t)); checkStopped(); }
+    catch (error) { fail(error); }
   };
 
   const schedule = (): void => {
@@ -114,7 +121,7 @@ export function runEngineWorker(
         emit(scope, engine.post(JSON.stringify(data)));
         checkStopped();
       }
-    });
+    }).catch(fail);
   });
 
   return {
