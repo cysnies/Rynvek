@@ -279,6 +279,12 @@ pub struct ObserverGrant {
 }
 
 /// 每个自创PvP世界一份冻结席位生命周期；关闭后须显式fork/新建，不热换玩家或抹历史。
+/// 定向Studio源码/创作准入，不授予WorldRead、控制、分叉或归档。
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EditorGrant { pub world_id: WireUuid, pub principal_id: u64, pub grant_id: WireUuid, pub active: bool }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EditorPermit { pub principal_id: u64, pub grant_id: Option<WireUuid> }
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustomRoom {
     pub world_id: WireUuid,
@@ -490,6 +496,11 @@ impl Store {
     ) -> StoreResult<()> {
         dispatch!(self.save_custom_room(room, expected, activation))
     }
+
+    pub async fn editor_grants(&self, world: WireUuid) -> StoreResult<Vec<EditorGrant>> {dispatch!(self.editor_grants(world))}
+    pub async fn change_editor(&self, owner:u64, grant:EditorGrant, expected:Option<WireUuid>) -> StoreResult<()> {dispatch!(self.change_editor(owner,grant,expected))}
+    pub async fn check_editor(&self,world:WireUuid,permit:EditorPermit)->StoreResult<()> {dispatch!(self.check_editor(world,permit))}
+    pub async fn append_commit_checked(&self,commit:CommitRow,fence:u64,permits:Vec<EditorPermit>)->StoreResult<()> {dispatch!(self.append_commit_checked(commit,fence,permits))}
 
     pub async fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<ObserverGrant>> {
         dispatch!(self.observer_grants(world))

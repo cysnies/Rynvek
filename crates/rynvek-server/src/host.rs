@@ -213,6 +213,7 @@ enum HostMsg {
     },
     Patch {
         patch: WorldPatch,
+        permit: Option<crate::store::EditorPermit>,
         reply: oneshot::Sender<Result<PatchApplied, ApiError>>,
     },
     Join {
@@ -325,9 +326,12 @@ impl MatchHandle {
         rx.await.map_err(|_| ended())?
     }
     pub async fn apply_patch(&self, patch: WorldPatch) -> Result<PatchApplied, ApiError> {
+        self.apply_patch_as(patch,None).await
+    }
+    pub async fn apply_patch_as(&self,patch:WorldPatch,permit:Option<crate::store::EditorPermit>)->Result<PatchApplied,ApiError>{
         let (reply, rx) = oneshot::channel();
         self.tx
-            .send(HostMsg::Patch { patch, reply })
+            .send(HostMsg::Patch { patch, permit,reply })
             .await
             .map_err(|_| ended())?;
         rx.await.map_err(|_| ended())?
@@ -495,6 +499,7 @@ enum PendingInput {
 }
 struct PendingPatch {
     patch: WorldPatch,
+    permit: Option<crate::store::EditorPermit>,
     replies: Vec<oneshot::Sender<Result<PatchApplied, ApiError>>>,
     bytes: usize,
 }
@@ -845,7 +850,7 @@ impl Host {
                 };
                 let _ = reply.send(result);
             }
-            HostMsg::Patch { patch, reply } => self.enqueue_patch(patch, reply).await,
+            HostMsg::Patch { patch,permit,reply } => self.enqueue_patch(patch,permit, reply).await,
             HostMsg::Join {
                 principal_id,
                 faction,
@@ -1347,7 +1352,7 @@ impl Host {
             .fold(0usize, usize::saturating_add)
     }
 
-    async fn enqueue_patch(&mut self, patch: WorldPatch, reply: oneshot::Sender<Result<PatchApplied, ApiError>>) {
+    async fn enqueue_patch(&mut self, patch: WorldPatch,permit:Option<crate::store::EditorPermit>, reply: oneshot::Sender<Result<PatchApplied, ApiError>>) {
         let result = async {
             if self.state != MatchState::Running {
                 return Err(conflict("宿主不是 Running"));
@@ -1364,6 +1369,7 @@ impl Host {
             if world.game_mode == "PvP_Ranked" {
                 return Err(ApiError::forbidden("排位对局禁止运行中创作编辑"));
             }
+            if let Some(p)=&permit {committer.store.check_editor(self.spec.world_id,p.clone()).await?;}
             crate::patch::validate(&patch)?;
             if patch.safety_class == LiveEditSafetyClass::RequiresForkRestart {
                 return Err(conflict("分叉重启必须走显式分叉"));
@@ -1402,7 +1408,7 @@ impl Host {
             self.patches.insert(
                 patch.patch_id,
                 PendingPatch {
-                    patch: patch.clone(),
+                    patch: patch.clone(),permit,
                     replies: Vec::new(),
                     bytes,
                 },
@@ -1470,7 +1476,8 @@ impl Host {
                 }
                 PendingInput::Patch(id) => {
                     let pending = self.patches.remove(&id).expect("排程引用存在");
-                    let result = if patched
+                    let authorized=if let(Some(c),Some(p))=(&self.committer,&pending.permit){c.store.check_editor(self.spec.world_id,p.clone()).await}else{Ok(())};
+                    let result = if let Err(e)=authorized {Err(e)}else if patched
                         || pending.patch.base_authoring_revision > previous.revision()
                         || pending.patch.base_authoring_revision < previous.authoring.last_edit_revision
                         || self.session.world.outcome.is_some()
@@ -1514,7 +1521,7 @@ impl Host {
                 inputs,
             };
             if let Some(committer) = &self.committer {
-                committer.persist(&self.session.world, &record).await?;
+                committer.persist_checked(&self.session.world,&record,patches.iter().filter_map(|(p,_)|p.permit.clone()).collect()).await?;
             }
             Ok::<_, ApiError>(record)
         }
@@ -1537,6 +1544,8 @@ impl Host {
                         let _ = reply.send(Err(conflict("权威 Tick 未提交")));
                     }
                 }
+                // 准入撤销与提交同Store序列化；拒绝此候选而不误终止所有者整局。
+                if error.status==axum::http::StatusCode::FORBIDDEN {self.retire_ranked("创作准入在提交事务前失效；本候选未发布，仅退役本Actor，所有者须重连原已提交世界");return;}
                 if self.is_persistent_ranked() {
                     self.retire_ranked(&format!("持久化失败，保留已提交世界供恢复：{error}"));
                 } else {

@@ -30,6 +30,7 @@ struct Tables {
     worlds: BTreeMap<WireUuid, WorldRow>,
     custom_rooms: BTreeMap<WireUuid, super::CustomRoom>,
     observers: BTreeMap<(WireUuid, u64), super::ObserverGrant>,
+    editors: BTreeMap<(WireUuid,u64), super::EditorGrant>,
     world_commits: BTreeMap<(WireUuid, u64), CommitRow>,
     packages: BTreeMap<String, PackageRow>,
     package_versions: BTreeMap<(String, String), PackageVersionRow>,
@@ -626,6 +627,26 @@ impl MemoryStore {
         t.custom_rooms.insert(room.world_id, room);
         Ok(())
     }
+    fn editor_allowed(t:&Tables,world:WireUuid,p:&super::EditorPermit)->StoreResult<()> {
+        let w=t.worlds.get(&world).ok_or_else(||ApiError::not_found("创作准入不存在"))?;
+        let active=[p.principal_id,w.owner_principal_id].iter().all(|id|t.principals.get(id).is_some_and(|r|r.status==PrincipalStatus::Active));
+        let allowed=if p.principal_id==w.owner_principal_id {p.grant_id.is_none()}else{
+            w.visibility==rynvek_security::Visibility::Private && t.editors.get(&(world,p.principal_id)).is_some_and(|g|g.active&&Some(g.grant_id)==p.grant_id)
+        };
+        if !active||!allowed {return Err(ApiError::forbidden("创作准入已撤销或身份失效"));} Ok(())
+    }
+    pub fn check_editor(&self,world:WireUuid,p:super::EditorPermit)->StoreResult<()> {Self::editor_allowed(&self.lock(),world,&p)}
+    pub fn editor_grants(&self,world:WireUuid)->StoreResult<Vec<super::EditorGrant>> {Ok(self.lock().editors.values().filter(|g|g.world_id==world).cloned().collect())}
+    pub fn change_editor(&self,owner:u64,g:super::EditorGrant,expected:Option<WireUuid>)->StoreResult<()> {
+        let mut t=self.lock();let w=t.worlds.get(&g.world_id).ok_or_else(||ApiError::not_found("世界不存在"))?;
+        if w.owner_principal_id!=owner||w.visibility!=rynvek_security::Visibility::Private||g.principal_id==owner {return Err(ApiError::forbidden("仅私有世界所有者可授权他人创作"));}
+        if ![owner,g.principal_id].iter().all(|id|t.principals.get(id).is_some_and(|p|p.status==PrincipalStatus::Active)){return Err(ApiError::forbidden("正式身份不可用"));}
+        let old=t.editors.get(&(g.world_id,g.principal_id));
+        if old.map(|x|x.grant_id)!=expected {return Err(conflict("准入版本改变，请刷新"));}
+        let all:Vec<_>=t.editors.values().filter(|x|x.world_id==g.world_id).collect();
+        if old.is_none()&&all.len()>=64 || g.active&&all.iter().filter(|x|x.active&&x.principal_id!=g.principal_id).count()>=16 {return Err(conflict("创作准入配额已满"));}
+        t.editors.insert((g.world_id,g.principal_id),g);Ok(())
+    }
     pub fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<super::ObserverGrant>> {
         Ok(self
             .lock()
@@ -819,8 +840,11 @@ impl MemoryStore {
         Ok(token + 1)
     }
 
-    pub fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
+    pub fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {self.append_commit_checked(commit,expected_fencing_token,vec![])}
+    pub fn append_commit_checked(&self, commit:CommitRow,expected_fencing_token:u64,permits:Vec<super::EditorPermit>)->StoreResult<()> {
         let mut t = self.lock();
+        for permit in &permits {Self::editor_allowed(&t,commit.world_id,permit)?;}
+
         let world = t.worlds.get(&commit.world_id).ok_or_else(|| missing_fk("world_id"))?;
         if world.fencing_token != expected_fencing_token
             || t.ranked_hosts

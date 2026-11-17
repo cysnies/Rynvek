@@ -215,6 +215,7 @@ impl PostgresStore {
         .await
         .map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0008_private_audio.sql")).await.map_err(db_err)?;
+        c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0009_studio_editors.sql")).await.map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -292,6 +293,29 @@ impl PostgresStore {
         tx.commit().await.map_err(db_err)
     }
 
+    async fn editor_allowed(tx:&tokio_postgres::Transaction<'_>,world:WireUuid,p:&super::EditorPermit)->StoreResult<()> {
+        let r=tx.query_one("SELECT EXISTS(SELECT 1 FROM worlds w JOIN principals p ON p.principal_id=$2 JOIN principals o ON o.principal_id=w.owner_principal_id AND o.status=0 WHERE w.world_id=$1::text::uuid AND p.status=0 AND ((w.owner_principal_id=$2 AND $3::text IS NULL) OR (w.visibility=0 AND EXISTS(SELECT 1 FROM world_editor_grants g WHERE g.world_id=w.world_id AND g.principal_id=$2 AND g.active AND g.grant_id::text=$3))))",&[&uuid_text(&world),&i(p.principal_id),&p.grant_id.map(|g|uuid_text(&g))]).await.map_err(db_err)?;
+        if !r.get::<_,bool>(0){return Err(ApiError::forbidden("创作准入已撤销或身份失效"));} Ok(())
+    }
+    pub async fn check_editor(&self,world:WireUuid,p:super::EditorPermit)->StoreResult<()> {let mut c=self.client.lock().await;let tx=c.transaction().await.map_err(db_err)?;Self::editor_allowed(&tx,world,&p).await}
+    pub async fn editor_grants(&self,world:WireUuid)->StoreResult<Vec<super::EditorGrant>> {
+        let c=self.client.lock().await;
+        c.query("SELECT principal_id,grant_id::text,active FROM world_editor_grants WHERE world_id=$1::text::uuid ORDER BY principal_id",&[&uuid_text(&world)]).await.map_err(db_err)?.iter().map(|r|Ok(super::EditorGrant{world_id:world,principal_id:u(r.get(0)),grant_id:parse_uuid(r.get::<_,String>(1))?,active:r.get(2)})).collect()
+    }
+    pub async fn change_editor(&self,owner:u64,g:super::EditorGrant,expected:Option<WireUuid>)->StoreResult<()> {
+        let mut c=self.client.lock().await;let tx=c.transaction().await.map_err(db_err)?;
+        let w=tx.query_opt("SELECT owner_principal_id,visibility FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE",&[&uuid_text(&g.world_id)]).await.map_err(db_err)?.ok_or_else(||ApiError::not_found("世界不存在"))?;
+        if u(w.get(0))!=owner||w.get::<_,i16>(1)!=0||g.principal_id==owner {return Err(ApiError::forbidden("仅私有世界所有者可授权他人创作"));}
+        let count:i64=tx.query_one("SELECT count(*) FROM principals WHERE principal_id=ANY($1) AND status=0",&[&vec![i(owner),i(g.principal_id)]]).await.map_err(db_err)?.get(0);
+        if count!=2{return Err(ApiError::forbidden("正式身份不可用"));}
+        let old=tx.query_opt("SELECT grant_id::text FROM world_editor_grants WHERE world_id=$1::text::uuid AND principal_id=$2",&[&uuid_text(&g.world_id),&i(g.principal_id)]).await.map_err(db_err)?;
+        let actual=old.as_ref().map(|r|parse_uuid(r.get::<_,String>(0))).transpose()?;
+        if actual!=expected {return Err(crate::transactions::conflict("准入版本改变，请刷新"));}
+        let counts=tx.query_one("SELECT count(*),count(*) FILTER(WHERE active AND principal_id<>$2) FROM world_editor_grants WHERE world_id=$1::text::uuid",&[&uuid_text(&g.world_id),&i(g.principal_id)]).await.map_err(db_err)?;
+        if old.is_none()&&counts.get::<_,i64>(0)>=64||g.active&&counts.get::<_,i64>(1)>=16{return Err(crate::transactions::conflict("创作准入配额已满"));}
+        tx.execute("INSERT INTO world_editor_grants(world_id,principal_id,grant_id,active) VALUES($1::text::uuid,$2,$3::text::uuid,$4) ON CONFLICT(world_id,principal_id) DO UPDATE SET grant_id=EXCLUDED.grant_id,active=EXCLUDED.active",&[&uuid_text(&g.world_id),&i(g.principal_id),&uuid_text(&g.grant_id),&g.active]).await.map_err(db_err)?;
+        tx.commit().await.map_err(db_err)
+    }
     pub async fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<super::ObserverGrant>> {
         let c = self.client.lock().await;
         c.query("SELECT principal_id, faction, grant_id::text FROM world_observer_grants WHERE world_id=$1::text::uuid AND active ORDER BY principal_id", &[&uuid_text(&world)]).await.map_err(db_err)?
@@ -521,7 +545,8 @@ impl PostgresStore {
         Ok(token + 1)
     }
 
-    pub async fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
+    pub async fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {self.append_commit_checked(commit,expected_fencing_token,vec![]).await}
+    pub async fn append_commit_checked(&self, commit: CommitRow, expected_fencing_token: u64,permits:Vec<super::EditorPermit>) -> StoreResult<()> {
         if commit.parent_revision.and_then(|r| r.checked_add(1)) != Some(commit.world_revision) {
             return Err(ApiError::new(
                 RynvekErrorCode::StructuralMutationConflict,
@@ -537,6 +562,7 @@ impl PostgresStore {
         .await
         .map_err(db_err)?;
         ranked::check_lease(&tx, commit.world_id, expected_fencing_token).await?;
+        for p in permits {Self::editor_allowed(&tx,commit.world_id,&p).await?;}
         let n = tx
             .execute(
                 "UPDATE worlds SET latest_revision = $3, latest_tick = $4, latest_state_root = $5, updated_at = NOW() \

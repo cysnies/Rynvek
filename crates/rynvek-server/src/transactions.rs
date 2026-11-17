@@ -160,7 +160,8 @@ impl TickCommitter {
             .map_err(ApiError::from)
     }
 
-    pub async fn persist(&self, runtime: &ArenaRuntime, record: &TickRecord) -> ApiResult<()> {
+    pub async fn persist(&self, runtime: &ArenaRuntime, record: &TickRecord) -> ApiResult<()> {self.persist_checked(runtime,record,vec![]).await}
+    pub async fn persist_checked(&self,runtime:&ArenaRuntime,record:&TickRecord,permits:Vec<crate::store::EditorPermit>)->ApiResult<()> {
         let root = runtime.state_root();
         if runtime.world_id() != self.world_id.0
             || record.revision != runtime.revision()
@@ -185,7 +186,7 @@ impl TickCommitter {
             }
         }
         self.store
-            .append_commit(
+            .append_commit_checked(
                 CommitRow {
                     world_id: self.world_id,
                     world_revision: runtime.revision(),
@@ -195,7 +196,7 @@ impl TickCommitter {
                     journal_segment_cid: journal.0,
                     snapshot_cid: snapshot,
                 },
-                self.fencing_token,
+                self.fencing_token,permits,
             )
             .await
     }
