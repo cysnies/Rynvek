@@ -11,6 +11,7 @@ import { fogAt, project, unproject, viewScale, type Viewport } from "./arena-vie
 import { mountArenaRenderer } from "./arena-renderer.js";
 import { ArenaWorldClient, ReplayObservationTransport, ObserverTransport, type ObserverFrame, type ObserverGrant, type WorldRun, type PlaybackFrame, type QueueContext, type CustomRoomView } from "./arena-remote.js";
 import { mountPrivateAgentPanel } from "./private-agent-panel.js";
+import { ArenaAudioSession } from "./arena-audio.js";
 import "./browser.css";
 
 const gpuRequested = new URLSearchParams(location.search).get("renderer") === "webgpu";
@@ -24,6 +25,7 @@ mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</
 <main class="layout"><section class="world"><div class="worldbar"><span>WORLD / <span id="clock">TICK —</span></span><span id="pointer">只读阵营视图</span></div><canvas id="world" tabindex="0" aria-label="Rynvek 战争迷雾地图，左键选择、右键命令"></canvas><div class="metrics"><span class="metric">生物质<b id="biomass">—</b></span><span class="metric">通量<b id="flux">—</b></span><span class="metric">神经胶<b id="neurogel">—</b></span><span class="metric">人口<b id="supply">—</b></span><span class="metric">波次<b id="wave">—</b></span></div></section>
 <aside class="sidebar"><section class="panel"><h2>指挥 / CONTROL</h2><div class="buttons"><button id="select" disabled>全选己方单位</button><button id="home" disabled>主脑居中</button><button id="release-control" disabled>交还控制租约</button><button id="claim-control" disabled>重新申请控制</button><button id="harvest" disabled>采集 → 点目标</button><button id="move" disabled>移动 → 点目标</button><button disabled title="当前权威协议不提供暂停">暂停未开放</button></div><p id="selection" class="muted">尚未选择</p><p id="intent">开始后，左键点选或拖框；右键移动。黄绿色为营养沼泽，工蜂右键自动采集。</p><p id="outcome" class="outcome"></p></section>
 <section class="panel"><h2>建造 / BUILD</h2><div id="build" class="build"></div><p class="muted">${gpuRequested?"GPU 黄色轮廓仅表示落点意图，不表示可建；权限、占地、资源和科技由服务器最终验证。":"选择建筑后点地图；黄色框仅为落点预览，权限、占地、资源和科技由服务器最终验证。"}Esc / 右键取消。</p></section>
+<section class="panel" aria-label="实时阵营音频"><h2>音频 / LIVE FACTION AUDIO</h2><div class="buttons"><button id="audio-enable" disabled>手势启用音频</button><button id="audio-mute" disabled>全部静音</button><label>主音量<input id="audio-volume" aria-label="音频主音量" type="range" min="0" max="100" value="50"></label><label><input id="audio-neural" aria-label="神经声化" type="checkbox">真实脑态声化（另行启用）</label></div><p id="audio-status" role="status">默认关闭；连接后点击启用。</p><p class="muted">只消费当前实时席位的本人阵营事件与脑态。脉冲声化为LIF/Izhikevich各自最近64个已执行子步的重叠环窗口密度；连续声化为MLP/CTRNN真实隐藏态绝对均值，不是伪spikes或Kuramoto相干度。主脑生命下降只作告警，不判断伤害来源。静音/失焦/隐藏/断线/换世界会切断旧音图，需再次手势启用；不补播历史。当前观战/回放不启用声音，程序化配方非最终采样，实际设备未听验。</p></section>
 <section class="panel" id="command-panel" aria-label="生产科技信标操作面板"></section>
 <section class="panel"><h2>签名归档逐记录重演 / REPLAY</h2><p>真实已提交创作锚点 + 实际运行WAL + TickRecord重演后的阵营观测。服务端验签；只读，无控制租约。完整终根未到达前不声称全片验证。</p><div class="buttons"><button id="watch-replay" disabled>打开真实回放</button><button id="play-replay" disabled>播放</button><button id="pause-replay" disabled>暂停/停止定位</button><button id="close-replay" disabled>关闭回放</button></div><label>目标Tick<input id="replay-tick" aria-label="回放目标Tick" type="number" min="0" value="0" disabled></label><button id="seek-replay" disabled>定位（有界重演）</button><p id="replay-status" role="status">未装载归档</p><p class="muted">倒退从真实初态重新演算，每请求最多120条记录，可停止；不是插值/伪帧。首帧是实际已提交Studio状态，不伪造编辑过程帧；完整保留运行期及恢复前的真实WAL。</p></section>
 <section class="panel"><h2>权威回执 / EVENTS</h2><div id="log" class="log" role="status" aria-live="polite">尚未连接。没有本地随机单位或预演资源。</div><div class="buttons" style="margin-top:12px"><button id="surrender" disabled>结束练习（投降）</button><button id="replay" disabled>下载回放</button></div></section>
@@ -31,6 +33,17 @@ mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</
 <footer>${gpuRequested?"当前显示：真实 Rust/wgpu + Dedicated Engine Worker / OffscreenCanvas；GPU不可用会显式报错，不静默切换。地图、己方选择与落点/拖框轮廓走GPU；预览不是合法性预测，命令以服务器回执为准。":"当前显示：临时 Canvas2D / 工业像素占位，不是 WebGPU。"} <a id="switch-renderer" href="/arena">${gpuRequested?"手动重载为临时 Canvas2D":"显式启用 WebGPU Worker"}</a>；生成WASM与软件GPU通过不等于浏览器验收。<br>已有世界通过正式身份/席位连接；仅「开始本地练习」使用显式回环开发身份。令牌不持久化。服务器持续推进，关闭页面不等于暂停。神经生态完整闭环、正式美术和浏览器性能未验收。<a href="/api/v1/meta/source-offer" target="_blank" rel="noopener">源码要约</a></footer>`;
 const el=(id:string):HTMLElement=>document.getElementById(id)!;
 const button=(id:string):HTMLButtonElement=>el(id) as HTMLButtonElement;
+const audio = new ArenaAudioSession(status => {
+  el("audio-status").textContent = status.message;
+  button("audio-enable").disabled = !status.ready || status.state === "enabling" || status.state === "running";
+  button("audio-mute").disabled = status.state !== "running" && status.state !== "enabling";
+});
+button("audio-enable").onclick = () => { void audio.enableFromGesture(); };
+button("audio-mute").onclick = () => audio.mute();
+el("audio-volume").addEventListener("input", () => audio.setVolume(Number((el("audio-volume") as HTMLInputElement).value) / 100));
+el("audio-neural").addEventListener("change", () => audio.setNeural((el("audio-neural") as HTMLInputElement).checked));
+document.addEventListener("visibilitychange", () => { if (document.hidden) audio.suspend(); });
+window.addEventListener("blur", () => audio.suspend());
 let canvas=el("world") as HTMLCanvasElement;
 const ctx=gpuRequested?null:canvas.getContext("2d");
 let gpuRenderer:ReturnType<typeof mountArenaRenderer>|null=null;
@@ -128,6 +141,7 @@ async function deadline<T>(pending:Promise<T>,label:string):Promise<T>{
   finally{clearTimeout(timer);}
 }
 function clearRuntime():void{
+  audio.detach();
   privateAgents.reset();
   request?.abort();request=null;
   if(customTimer)clearTimeout(customTimer);customTimer=null;customRead?.abort();customRead=null;
@@ -170,12 +184,12 @@ async function connectLive(info:Session,own:number,signal:AbortSignal):Promise<v
   if(own!==generation||signal.aborted){ws.close();return;}
   const transport=new WebSocketTransport({send:raw=>ws.send(JSON.stringify(info.client.hello(JSON.parse(raw) as Parameters<ArenaWorldClient["hello"]>[0]))),
     close:()=>ws.close(),addEventListener:(_type,listener)=>ws.addEventListener("message",listener),removeEventListener:(_type,listener)=>ws.removeEventListener("message",listener)});
-  const current=createArenaApp(transport,{principalId:info.principal_id,kind:"Human",faction:info.faction});arena=current;current.ui.camera.yDown=gpuRequested;
+  const current=createArenaApp(transport,{principalId:info.principal_id,kind:"Human",faction:info.faction});arena=current;current.ui.camera.yDown=gpuRequested;audio.bind(current.client);
   ws.addEventListener("message",e=>{if(own!==generation||arena!==current||typeof e.data!=="string")return;const m=JSON.parse(e.data) as ArenaServerMessage;if(m.type==="ack"&&m.ack)note(`已提交Tick ${m.tick} · ${m.ack.type}`);});
   current.client.on(event=>{if(own!==generation||arena!==current)return;if(event.type==="observation"){
     if(!initialized){current.controller.jumpToNexus();current.ui.camera.zoom=1.8;initialized=true;}display();
   }if(event.type==="error")note(event.error.message);if(event.type==="lease_revoked"||(event.type==="lease"&&!event.lease)){connected=false;el("connection").textContent="控制租约已结束 / 可按原世界重连";controls();}});
-  ws.onclose=()=>{if(own!==generation||socket!==ws)return;connected=false;linked=false;if(!current.client.observation?.outcome){el("connection").textContent="连接关闭 / 同一世界重连";note("连接已关闭；没有把未确认命令标为成功。原Actor/席位继续按规则运行。");}controls();};
+  ws.onclose=()=>{if(own!==generation||socket!==ws)return;audio.detach("实时连接已关闭；音频已切断，重连后重新手势启用。");connected=false;linked=false;if(!current.client.observation?.outcome){el("connection").textContent="连接关闭 / 同一世界重连";note("连接已关闭；没有把未确认命令标为成功。原Actor/席位继续按规则运行。");}controls();};
   const welcome=await deadline(current.client.connect(),"身份/席位握手");
   if(welcome.faction!==info.faction||welcome.mode!==info.mode)throw new Error("服务器握手与已认证席位不一致");
   linked=true;
@@ -212,7 +226,7 @@ async function start(authored=false):Promise<void>{
     if(previous&&previous.client!==client)previous.client.destroy();session=info;
     if(info.match_state==="Completed"){el("connection").textContent="世界已终局 / 可打开真实回放";note("保持终局和历史，不重建或重置世界；可打开签名重演。");return;}
     await connectLive(info,own,pending.signal);
-  }catch(error){if(own===generation){connected=false;gpuRenderer?.dispose();gpuRenderer=null;arena?.dispose();arena=null;socket?.close();socket=null;
+  }catch(error){if(own===generation){audio.detach();connected=false;gpuRenderer?.dispose();gpuRenderer=null;arena?.dispose();arena=null;socket?.close();socket=null;
     if(client&&session?.client!==client)client.destroy();el("connection").textContent="连接失败 / 未确认成功";
     note(`${String(error)}；已有世界开局可能已提交，请按同一世界重连，不重复创建世界。`);}}
   finally{if(previous&&session?.client!==previous.client)previous.client.destroy();if(own===generation){starting=false;request=null;controls();}}

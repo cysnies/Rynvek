@@ -39,6 +39,9 @@ importers:
       '@rynvek/arena':
         specifier: workspace:*
         version: link:../../packages/arena
+      '@rynvek/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
       '@rynvek/client':
         specifier: workspace:*
         version: link:../../packages/client
