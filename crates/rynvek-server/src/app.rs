@@ -153,6 +153,8 @@ pub struct AppInner {
     pub config: AppConfig,
     pub store: Store,
     pub blobs: Arc<dyn BlobStore>,
+    /// 完整世界状态、补丁输入与公开 Hub Blob 物理隔离，不允许通过公共 CID 路由下载隐藏状态。
+    pub world_snapshots: Arc<dyn BlobStore>,
     pub tokens: RwLock<TokenAuthority>,
     pub challenges: Mutex<AuthChallenges>,
     pub matchmaker: Mutex<Matchmaker>,
@@ -195,6 +197,13 @@ impl AppState {
                     Some(dir) => Arc::new(
                         FsBlobStore::open(dir)
                             .map_err(|e| ApiError::internal(format!("无法打开 Blob 目录 {}：{e}", dir.display())))?,
+                    ),
+                    None => Arc::new(MemoryBlobStore::new()),
+                },
+                world_snapshots: match &config.blob_dir {
+                    Some(dir) => Arc::new(
+                        FsBlobStore::open(dir.join("world-checkpoints"))
+                            .map_err(|e| ApiError::internal(format!("无法打开私有检查点目录：{e}")))?,
                     ),
                     None => Arc::new(MemoryBlobStore::new()),
                 },

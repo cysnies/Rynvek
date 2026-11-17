@@ -267,11 +267,12 @@ async fn worlds_commits_fork_and_patches() {
             "operations": [op],
         })
     };
-    let econ = json!({ "SetWorldParam": { "key_path": "economy.biomass_rate", "new_value_json": "1.5" } });
+    let econ = json!({ "SetWorldParam": { "key_path": "economy.grant_biomass_milli", "new_value_json": "1000" } });
     let p = format!("/api/v1/worlds/{wid}/patches");
     let r = send(&base, "POST", &p, t, patch(0, "TickBoundarySafe", econ.clone())).await;
-    assert_eq!(r.status, 202, "{}", String::from_utf8_lossy(&r.body));
+    assert_eq!(r.status, 200, "{}", String::from_utf8_lossy(&r.body));
     let v = r.json().unwrap();
+    assert_eq!(v["status"], "applied");
     assert_eq!(v["world_revision"], 1);
     assert_eq!(v["required_class"], "TickBoundarySafe");
     // 修订过期 → 0x2005
@@ -288,13 +289,13 @@ async fn worlds_commits_fork_and_patches() {
     );
     // 格式错误 → 0x3003
     assert_error(&send(&base, "POST", &p, t, json!({ "x": 1 })).await, 422, 0x3003);
-    // Class 3 自动分叉
+    // 未接通的重启参数拒绝，不创建只记账不执行的假分叉。
     let core = json!({ "SetWorldParam": { "key_path": "map.size", "new_value_json": "\"large\"" } });
-    let r = send(&base, "POST", &p, t, patch(1, "RequiresForkRestart", core)).await;
-    assert_eq!(r.status, 202, "{}", String::from_utf8_lossy(&r.body));
-    let v = r.json().unwrap();
-    assert_eq!(v["forked_from"], wid);
-    assert_ne!(v["world_id"], wid);
+    assert_error(
+        &send(&base, "POST", &p, t, patch(1, "RequiresForkRestart", core)).await,
+        422,
+        0x5006,
+    );
 
     // 显式分叉（他人对私有世界无权）
     let f = format!("/api/v1/worlds/{wid}/fork");
@@ -304,6 +305,14 @@ async fn worlds_commits_fork_and_patches() {
     let fork = r.json().unwrap();
     assert_eq!(fork["parent_world_id"], wid);
     assert_eq!(fork["forked_at_revision"], 1);
+    let fork_path = format!("/api/v1/worlds/{}/patches", fork["world_id"].as_str().unwrap());
+    let applied = send(&base, "POST", &fork_path, t, patch(0, "TickBoundarySafe", econ.clone())).await;
+    assert_eq!(
+        applied.status,
+        200,
+        "分叉检查点必须重新绑定身份后可继续：{}",
+        String::from_utf8_lossy(&applied.body)
+    );
     // 不存在的世界 / 非法 UUID → 0x2002
     assert_error(
         &get(&base, "/api/v1/worlds/0190a000-0000-7000-8000-000000000000/commits", t).await,
@@ -527,4 +536,251 @@ async fn lab_and_account_lifecycle() {
             .is_err()
     );
     server.shutdown().await;
+}
+
+#[tokio::test]
+async fn ryn1_http_patch_commits_real_simulation_or_rejects_without_changes() {
+    let server = start_server(false).await;
+    let base = server.base_url();
+    let alice = register(&base, "ryn1-owner", "human", 51).await;
+    let eve = register(&base, "ryn1-outsider", "human", 52).await;
+    let t = Some(alice.token.as_str());
+    let created = send(
+        &base,
+        "POST",
+        "/api/v1/worlds",
+        t,
+        json!({"title":"权威链回归", "template":"arena_duel", "map_seed":42}),
+    )
+    .await
+    .json()
+    .unwrap();
+    let wid = created["world_id"].as_str().unwrap();
+    let path = format!("/api/v1/worlds/{wid}/patches");
+    let commits_path = format!("/api/v1/worlds/{wid}/commits");
+    let paint = json!({"PaintTerrainRect":{"x0":100,"y0":100,"width":2,"height":2,"tile_kind":4}});
+    let patch = |ops: Vec<Value>| {
+        json!({"patch_id":vec![1;16],"base_authoring_revision":0,
+        "hlc":{"wall_time_ms":1,"logical_counter":0,"author_node_id":1},
+        "safety_class":"TickBoundarySafe","operations":ops})
+    };
+    // 无权用户连世界存在性都不应获知，更不能触发推进。
+    assert_error(
+        &send(&base, "POST", &path, Some(&eve.token), patch(vec![paint.clone()])).await,
+        404,
+        0x2002,
+    );
+    let before = get(&base, &commits_path, t).await.json().unwrap();
+    let unsupported = json!({"SetWorldParam":{"key_path":"field.diffusion","new_value_json":"1"}});
+    let rejected = send(&base, "POST", &path, t, patch(vec![paint.clone(), unsupported])).await;
+    assert!(
+        rejected.status >= 400,
+        "不能把未实现补丁排队当作成功：{}",
+        rejected.status
+    );
+    assert_eq!(get(&base, &commits_path, t).await.json().unwrap(), before);
+    let result = send(&base, "POST", &path, t, patch(vec![paint])).await;
+    assert_eq!(result.status, 200, "{}", String::from_utf8_lossy(&result.body));
+    let applied = result.json().unwrap();
+    assert_eq!(applied["status"], "applied");
+    assert_eq!(applied["effective_tick"], 1);
+    let patch_cid = applied["patch_cid"].as_str().unwrap();
+    assert_eq!(
+        get(&base, &format!("/api/v1/hub/blobs/{patch_cid}"), None).await.status,
+        404
+    );
+    let after = get(&base, &commits_path, t).await.json().unwrap();
+    assert_eq!(after["latest_revision"], 1);
+    assert_ne!(
+        after["commits"][1]["state_root_blake3"],
+        before["commits"][0]["state_root_blake3"]
+    );
+    assert!(after["latest_snapshot_cid"].is_string());
+    let world_id: rynvek_protocol::WireUuid = wid.parse().unwrap();
+    let commits = server.state.store().list_commits(world_id).await.unwrap();
+    let latest = commits.last().unwrap();
+    let cid = latest.snapshot_cid.unwrap();
+    let bytes = server
+        .state
+        .inner
+        .world_snapshots
+        .get(&rynvek_core::Blake3Hash(cid))
+        .unwrap();
+    let mut restored = rynvek_engine::ArenaRuntime::restore(world_id.0, 1, latest.state_root_blake3, &bytes).unwrap();
+    assert_eq!(
+        restored.world().map.tile(100, 100),
+        rynvek_rts::TerrainTileKind::ImperviousWall
+    );
+    // 和通过引擎公开接口执行的相同初态、同一补丁、同一边界逐根对照。
+    let mut engine = rynvek_engine::ArenaRuntime::new(
+        world_id.0,
+        rynvek_rts::ArenaWorld::new(rynvek_rts::MatchConfig::duel(42)),
+    );
+    let operation: rynvek_world::WorldPatch = serde_json::from_value(patch(vec![
+        json!({"PaintTerrainRect":{"x0":100,"y0":100,"width":2,"height":2,"tile_kind":4}}),
+    ]))
+    .unwrap();
+    engine
+        .transact_at(1, |arena| operation.apply_at_boundary(arena, 1))
+        .unwrap();
+    assert_eq!(engine.state_root(), latest.state_root_blake3);
+    for _ in 0..4 {
+        engine.step().unwrap();
+        restored.step().unwrap();
+        assert_eq!(engine.state_root(), restored.state_root());
+    }
+    // 知道 CID 也不能从 Public Hub 获取包含敌方隐藏状态的完整快照。
+    assert_eq!(
+        get(
+            &base,
+            &format!("/api/v1/hub/blobs/{}", rynvek_server::ids::hex(&cid)),
+            None
+        )
+        .await
+        .status,
+        404
+    );
+    let next_patch = |kind| {
+        json!({"patch_id":vec![kind;16],"base_authoring_revision":1,
+        "hlc":{"wall_time_ms":2,"logical_counter":0,"author_node_id":1},
+        "safety_class":"TickBoundarySafe","operations":[{"PaintTerrainRect":{"x0":101,"y0":101,"width":1,"height":1,"tile_kind":kind}}]})
+    };
+    let (one, two) = tokio::join!(
+        send(&base, "POST", &path, t, next_patch(1)),
+        send(&base, "POST", &path, t, next_patch(2))
+    );
+    let mut statuses = [one.status, two.status];
+    statuses.sort();
+    assert_eq!(statuses, [200, 409], "并发补丁只能发布一个前驱修订");
+    // 提交层也必须拒绝跳修订和时钟倒退，不能只依靠路由的先检查。
+    let stable = server.state.store().get_world(world_id).await.unwrap().unwrap();
+    let stable_commits = server.state.store().list_commits(world_id).await.unwrap();
+    let mut bad = stable_commits.last().unwrap().clone();
+    bad.parent_revision = Some(stable.latest_revision);
+    bad.world_revision = stable.latest_revision + 2;
+    assert!(
+        server
+            .state
+            .store()
+            .append_commit(bad.clone(), stable.fencing_token)
+            .await
+            .is_err()
+    );
+    bad.world_revision = stable.latest_revision + 1;
+    bad.tick = stable.latest_tick - 1;
+    assert!(
+        server
+            .state
+            .store()
+            .append_commit(bad, stable.fencing_token)
+            .await
+            .is_err()
+    );
+    assert_eq!(server.state.store().get_world(world_id).await.unwrap().unwrap(), stable);
+    // 旧世界无检查点时拒绝迁移；有活动宿主租约时拒绝创建旁路权威。
+    for leased in [false, true] {
+        let mut old = stable.clone();
+        old.world_id = rynvek_server::ids::new_uuid_v7();
+        old.latest_revision = 0;
+        old.latest_tick = 0;
+        old.lease_holder_node = leased.then(|| "existing-host".into());
+        let mut initial = stable_commits[0].clone();
+        initial.world_id = old.world_id;
+        initial.snapshot_cid = None;
+        server.state.store().insert_world(old.clone(), initial).await.unwrap();
+        let rejected = send(
+            &base,
+            "POST",
+            &format!("/api/v1/worlds/{}/patches", old.world_id),
+            t,
+            patch(vec![
+                json!({"PaintTerrainRect":{"x0":100,"y0":100,"width":1,"height":1,"tile_kind":4}}),
+            ]),
+        )
+        .await;
+        assert!(rejected.status >= 400);
+        assert_eq!(
+            server.state.store().get_world(old.world_id).await.unwrap().unwrap(),
+            old
+        );
+    }
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn ryn1_private_checkpoint_survives_host_recreation() {
+    async fn boot(store: rynvek_server::store::Store, dir: &std::path::Path) -> rynvek_server::RunningServer {
+        rynvek_server::start(rynvek_server::ServerConfig {
+            http_addr: "127.0.0.1:0".parse().unwrap(),
+            webtransport_addr: None,
+            app: rynvek_server::app::AppConfig {
+                blob_dir: Some(dir.to_owned()),
+                tick_driver: rynvek_server::host::TickDriver::Manual,
+                lobby_timeout: None,
+                ..Default::default()
+            },
+            store,
+            signer: common::server_key(),
+        })
+        .await
+        .unwrap()
+    }
+    let dir = tempfile::TempDir::new().unwrap();
+    let store = rynvek_server::store::Store::memory();
+    let first = boot(store.clone(), dir.path()).await;
+    let base = first.base_url();
+    let owner = register(&base, "restart-owner", "human", 71).await;
+    let t = Some(owner.token.as_str());
+    let created = send(
+        &base,
+        "POST",
+        "/api/v1/worlds",
+        t,
+        json!({"title":"恢复","template":"arena_duel","map_seed":42}),
+    )
+    .await
+    .json()
+    .unwrap();
+    let id: rynvek_protocol::WireUuid = created["world_id"].as_str().unwrap().parse().unwrap();
+    let patch = |rev| {
+        json!({"patch_id":vec![8;16],"base_authoring_revision":rev,
+        "hlc":{"wall_time_ms":1,"logical_counter":0,"author_node_id":1},"safety_class":"EpochBoundarySafe",
+        "operations":[{"PaintTerrainRect":{"x0":100,"y0":100,"width":1,"height":1,"tile_kind":4}}]})
+    };
+    let path = format!("/api/v1/worlds/{id}/patches");
+    let applied = send(&base, "POST", &path, t, patch(0)).await;
+    assert_eq!(applied.status, 200);
+    assert_eq!(applied.json().unwrap()["effective_tick"], 4);
+    let old = store.get_world(id).await.unwrap().unwrap();
+    let commits = store.list_commits(id).await.unwrap();
+    let cid = commits.last().unwrap().snapshot_cid.unwrap();
+    let bytes = first
+        .state
+        .inner
+        .world_snapshots
+        .get(&rynvek_core::Blake3Hash(cid))
+        .unwrap();
+    let mut expected = rynvek_engine::ArenaRuntime::restore(id.0, 1, old.latest_state_root, &bytes).unwrap();
+    first.shutdown().await;
+    let second = boot(store.clone(), dir.path()).await;
+    assert_eq!(
+        second
+            .state
+            .inner
+            .world_snapshots
+            .get(&rynvek_core::Blake3Hash(cid))
+            .unwrap(),
+        bytes
+    );
+    let operation: rynvek_world::WorldPatch = serde_json::from_value(patch(1)).unwrap();
+    expected
+        .transact_at(8, |world| operation.apply_at_boundary(world, 8))
+        .unwrap();
+    let applied = send(&second.base_url(), "POST", &path, t, patch(1)).await;
+    assert_eq!(applied.status, 200, "{}", String::from_utf8_lossy(&applied.body));
+    let current = store.get_world(id).await.unwrap().unwrap();
+    assert_eq!(current.latest_tick, 8);
+    assert_eq!(current.latest_revision, 2);
+    assert_eq!(current.latest_state_root, expected.state_root());
+    second.shutdown().await;
 }
