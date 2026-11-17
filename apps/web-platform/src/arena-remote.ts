@@ -6,7 +6,7 @@ import type { ArenaClientMessage, ArenaServerMessage, ArenaTransport, FactionObs
 
 export interface WorldRun {
   world_id:string;match_id:string;principal_id:string;faction:number;mode:MatchMode;
-  match_state:string;tick:number;recovered:boolean;
+  match_state:string;tick:number;recovered:boolean;custom?:boolean;
 }
 export interface RankedSeat {
   status:"matched"; principal_id:string; match_id:string; world_id:string;
@@ -17,6 +17,10 @@ export interface QueueContext {
   status:"idle"|"queued"|"matched"; active:RankedSeat|null;
 }
 export type QueueReply = RankedSeat | {status:"queued";position:number;rating:number} | {status:"cancelled"|"not_queued"};
+export interface CustomRoomView {
+  world_id:string;principal_id:string;role:"owner"|"player";status:"unconfigured"|"invited"|"ready"|"active"|"ended"|"closed";
+  custom:true;owner_id?:string;guest_id?:string;faction?:number;version?:string;accepted?:boolean;seat?:WorldRun|null;
+}
 export interface ObserverGrant {principal_id:string;faction:number;grant_id:string;role:"observer"}
 export interface ObserverFrame extends ObserverGrant {
   world_id:string;match_id:string;principal_kind:"Human"|"Agent"|"Service";
@@ -76,6 +80,21 @@ export class ArenaWorldClient {
     uuid(seat.match_id);uuid(seat.world_id);
     if(seat.principal_id!==principal||![0,1].includes(seat.faction)||!["PvP_Ranked","PvE_Survival"].includes(seat.mode)
       ||!Number.isSafeInteger(seat.tick)||seat.tick<0)throw new Error("真实身份/席位不匹配");
+  }
+  async createCustom(title:string,mapSeed:number,signal?:AbortSignal):Promise<string>{
+    if(!title.trim()||!Number.isSafeInteger(mapSeed)||mapSeed<0)throw new Error("私有自创标题/seed非法");
+    const r=await this.request<{world_id:string}>("worlds","POST",{title,template:"arena_duel",visibility:"Private",map_seed:mapSeed},signal);uuid(r.world_id);return r.world_id;
+  }
+  async customRoom(world:string,action?:{action:"invite";guest_id:string}|{action:"accept"|"connect"|"close";version:string},signal?:AbortSignal):Promise<CustomRoomView>{
+    if(action?.action==="invite"&&!/^[1-9]\d*$/.test(action.guest_id))throw new Error("须输入正式受邀主体ID");
+    const r=await this.request<CustomRoomView>(`worlds/${uuid(world)}/multiplayer`,action?"POST":"GET",action,signal);
+    if(r.world_id!==world||r.custom!==true||!/^[1-9]\d*$/.test(r.principal_id)||!["owner","player"].includes(r.role)
+      ||!["unconfigured","invited","ready","active","ended","closed"].includes(r.status))throw new Error("自创房间身份/状态不合法");
+    if(r.status!=="unconfigured"){
+      uuid(r.version!);if(![0,1].includes(r.faction!)||!r.owner_id||!r.guest_id||(r.role==="owner"?r.owner_id:r.guest_id)!==r.principal_id)throw new Error("房间角色/席位不一致");
+    }
+    if(r.seat){const s=r.seat;uuid(s.match_id);if(s.world_id!==world||s.principal_id!==r.principal_id||s.faction!==r.faction||s.mode!=="PvP_Ranked"||s.custom!==true)throw new Error("自创实际控制席位不一致");}
+    return r;
   }
   async observerGrants(world:string,signal?:AbortSignal):Promise<ObserverGrant[]>{
     const result=await this.request<{world_id:string;grants:ObserverGrant[]}>(`worlds/${uuid(world)}/observers`,"GET",undefined,signal);

@@ -10,12 +10,12 @@ const transcript=JSON.parse(readFileSync(resolve(process.cwd(),"../../tests/aren
 const welcome=transcript[0].recv[0].message,observation=transcript[5].recv.find((e:{to:string})=>e.to==="human:p0").message;
 const run={world_id:world,match_id:match,principal_id:"123",faction:0,mode:"PvE_Survival",match_state:"Running",tick:1,recovered:false};
 class Socket extends EventTarget {
- static all:Socket[]=[];sent:Record<string,unknown>[]=[];closed=false;
+ static mode="PvE_Survival";static all:Socket[]=[];sent:Record<string,unknown>[]=[];closed=false;
  onopen:((event:Event)=>void)|null=null;onerror:((event:Event)=>void)|null=null;onclose:((event:Event)=>void)|null=null;
  constructor(readonly url:string){super();Socket.all.push(this);queueMicrotask(()=>this.onopen?.(new Event("open")));}
  receive(message:unknown){this.dispatchEvent(new MessageEvent("message",{data:JSON.stringify(message)}));}
  send(raw:string){const m=JSON.parse(raw);this.sent.push(m);
-  if(m.type==="hello"){this.receive({...welcome,mode:"PvE_Survival"});this.receive(observation);}
+  if(m.type==="hello"){this.receive({...welcome,mode:Socket.mode,faction:m.faction});const obs=structuredClone(observation);obs.observation.faction=m.faction;for(const u of [...obs.observation.units,...obs.observation.buildings])u.faction=m.faction;this.receive(obs);}
   if(m.type==="acquire_lease")this.receive({type:"lease",seq:m.seq,lease:{holder:{id:"123",kind:"Human"},faction:0,level:"Sovereign",fencing_token:11,issued_tick:1,expires_tick:900}});
   if(m.type==="command"){const c=m.command as Record<string,unknown>;const ack=c.type==="queue_unit"?{type:"queued",vat:c.vat,count:c.count}:c.type==="cancel_queue"?{type:"cancelled",vat:c.vat}:c.type==="research_tech"?{type:"research_started",site:c.site,tech:c.tech}:{type:"cancelled",vat:0};this.receive({type:"ack",seq:m.seq,tick:1,ack});}
  }
@@ -23,7 +23,7 @@ class Socket extends EventTarget {
 }
 function field(id:string){return document.getElementById(id) as HTMLInputElement;}
 async function mount(fetcher:typeof fetch){
- vi.resetModules();Socket.all=[];window.history.replaceState({},"",`/arena?world=${world}`);document.body.innerHTML='<div id="app"></div>';
+ vi.resetModules();Socket.mode="PvE_Survival";Socket.all=[];window.history.replaceState({},"",`/arena?world=${world}`);document.body.innerHTML='<div id="app"></div>';
  vi.spyOn(HTMLCanvasElement.prototype,"getContext").mockReturnValue({setTransform:vi.fn(),fillRect:vi.fn(),fillText:vi.fn()} as unknown as CanvasRenderingContext2D);
  vi.stubGlobal("requestAnimationFrame",vi.fn(()=>1));vi.stubGlobal("cancelAnimationFrame",vi.fn());vi.stubGlobal("fetch",fetcher);vi.stubGlobal("WebSocket",Socket);
  await import("../src/browser.js");field("api-origin").value="http://srv";field("capability").value="test-memory-secret";
@@ -100,4 +100,41 @@ it("所有者从真实席位授予当前阵营观战，清单回执后展示并�
  const posted=fetcher.mock.calls.find(([url,init])=>String(url).endsWith("/observers")&&init?.method==="POST")!;expect(JSON.parse(String(posted[1]?.body))).toEqual({principal_id:"789",faction:0});
  (field("observer-grants").querySelector("button") as HTMLButtonElement).click();await vi.waitFor(()=>expect(field("observer-grants").textContent).toContain("当前没有"));
  const revoked=fetcher.mock.calls.find(([,init])=>init?.method==="DELETE")!;expect(JSON.parse(String(revoked[1]?.body))).toEqual({grant_id:observerGrant.grant_id});
+});
+
+const roomVersion="10000000-0000-4000-8000-000000000005";
+it("自创所有者显式邀请/冻结，原租约可在大厅等待，Running前禁写且撤销等真实回执",async()=>{
+ let stage="unconfigured",phase="Lobby";let close!:((r:Response)=>void);
+ const room=()=>({world_id:world,principal_id:"123",owner_id:"123",guest_id:"789",role:"owner",status:stage,custom:true,faction:0,version:roomVersion,accepted:stage!=="invited",seat:stage==="active"?{...run,mode:"PvP_Ranked",custom:true,match_state:phase}:null});
+ const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>{
+  const body=init?.body?JSON.parse(String(init.body)):null;
+  if(body?.action==="invite"){expect(body.guest_id).toBe("789");stage="invited";return Response.json(room());}
+  if(body?.action==="connect"){expect(body.version).toBe(roomVersion);stage="active";return Response.json(room());}
+  if(body?.action==="close")return new Promise<Response>(r=>{close=r});
+  return Response.json(room());
+ });await mount(fetcher);Socket.mode="PvP_Ranked";
+ field("custom-load").click();await vi.waitFor(()=>expect(field("custom-status").textContent).toContain("unconfigured"));
+ field("custom-guest").value="789";field("custom-invite").click();await vi.waitFor(()=>expect(field("custom-status").textContent).toContain("invited"));expect(field("custom-accept").disabled).toBe(true);expect(field("custom-connect").disabled).toBe(true);
+ stage="ready";field("custom-load").click();await vi.waitFor(()=>expect(field("custom-connect").disabled).toBe(false));field("custom-connect").click();await vi.waitFor(()=>expect(field("connection").textContent).toContain("私有自创席位已连接"));
+ expect(field("move").disabled).toBe(true);expect(Socket.all[0]!.sent.some(m=>m.type==="acquire_lease")).toBe(true);
+ phase="Running";await vi.waitFor(()=>expect(field("move").disabled).toBe(false));expect(field("surrender").textContent).toContain("非排位");
+ field("custom-close").click();await vi.waitFor(()=>expect(close).toBeTypeOf("function"));expect(field("move").disabled).toBe(true);expect(field("connection").textContent).not.toContain("授权已关闭");
+ stage="closed";close(Response.json(room()));await vi.waitFor(()=>expect(field("connection").textContent).toContain("授权已关闭"));expect(Socket.all[0]!.closed).toBe(true);expect(field("biomass").textContent).toBe("—");expect(fetcher.mock.calls.every(([url])=>!String(url).includes("practice")&&!String(url).includes("secret"))).toBe(true);
+});
+it("受邀玩家本人确认后仍等待所有者冻结，连接只授本人阵营且服务撤销后清空",async()=>{
+ let stage="invited";const guestRun={...run,principal_id:"789",faction:1,mode:"PvP_Ranked",custom:true};
+ const room=()=>({world_id:world,principal_id:"789",owner_id:"123",guest_id:"789",role:"player",status:stage,custom:true,faction:1,version:roomVersion,accepted:stage!=="invited",seat:stage==="active"?guestRun:null});
+ const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>{const body=init?.body?JSON.parse(String(init.body)):null;if(body?.action==="accept"){stage="ready";}return Response.json(room())});await mount(fetcher);Socket.mode="PvP_Ranked";
+ field("custom-load").click();await vi.waitFor(()=>expect(field("custom-accept").disabled).toBe(false));expect(field("custom-invite").disabled).toBe(true);field("custom-accept").click();await vi.waitFor(()=>expect(field("custom-status").textContent).toContain("ready"));expect(field("custom-connect").disabled).toBe(true);
+ stage="active";field("custom-load").click();await vi.waitFor(()=>expect(field("custom-connect").disabled).toBe(false));field("custom-connect").click();await vi.waitFor(()=>expect(field("connection").textContent).toContain("私有自创席位已连接"));expect(Socket.all[0]!.sent[0]).toMatchObject({principal_id:"789",faction:1});expect(field("grant-observer").disabled).toBe(true);
+ stage="closed";await vi.waitFor(()=>expect(field("biomass").textContent).toBe("—"));expect(Socket.all[0]!.closed).toBe(true);expect(field("move").disabled).toBe(true);
+});
+it("显式创建私有双人世界保留实际ID；断开后迟到邀请回执不恢复身份",async()=>{
+ let resolve!:((r:Response)=>void);const fetcher=vi.fn(async(url:unknown,init?:RequestInit)=>{
+  if(String(url).endsWith("/worlds")){expect(JSON.parse(String(init?.body))).toMatchObject({template:"arena_duel",visibility:"Private",map_seed:42});return Response.json({world_id:world});}
+  const body=init?.body?JSON.parse(String(init.body)):null;if(body?.action==="invite")return new Promise<Response>(r=>{resolve=r});
+  return Response.json({world_id:world,principal_id:"123",role:"owner",status:"unconfigured",custom:true});
+ });await mount(fetcher);field("custom-create").click();await vi.waitFor(()=>expect(field("custom-status").textContent).toContain("unconfigured"));expect(field("world-id").value).toBe(world);
+ field("custom-guest").value="789";field("custom-invite").click();await vi.waitFor(()=>expect(resolve).toBeTypeOf("function"));field("disconnect").click();resolve(Response.json({world_id:world,principal_id:"123",owner_id:"123",guest_id:"789",role:"owner",status:"invited",version:roomVersion,custom:true,faction:0}));
+ await new Promise(r=>setTimeout(r,0));expect(field("connection").textContent).toBe("身份已断开");expect(Socket.all).toHaveLength(0);expect(field("biomass").textContent).toBe("—");
 });
