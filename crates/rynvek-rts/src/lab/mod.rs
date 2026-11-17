@@ -56,7 +56,7 @@ pub struct VariantSpec {
     pub policy: PolicyKind,
     /// 显式实验生态契约，仅允许PvE；不改变未指定的世界，也不补免费出生能量。
     #[serde(default)]
-    pub ecology: Option<crate::world::ecology::ForagerEcologyContract>,
+    pub ecology: Option<crate::world::ecology::EcologyContract>,
 }
 
 impl VariantSpec {
@@ -84,7 +84,7 @@ impl VariantSpec {
             LabMode::Pve => MatchConfig::pve(seed, self.player_count()),
             LabMode::Duel => MatchConfig::duel(seed),
         };
-        config.ecology = self.ecology;
+        config.ecology = self.ecology.clone();
         config
     }
 }
@@ -143,7 +143,7 @@ impl ExperimentSpec {
             if !labels.insert(v.label.as_str()) {
                 return Err(format!("变体 label 重复：{}", v.label));
             }
-            if let Some(ecology) = v.ecology {
+            if let Some(ecology) = &v.ecology {
                 if v.mode != LabMode::Pve {
                     return Err("生态实验只允许显式PvE变体".into());
                 }

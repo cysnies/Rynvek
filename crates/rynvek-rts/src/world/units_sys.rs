@@ -466,6 +466,18 @@ impl ArenaWorld {
             } else {
                 (p, Vec2::ZERO)
             };
+            if let Some(role) = self.role_energy(u.kind, u.faction) {
+                let distance = super::ecology::movement_distance_raw(pos - p);
+                let body = self.ecology.as_mut().expect("配置").bodies.get_mut(&id).expect("活体");
+                let total =
+                    distance * u128::from(role.movement_cost_micro_per_tile) * 4 + u128::from(body.movement_remainder);
+                let cost = u64::try_from(total >> 32).expect("单Tick位移和u32成本可表示");
+                if !body.account.try_dissipate_q(cost) {
+                    self.units.get_mut(&id).expect("活体").velocity = Vec2::ZERO;
+                    continue;
+                }
+                body.movement_remainder = total as u32;
+            }
             let u = self.units.get_mut(&id).expect("存在");
             u.position = pos;
             u.velocity = vel;
@@ -477,7 +489,10 @@ impl ArenaWorld {
     pub(super) fn step_forager_uptake(&mut self) {
         let ids: Vec<_> = self.units.keys().copied().collect();
         for id in ids {
-            if !self.has_neural_energy_budget(id) || self.units[&id].defense.hp_milli <= 0 {
+            if self.units[&id].kind != UnitKind::Forager
+                || !self.has_neural_energy_budget(id)
+                || self.units[&id].defense.hp_milli <= 0
+            {
                 continue;
             }
             let u = &self.units[&id];

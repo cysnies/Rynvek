@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 显式Forager契约统一局部摄食、实际脉冲预算与首次有来源供能后的生存成本。
+//! 显式角色契约统一真实局部摄食/阵营补给、脉冲预算、运动与生命维护。
 //! 孵化槽出生实扣Biomass，自然出生由亲本原池分配；摄食继续等额扣环境场。
 use super::ArenaWorld;
 use crate::{EntitySerial, FactionId, FieldId, UnitKind};
@@ -12,36 +12,54 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const ECOL_TAG: [u8; 4] = *b"ECOL";
 
-/// 数值为显式实验参数，并非原v1冻结平衡；首次有来源收入由原账本received_q推导。
+/// 显式角色生命成本；数值是实验配置，不冒充原v1已冻结的平衡值。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ForagerEcologyContract {
+pub struct RoleEnergyContract {
     pub basal_cost_micro_per_tick: u32,
     pub reserve_ticks: u32,
-    /// 玩家Forager的出生投入；孵化槽实扣Biomass，自然分裂由亲本原能量池支付。
     pub birth_energy_milli: u32,
+    pub movement_cost_micro_per_tile: u32,
+    pub synapse_maintenance_micro_per_tick: u32,
+    pub natural_reproduction: bool,
 }
-
-impl ForagerEcologyContract {
+impl RoleEnergyContract {
     pub fn validate(self) -> Result<(), &'static str> {
-        if self.birth_energy_milli == 0 {
-            return Err("出生能量必须显式大于0，由生产池或亲本实际支付");
+        if self.birth_energy_milli == 0 || self.basal_cost_micro_per_tick == 0 {
+            return Err("出生投入和基础代谢必须显式大于0");
         }
-        if self.basal_cost_micro_per_tick == 0 {
-            return Err("实验基础代谢成本必须显式大于0");
-        }
-        self.reserve_q().ok_or("实验代谢预留超出精确能量表示范围")?;
+        self.reserve_q().ok_or("代谢预留超出精确表示范围")?;
         Ok(())
     }
-
     pub fn birth_q(self) -> u64 {
         u64::from(self.birth_energy_milli) * ENERGY_Q_PER_MILLI
     }
-
     pub fn reserve_q(self) -> Option<u64> {
         u64::from(self.basal_cost_micro_per_tick)
             .checked_mul(u64::from(self.reserve_ticks))?
             .checked_mul(4)
+    }
+}
+/// 统一当前模型：配置哪些玩家角色，就对哪些角色执行有来源供能与实际成本。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EcologyContract {
+    pub roles: BTreeMap<UnitKind, RoleEnergyContract>,
+}
+impl EcologyContract {
+    pub fn single(kind: UnitKind, contract: RoleEnergyContract) -> Self {
+        Self {
+            roles: BTreeMap::from([(kind, contract)]),
+        }
+    }
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.roles.is_empty() {
+            return Err("生态角色配置不能为空");
+        }
+        for role in self.roles.values() {
+            role.validate()?;
+        }
+        Ok(())
     }
 }
 
@@ -50,6 +68,8 @@ impl ForagerEcologyContract {
 pub struct BodyEnergy {
     pub account: EnergyAccount,
     pub pending_spikes: u32,
+    /// 移动计费Q32小数余量随原权威根/快照保存，不能靠小步逃费。
+    pub movement_remainder: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,10 +104,99 @@ pub struct EcologyState {
     pub births: BTreeMap<EntitySerial, MitosisBirth>,
 }
 
+// 直接对Q32原始位移平方开整数根，避免先做定点平方把小步截成0而逃费。
+pub(super) fn movement_distance_raw(delta: crate::Vec2) -> u128 {
+    let x = u128::from(delta.x.0.unsigned_abs());
+    let y = u128::from(delta.y.0.unsigned_abs());
+    (x * x + y * y).isqrt()
+}
+
 impl ArenaWorld {
-    /// 仅已核定真实摄食契约的玩家Forager进入新预算规则；其他角色不擅自断供。
+    pub(super) fn role_energy(&self, kind: UnitKind, faction: FactionId) -> Option<RoleEnergyContract> {
+        if faction.is_wild() {
+            return None;
+        }
+        self.config.ecology.as_ref()?.roles.get(&kind).copied()
+    }
     pub(super) fn has_neural_energy_budget(&self, id: EntitySerial) -> bool {
-        self.config.ecology.is_some() && self.units[&id].kind == UnitKind::Forager && !self.units[&id].faction.is_wild()
+        let u = &self.units[&id];
+        self.role_energy(u.kind, u.faction).is_some()
+    }
+    fn maintenance_q(&self, id: EntitySerial, role: RoleEnergyContract) -> u64 {
+        let g = &self.units[&id].genome;
+        let edges = g
+            .w_in
+            .iter()
+            .chain(&g.w_rec)
+            .chain(&g.w_out)
+            .filter(|&&w| w != 0)
+            .count() as u64;
+        u64::from(role.basal_cost_micro_per_tick) * 4 + edges * u64::from(role.synapse_maintenance_micro_per_tick) * 4
+    }
+    fn neural_reserve_q(&self, id: EntitySerial) -> u64 {
+        let u = &self.units[&id];
+        if !matches!(
+            u.genome.model,
+            rynvek_neural::NeuronModelKind::LIF | rynvek_neural::NeuronModelKind::Izhikevich
+        ) {
+            return 0;
+        }
+        let cost = self
+            .faction(u.faction)
+            .map_or(800, |f| f.modifiers().spike_cost_micro_energy) as u64;
+        u64::from(u.genome.n_hid) * crate::brain::BRAIN_STEPS_PER_EPOCH as u64 * cost * 4
+    }
+    /// 非采集角色从既有Biomass池实际转移补给。按实体序稳定分配，满账/余额不足不扣款。
+    pub(super) fn step_role_supply(&mut self) {
+        let ids: Vec<_> = self.units.keys().copied().collect();
+        for id in ids {
+            let u = &self.units[&id];
+            if u.kind == UnitKind::Forager || u.defense.hp_milli <= 0 {
+                continue;
+            }
+            let Some(role) = self.role_energy(u.kind, u.faction) else {
+                continue;
+            };
+            let faction = u.faction;
+            let reserve = self
+                .maintenance_q(id, role)
+                .saturating_mul(u64::from(role.reserve_ticks).max(1));
+            let movement_upper = u64::from(role.movement_cost_micro_per_tile)
+                * 4
+                * (crate::units::unit_spec(u.kind).speed_milli_per_s as u64).div_ceil(30_000);
+            let reserve = reserve
+                .saturating_add(self.neural_reserve_q(id))
+                .saturating_add(movement_upper.saturating_mul(u64::from(role.reserve_ticks).max(1)));
+            let target = if role.natural_reproduction {
+                reserve.max(role.birth_q()).saturating_add(role.birth_q())
+            } else {
+                reserve.max(role.birth_q())
+            };
+            let a = &self.ecology.as_ref().expect("已配置").bodies[&id].account;
+            let needed = target.saturating_sub(a.stored_q).div_ceil(ENERGY_Q_PER_MILLI);
+            let room = (u64::MAX - a.received_q) / ENERGY_Q_PER_MILLI;
+            let available = self.faction(faction).expect("玩家").ledger.balance.biomass.max(0) as u64;
+            let milli = needed.min(room).min(available);
+            if milli == 0 {
+                continue;
+            }
+            assert!(
+                self.faction_mut(faction)
+                    .expect("玩家")
+                    .ledger
+                    .try_consume(crate::ResourceKind::Biomass, milli as i64)
+            );
+            assert!(
+                self.ecology
+                    .as_mut()
+                    .expect("已配置")
+                    .bodies
+                    .get_mut(&id)
+                    .expect("活体")
+                    .account
+                    .try_receive_milli(milli)
+            );
+        }
     }
 
     pub(super) fn validate_ecology(&self) -> bool {
@@ -104,7 +213,7 @@ impl ArenaWorld {
                             && b.account.returned_q == 0
                             // 稳定权威边界必须已退役耗尽的激活个体，不能存成活体等待新食物复活。
                             && (!self.has_neural_energy_budget(*id)
-                                || b.account.received_q == 0
+                                || (self.units[id].kind==UnitKind::Forager && b.account.received_q == 0)
                                 || b.account.stored_q > 0)
                             && (!self.has_neural_energy_budget(*id)
                                 || (b.pending_spikes == 0 && b.account.unfunded_q == 0))
@@ -117,7 +226,9 @@ impl ArenaWorld {
                             && child.0 < self.next_serial
                             && birth.born_tick <= self.tick
                             && birth.parent_generation.checked_add(1) == Some(birth.generation)
-                            && birth.allocated_q == self.config.ecology.expect("已检查").birth_q()
+                            && self
+                                .role_energy(birth.unit, birth.faction)
+                                .is_some_and(|r| r.natural_reproduction && birth.allocated_q == r.birth_q())
                             && (e.bodies.contains_key(&birth.parent) || e.remains.contains_key(&birth.parent))
                             && (e.bodies.contains_key(child) || e.remains.contains_key(child))
                     })
@@ -133,7 +244,7 @@ impl ArenaWorld {
         }
     }
 
-    /// Forager随候选脑原子支付，此处保留下一Epoch预算；其他角色仅记原诊断成本。
+    /// 已配置角色随候选脑和候选位移原子支付，再支付实际基础/突触维护；未配置角色只诊断。
     /// 仅完整毫余量转原账本；未转出的能量仍在原池，没有第二份能量或虚构适应度。
     pub(super) fn step_metabolism(&mut self) {
         if self.ecology.is_none() {
@@ -152,19 +263,11 @@ impl ArenaWorld {
                 .map_or(800, |f| f.modifiers().spike_cost_micro_energy) as u32;
             let forager = unit.kind == UnitKind::Forager && !faction.is_wild();
             let budgeted = self.has_neural_energy_budget(id);
-            // 只按冻结模型上界保留下一Epoch预算：隐藏神经元×4子步×冻结发放成本。
-            // 非脉冲模型没有已定义的基础成本，不能冒充脉冲模型收取同一费用。
-            let reserve_q = if budgeted
-                && matches!(
-                    unit.genome.model,
-                    rynvek_neural::NeuronModelKind::LIF | rynvek_neural::NeuronModelKind::Izhikevich
-                ) {
-                u64::from(unit.genome.n_hid) * crate::brain::BRAIN_STEPS_PER_EPOCH as u64 * u64::from(cost) * 4
-            } else {
-                0
-            };
-            let survival = if budgeted { self.config.ecology } else { None };
-            let reserve_q = reserve_q.saturating_add(survival.map_or(0, |c| c.reserve_q().expect("创建/恢复已验证")));
+            let survival = self.role_energy(unit.kind, faction);
+            let maintenance_q = survival.map_or(0, |r| self.maintenance_q(id, r));
+            let reserve_q = self
+                .neural_reserve_q(id)
+                .saturating_add(survival.map_or(0, |r| maintenance_q.saturating_mul(u64::from(r.reserve_ticks))));
             let room = self
                 .faction(faction)
                 .map_or(0, |f| (f.ledger.capacity.biomass - f.ledger.balance.biomass).max(0))
@@ -181,9 +284,9 @@ impl ArenaWorld {
             } else {
                 b.account.charge_spikes(std::mem::take(&mut b.pending_spikes), cost);
             }
-            let activated = survival.filter(|_| b.account.received_q > 0);
-            if let Some(contract) = activated {
-                b.account.dissipate_micro(contract.basal_cost_micro_per_tick);
+            let activated = survival.filter(|_| !forager || b.account.received_q > 0);
+            if activated.is_some() {
+                b.account.dissipate_q(maintenance_q);
             }
             let starved = activated.is_some() && b.account.stored_q == 0;
             if starved {
@@ -192,12 +295,13 @@ impl ArenaWorld {
                 continue;
             }
             // 出生优先于资源盈余转出；只用既有出生投入和下一Epoch/代谢预留决定门槛。
-            let parent_reserve_q = reserve_q.max(survival.map_or(0, |c| c.birth_q()));
-            if budgeted {
+            let birth_q = survival.filter(|r| r.natural_reproduction).map_or(0, |r| r.birth_q());
+            let parent_reserve_q = reserve_q.max(birth_q);
+            if survival.is_some_and(|r| r.natural_reproduction) {
                 self.try_mitosis(id, parent_reserve_q, &mut occupied);
             }
             // 亲子都保留既有出生投入；额外积累一份出生预算，不逐Tick把繁殖所需余量转走。
-            let retain_q = parent_reserve_q.saturating_add(survival.map_or(0, |c| c.birth_q()));
+            let retain_q = parent_reserve_q.saturating_add(birth_q);
             let b = self
                 .ecology
                 .as_mut()
@@ -231,5 +335,205 @@ impl ArenaWorld {
             let actual = self.fields.add(FieldId::Nutrient, x, y, returned as i32);
             assert_eq!(actual, returned as i32);
         }
+    }
+}
+
+#[cfg(test)]
+mod role_energy_tests {
+    use super::*;
+    use crate::OrderKind;
+    use crate::commands::{CommandAck, RtsCommand, UnitSelector};
+    use crate::genome::Genome;
+    use crate::{ArenaMap, ArenaRuntime, BuildingKind, MatchConfig, TerrainTileKind, Vec2};
+    const PLAYER: FactionId = FactionId(0);
+    fn role() -> RoleEnergyContract {
+        RoleEnergyContract {
+            basal_cost_micro_per_tick: 10,
+            reserve_ticks: 4,
+            birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 11,
+            synapse_maintenance_micro_per_tick: 1,
+            natural_reproduction: false,
+        }
+    }
+    fn world(roles: BTreeMap<UnitKind, RoleEnergyContract>) -> ArenaWorld {
+        let mut c = MatchConfig::pve(57, 1);
+        c.ecology = Some(EcologyContract { roles });
+        ArenaWorld::with_map(
+            c,
+            ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::ConductiveBasalt; 96 * 96]),
+        )
+    }
+    #[test]
+    fn every_supplied_role_uses_actual_faction_pool_and_replays_the_same_root() {
+        let kinds = [
+            UnitKind::Striker,
+            UnitKind::Carapace,
+            UnitKind::Spitter,
+            UnitKind::Weaver,
+            UnitKind::Leviathan,
+        ];
+        let mut w = world(kinds.into_iter().map(|k| (k, role())).collect());
+        for (i, kind) in kinds.into_iter().enumerate().skip(1) {
+            w.spawn_unit(
+                PLAYER,
+                kind,
+                Genome::seed(kind),
+                Vec2::tile_center(20 + i as u32 * 4, 20),
+            );
+        }
+        let initial = w.faction(PLAYER).unwrap().ledger.balance.biomass;
+        w.step();
+        let accounts: Vec<_> = w
+            .units
+            .iter()
+            .filter(|(_, u)| kinds.contains(&u.kind))
+            .map(|(id, _)| &w.ecology.as_ref().unwrap().bodies[id].account)
+            .collect();
+        assert_eq!(accounts.len(), 5);
+        assert_eq!(
+            (initial - w.faction(PLAYER).unwrap().ledger.balance.biomass) as u128 * 4000,
+            accounts.iter().map(|a| u128::from(a.received_q)).sum::<u128>()
+        );
+        assert!(
+            accounts
+                .iter()
+                .all(|a| a.received_q > 0 && a.dissipated_q > 40 && a.unfunded_q == 0 && a.is_conserved())
+        );
+        let mut a = ArenaRuntime::new([121; 16], w);
+        let cp = a.checkpoint().unwrap();
+        let mut b = ArenaRuntime::restore([121; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
+        assert!(
+            a.transact_at(a.tick + 2, |_| Err::<(), _>(
+                rynvek_core::RynvekErrorCode::SimulationInvariantViolated
+            ))
+            .is_err()
+        );
+        assert_eq!(a.checkpoint().unwrap().bytes, cp.bytes);
+        for _ in 0..6 {
+            a.step().unwrap();
+            b.step().unwrap();
+            assert_eq!(a.state_root(), b.state_root());
+        }
+    }
+    #[test]
+    fn dry_faction_cannot_give_a_combat_role_free_life_or_neural_debt() {
+        let mut w = world(BTreeMap::from([(UnitKind::Striker, role())]));
+        let id = w.units.values().find(|u| u.kind == UnitKind::Striker).unwrap().id;
+        w.faction_mut(PLAYER).unwrap().ledger.balance.biomass = 0;
+        w.step();
+        assert!(!w.units.contains_key(&id));
+        let a = &w.ecology.as_ref().unwrap().remains[&id].account;
+        assert_eq!((a.received_q, a.stored_q, a.unfunded_q), (0, 0, 0));
+        assert!(a.is_conserved());
+    }
+    #[test]
+    fn paid_real_movement_carries_subquantum_cost_and_failed_move_is_atomic() {
+        assert_eq!(
+            movement_distance_raw(Vec2::new(rynvek_core::Q32_32(1), rynvek_core::Q32_32::ZERO)),
+            1
+        );
+        for cost in [11, u32::MAX] {
+            let mut r = role();
+            r.movement_cost_micro_per_tile = cost;
+            let mut w = world(BTreeMap::from([(UnitKind::Striker, r)]));
+            w.faction_mut(PLAYER).unwrap().ledger.balance.biomass = 1;
+            let id = w.units.values().find(|u| u.kind == UnitKind::Striker).unwrap().id;
+            w.step_role_supply();
+            assert_eq!(w.faction(PLAYER).unwrap().ledger.balance.biomass, 0);
+            let p = w.units[&id].position;
+            w.apply_command(
+                PLAYER,
+                &RtsCommand::IssueOrder {
+                    units: UnitSelector::Ids(vec![id]),
+                    order: OrderKind::Move,
+                    target: p + Vec2::tile_center(5, 0),
+                },
+            )
+            .unwrap();
+            let before = w.ecology.as_ref().unwrap().bodies[&id].clone();
+            let mut total = 0u128;
+            for _ in 0..12 {
+                let old = w.units[&id].position;
+                w.step_movement();
+                total += movement_distance_raw(w.units[&id].position - old) * u128::from(cost) * 4;
+            }
+            let body = &w.ecology.as_ref().unwrap().bodies[&id];
+            if cost == u32::MAX {
+                assert_eq!(w.units[&id].position, p);
+                assert_eq!(body, &before);
+            } else {
+                assert_ne!(w.units[&id].position, p);
+                assert_eq!(
+                    body.account.dissipated_q - before.account.dissipated_q,
+                    (total >> 32) as u64
+                );
+                assert_eq!(body.movement_remainder, total as u32);
+                assert!(body.account.is_conserved());
+                let (bytes, root) = w.encode_snapshot([122; 16], 1, [0; 32]).unwrap();
+                let loaded = ArenaWorld::decode_snapshot(&bytes).unwrap();
+                assert_eq!(loaded.ecology, w.ecology);
+                assert_eq!(loaded.state_hash().0, root.state_root);
+            }
+        }
+    }
+    #[test]
+    fn combat_production_requires_its_real_birth_payment_before_shared_spawn() {
+        let mut w = world(BTreeMap::from([(UnitKind::Striker, role())]));
+        let origin = (0..96)
+            .flat_map(|y| (0..96).map(move |x| (x, y)))
+            .find(|&p| w.validate_placement(PLAYER, BuildingKind::SpawningVat, p).is_ok())
+            .unwrap();
+        let CommandAck::BuildingPlaced { id: vat } = w
+            .apply_command(
+                PLAYER,
+                &RtsCommand::PlaceBuilding {
+                    kind: BuildingKind::SpawningVat,
+                    origin,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("真实建设")
+        };
+        for _ in 0..1000 {
+            if w.buildings[&vat].complete {
+                break;
+            }
+            w.step();
+        }
+        assert!(w.buildings[&vat].complete);
+        w.apply_command(
+            PLAYER,
+            &RtsCommand::QueueUnit {
+                vat,
+                unit: UnitKind::Striker,
+                genome_slug: "seed.striker.v1".into(),
+                count: 1,
+            },
+        )
+        .unwrap();
+        for _ in 0..1000 {
+            if w.buildings[&vat].queue.front().unwrap().remaining_ticks <= 1 {
+                break;
+            }
+            w.step();
+        }
+        assert_eq!(w.buildings[&vat].queue.front().unwrap().remaining_ticks, 1);
+        let old = w.next_serial();
+        let count = w.units.len();
+        w.faction_mut(PLAYER).unwrap().ledger.balance.biomass = 999;
+        w.step_economy();
+        assert_eq!(w.next_serial(), old);
+        assert_eq!(w.units.len(), count);
+        assert_eq!(w.faction(PLAYER).unwrap().ledger.balance.biomass, 999);
+        w.faction_mut(PLAYER).unwrap().ledger.balance.biomass += 1;
+        w.step_economy();
+        assert!(w.buildings[&vat].queue.is_empty());
+        assert_eq!(w.faction(PLAYER).unwrap().ledger.balance.biomass, 0);
+        let a = &w.ecology.as_ref().unwrap().bodies[&EntitySerial(old)].account;
+        assert_eq!(a.received_q, 4_000_000);
+        assert_eq!(a.stored_q, 4_000_000);
+        assert!(a.is_conserved());
     }
 }

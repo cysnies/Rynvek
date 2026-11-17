@@ -48,6 +48,35 @@ impl EnergyAccount {
         accepted
     }
 
+    /// 接收已由宿主预检并实际扣除的资源，不从其他账户凭空造能。
+    pub fn try_receive_milli(&mut self, milli: u64) -> bool {
+        let Some(q) = milli.checked_mul(ENERGY_Q_PER_MILLI) else {
+            return false;
+        };
+        let (Some(received), Some(stored)) = (self.received_q.checked_add(q), self.stored_q.checked_add(q)) else {
+            return false;
+        };
+        self.received_q = received;
+        self.stored_q = stored;
+        true
+    }
+    /// 可撤销活动先完整付费，余额不足账户不变，宿主不提交运动状态。
+    pub fn try_dissipate_q(&mut self, q: u64) -> bool {
+        if self.stored_q < q {
+            return false;
+        }
+        self.stored_q -= q;
+        self.dissipated_q += q;
+        true
+    }
+    /// 必须生命维护耗尽现有池；宿主决定饥饿死亡，不生成欠账。
+    pub fn dissipate_q(&mut self, q: u64) -> u64 {
+        let paid = self.stored_q.min(q);
+        self.stored_q -= paid;
+        self.dissipated_q += paid;
+        paid
+    }
+
     pub fn charge_spikes(&mut self, spikes: u32, cost_micro: u32) -> u64 {
         let requested = u128::from(spikes) * u128::from(cost_micro) * 4;
         let paid = u128::from(self.stored_q).min(requested) as u64;

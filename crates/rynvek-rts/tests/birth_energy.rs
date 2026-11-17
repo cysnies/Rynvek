@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use rynvek_rts::commands::{CommandAck, RtsCommand};
-use rynvek_rts::world::ecology::ForagerEcologyContract;
+use rynvek_rts::world::ecology::{EcologyContract, RoleEnergyContract};
 use rynvek_rts::{
     ArenaMap, ArenaRuntime, ArenaWorld, BuildingKind, EntitySerial, FactionId, MatchConfig, TerrainTileKind, UnitKind,
 };
@@ -11,11 +11,17 @@ const PLAYER: FactionId = FactionId(0);
 
 fn ready_world(vats: usize) -> (ArenaWorld, Vec<EntitySerial>) {
     let mut config = MatchConfig::pve(57, 1);
-    config.ecology = Some(ForagerEcologyContract {
-        basal_cost_micro_per_tick: 1000,
-        reserve_ticks: 1000,
-        birth_energy_milli: 1000,
-    });
+    config.ecology = Some(EcologyContract::single(
+        rynvek_rts::UnitKind::Forager,
+        RoleEnergyContract {
+            basal_cost_micro_per_tick: 1000,
+            reserve_ticks: 1000,
+            birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 0,
+            synapse_maintenance_micro_per_tick: 0,
+            natural_reproduction: true,
+        },
+    ));
     // 无营养地形，不依靠Move、Harvest或测试注入身体能量掩盖出生空池。
     let mut w = ArenaWorld::with_map(
         config,

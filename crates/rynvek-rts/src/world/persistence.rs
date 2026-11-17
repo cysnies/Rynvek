@@ -167,7 +167,7 @@ impl ArenaWorld {
         let canonical = self.canonical_state_with_parent(Blake3Hash(parent_state_root));
 
         let conf = ConfChunkDto {
-            arena_format: "rynvek-arena/6".into(),
+            arena_format: "rynvek-arena/7".into(),
             config: self.config.clone(),
             map_width: self.map.width,
             map_height: self.map.height,
@@ -324,7 +324,7 @@ impl ArenaWorld {
             read.find_chunk(CONF_TAG)
                 .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
-        if conf.arena_format != "rynvek-arena/6" {
+        if conf.arena_format != "rynvek-arena/7" {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
         let comp: CompChunkDto = from_chunk(

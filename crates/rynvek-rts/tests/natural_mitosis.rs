@@ -2,16 +2,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use rynvek_core::RynvekErrorCode;
-use rynvek_rts::world::ecology::ForagerEcologyContract;
+use rynvek_rts::world::ecology::{EcologyContract, RoleEnergyContract};
 use rynvek_rts::{ArenaMap, ArenaRuntime, ArenaWorld, FactionId, MatchConfig, TerrainTileKind, UnitKind};
 
 fn world() -> ArenaWorld {
     let mut config = MatchConfig::pve(57, 1);
-    config.ecology = Some(ForagerEcologyContract {
-        basal_cost_micro_per_tick: 1000,
-        reserve_ticks: 4,
-        birth_energy_milli: 1000,
-    });
+    config.ecology = Some(EcologyContract::single(
+        rynvek_rts::UnitKind::Forager,
+        RoleEnergyContract {
+            basal_cost_micro_per_tick: 1000,
+            reserve_ticks: 4,
+            birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 0,
+            synapse_maintenance_micro_per_tick: 0,
+            natural_reproduction: true,
+        },
+    ));
     let mut w = ArenaWorld::with_map(
         config,
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),

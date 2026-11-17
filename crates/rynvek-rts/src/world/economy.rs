@@ -164,9 +164,7 @@ impl ArenaWorld {
         }
         let (faction, rect, unit) = (b.faction, b.rect(), b.queue.front().expect("非空").unit);
         let birth_milli = self
-            .config
-            .ecology
-            .filter(|_| unit == UnitKind::Forager && !faction.is_wild())
+            .role_energy(unit, faction)
             .map_or(0, |c| i64::from(c.birth_energy_milli));
         // 出生前唯一付款点：不预扣第二份托管状态，不依靠造价或免费移动制造启动能量。
         // 不足时队首停在最后一Tick，保留原生产造价及取消退款语义，不扣能量也不弹队。

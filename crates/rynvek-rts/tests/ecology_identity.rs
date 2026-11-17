@@ -1,16 +1,22 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use rynvek_rts::world::ecology::ForagerEcologyContract;
+use rynvek_rts::world::ecology::{EcologyContract, RoleEnergyContract};
 use rynvek_rts::{ArenaRuntime, ArenaWorld, MatchConfig};
 
 fn config() -> MatchConfig {
     let mut c = MatchConfig::pve(57, 1);
-    c.ecology = Some(ForagerEcologyContract {
-        basal_cost_micro_per_tick: 1000,
-        reserve_ticks: 4,
-        birth_energy_milli: 1000,
-    });
+    c.ecology = Some(EcologyContract::single(
+        rynvek_rts::UnitKind::Forager,
+        RoleEnergyContract {
+            basal_cost_micro_per_tick: 1000,
+            reserve_ticks: 4,
+            birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 0,
+            synapse_maintenance_micro_per_tick: 0,
+            natural_reproduction: true,
+        },
+    ));
     c
 }
 
@@ -22,9 +28,39 @@ fn whole_current_contract_is_bound_and_transaction_cannot_reprice_it() {
         let mut changed = w.clone();
         match variant {
             0 => changed.config.ecology = None,
-            1 => changed.config.ecology.as_mut().unwrap().basal_cost_micro_per_tick += 1,
-            2 => changed.config.ecology.as_mut().unwrap().reserve_ticks += 1,
-            _ => changed.config.ecology.as_mut().unwrap().birth_energy_milli += 1,
+            1 => {
+                changed
+                    .config
+                    .ecology
+                    .as_mut()
+                    .unwrap()
+                    .roles
+                    .get_mut(&rynvek_rts::UnitKind::Forager)
+                    .unwrap()
+                    .basal_cost_micro_per_tick += 1
+            }
+            2 => {
+                changed
+                    .config
+                    .ecology
+                    .as_mut()
+                    .unwrap()
+                    .roles
+                    .get_mut(&rynvek_rts::UnitKind::Forager)
+                    .unwrap()
+                    .reserve_ticks += 1
+            }
+            _ => {
+                changed
+                    .config
+                    .ecology
+                    .as_mut()
+                    .unwrap()
+                    .roles
+                    .get_mut(&rynvek_rts::UnitKind::Forager)
+                    .unwrap()
+                    .birth_energy_milli += 1
+            }
         }
         assert_ne!(changed.canonical_state().config_root, root);
         let mut runtime = ArenaRuntime::new([91; 16], w.clone());
@@ -63,13 +99,13 @@ fn resealed_snapshot_rejects_cross_contract_and_unsupported_arena_format() {
             0 => {
                 v["config"].as_object_mut().unwrap().remove("ecology");
             }
-            1 => v["config"]["ecology"]["reserve_ticks"] = serde_json::json!(5),
-            2 => v["config"]["ecology"]["basal_cost_micro_per_tick"] = serde_json::json!(1001),
+            1 => v["config"]["ecology"]["roles"]["unit.forager"]["reserve_ticks"] = serde_json::json!(5),
+            2 => v["config"]["ecology"]["roles"]["unit.forager"]["basal_cost_micro_per_tick"] = serde_json::json!(1001),
             3 => {
                 v.as_object_mut().unwrap().remove("arena_format");
             }
             4 => v["arena_format"] = serde_json::json!("rynvek-arena/3"),
-            _ => v["config"]["ecology"]["birth_energy_milli"] = serde_json::json!(1001),
+            _ => v["config"]["ecology"]["roles"]["unit.forager"]["birth_energy_milli"] = serde_json::json!(1001),
         }
         conf.payload = serde_json::to_vec(&v).unwrap();
         let (forged, _) = SnapshotWriter::write_bytes_with_chunks(

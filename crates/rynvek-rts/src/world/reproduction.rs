@@ -44,7 +44,9 @@ impl ArenaWorld {
                 true
             };
             if account.is_none_or(|a| a.received_q < birth.allocated_q)
-                || birth.unit != crate::UnitKind::Forager
+                || self
+                    .role_energy(birth.unit, birth.faction)
+                    .is_none_or(|r| !r.natural_reproduction)
                 || birth.faction.is_wild()
                 || self.faction(birth.faction).is_none()
                 || birth.slug.is_empty()
@@ -69,7 +71,9 @@ impl ArenaWorld {
             .all(|(id, a)| u128::from(a.transferred_q) == allocations.get(id).copied().unwrap_or(0))
     }
     pub(super) fn try_mitosis(&mut self, parent: EntitySerial, retain_q: u64, occupied: &mut BTreeSet<(u32, u32)>) {
-        let contract = self.config.ecology.expect("调用者已核定Forager契约");
+        let contract = self
+            .role_energy(self.units[&parent].kind, self.units[&parent].faction)
+            .expect("调用者已核定角色契约");
         let allocated_q = contract.birth_q();
         let Some(required_q) = allocated_q.checked_add(retain_q) else {
             return;

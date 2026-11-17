@@ -4,7 +4,7 @@
 use rynvek_rts::{ArenaMap, ArenaWorld, MatchConfig, TerrainTileKind, UnitKind};
 fn world() -> ArenaWorld {
     let mut c = serde_json::to_value(MatchConfig::pve(57, 1)).unwrap();
-    c["ecology"] = serde_json::json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000});
+    c["ecology"] = serde_json::json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}});
     ArenaWorld::with_map(
         serde_json::from_value(c).unwrap(),
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),

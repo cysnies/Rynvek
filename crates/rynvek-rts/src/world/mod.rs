@@ -90,7 +90,7 @@ pub struct MatchConfig {
     pub players: u8,
     /// 显式PvE实验契约：局部摄食、真实计算预算与首次摄食后基础代谢；无隐含数值。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ecology: Option<ecology::ForagerEcologyContract>,
+    pub ecology: Option<ecology::EcologyContract>,
 }
 
 #[derive(Deserialize)]
@@ -102,7 +102,7 @@ struct MatchConfigWire {
     world_seed: u64,
     players: u8,
     #[serde(default)]
-    ecology: Option<ecology::ForagerEcologyContract>,
+    ecology: Option<ecology::EcologyContract>,
 }
 
 impl TryFrom<MatchConfigWire> for MatchConfig {
@@ -126,7 +126,7 @@ impl TryFrom<MatchConfigWire> for MatchConfig {
 
 impl MatchConfig {
     pub fn validate_energy_contract(&self) -> Result<(), &'static str> {
-        if let Some(contract) = self.ecology {
+        if let Some(contract) = &self.ecology {
             if self.mode != MatchMode::PveSurvival {
                 return Err("未认证的能量规则不能进入PvP/排位");
             }
@@ -497,7 +497,7 @@ impl ArenaWorld {
             .validate_energy_contract()
             .expect("世界能量/生存契约必须通过验证");
         let mut world = Self {
-            ecology: config.ecology.map(|_| ecology::EcologyState::default()),
+            ecology: config.ecology.as_ref().map(|_| ecology::EcologyState::default()),
             pve: (config.mode == MatchMode::PveSurvival).then(|| PveDirector::new(config.world_seed)),
             config,
             nav,
@@ -1206,6 +1206,7 @@ impl ArenaWorld {
             self.step_fields();
         }
         self.step_forager_uptake();
+        self.step_role_supply();
         if self.tick % rynvek_core::constants::COUPLING_EPOCH_TICKS as u64 == 0 {
             self.step_brains();
         }
@@ -1289,7 +1290,7 @@ impl ArenaWorld {
         let config_root = {
             let mut h = Hasher::new();
             // 当前格式绑定整个配置，删除历史模式共用标签与二次身份来源。
-            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_6");
+            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_7");
             h.update(&serde_json::to_vec(&self.config).expect("配置仅含确定性枚举和整数"));
             h.update(&self.map.width.to_le_bytes());
             h.update(&self.map.height.to_le_bytes());

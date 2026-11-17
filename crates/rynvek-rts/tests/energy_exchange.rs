@@ -1,16 +1,22 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use rynvek_rts::world::ecology::ForagerEcologyContract;
+use rynvek_rts::world::ecology::{EcologyContract, RoleEnergyContract};
 use rynvek_rts::{ArenaMap, ArenaRuntime, ArenaWorld, FactionId, FieldId, MatchConfig, TerrainTileKind, UnitKind};
 
 fn world() -> ArenaWorld {
     let mut config = MatchConfig::pve(57, 1);
-    config.ecology = Some(ForagerEcologyContract {
-        basal_cost_micro_per_tick: 1000,
-        reserve_ticks: 4,
-        birth_energy_milli: 1000,
-    });
+    config.ecology = Some(EcologyContract::single(
+        rynvek_rts::UnitKind::Forager,
+        RoleEnergyContract {
+            basal_cost_micro_per_tick: 1000,
+            reserve_ticks: 4,
+            birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 0,
+            synapse_maintenance_micro_per_tick: 0,
+            natural_reproduction: true,
+        },
+    ));
     ArenaWorld::with_map(
         config,
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),
@@ -159,8 +165,7 @@ fn retired_arena_snapshot_is_explicitly_unsupported() {
 #[test]
 fn ranked_cannot_opt_into_an_uncertified_ecology_version() {
     let mut value = serde_json::to_value(MatchConfig::duel(42)).unwrap();
-    value["ecology"] =
-        serde_json::json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000});
+    value["ecology"] = serde_json::json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}});
     assert!(serde_json::from_value::<MatchConfig>(value).is_err());
 }
 

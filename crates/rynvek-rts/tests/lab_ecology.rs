@@ -10,9 +10,9 @@ use rynvek_rts::lab::{ExperimentSpec, run_experiment};
 fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
     let spec: ExperimentSpec = serde_json::from_value(serde_json::json!({
       "name":"真实自然谱系", "seeds":[57],"ticks":600,"sample_every":300,
-      "variants":[{"label":"自然复制", "policy":"ecology", "ecology":{
+      "variants":[{"label":"自然复制", "policy":"ecology", "ecology":{"roles":{"unit.forager":{
         "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
-      }}]
+      ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}}]
     }))
     .unwrap();
     spec.validate().unwrap();
@@ -65,7 +65,7 @@ fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
 fn ecology_experiment_cannot_silently_enable_ranked_or_incomplete_contract() {
     for variant in [
         serde_json::json!({"label":"x","policy":"ecology"}),
-        serde_json::json!({"label":"x","mode":"duel","ecology":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000}}),
+        serde_json::json!({"label":"x","mode":"duel","ecology":{"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}}),
     ] {
         let spec: ExperimentSpec =
             serde_json::from_value(serde_json::json!({"name":"bad","seeds":[1],"ticks":1,"variants":[variant]}))
