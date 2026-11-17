@@ -4,6 +4,8 @@
 
 2026-11-18，中国标准时间 UTC+8；第三十六批。
 
+第三十七批已接所有者定向多编辑者准入和原日志同步，见[STUDIO_COLLABORATION.md](STUDIO_COLLABORATION.md)。模型本身仍为下述有界profile，未因此变成一般Lab/物理ECS。
+
 ## 操作与SDK
 
 原`/studio` → 连接正式WorldEdit世界 → RuleGraph面板。载入「一般参数实体规则草稿」，模块ID填`counter`并编译提交；registry依次选择templates/instances/bindings并使用预填示例创建。读取权威监视器：真实运行后`state.total`按`param.rate`累加。运行仍通过原「进入Arena」/正式席位连接启动，不在Studio凭空推进Tick。编辑实例参数rate不清空state，undo/redo更改定义而非回滚仿真时间。删除实例/绑定后才可删被引用模板/模块，允许SDK同补丁删除完整子图。身份/世界切换清私有草稿及监视值。
