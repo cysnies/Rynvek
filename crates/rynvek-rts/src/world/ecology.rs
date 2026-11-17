@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! V1能量交换与显式V2 Forager计算预算：复用冻结采集率、1:1营养转移和实际脉冲成本。
-//! 未定义的出生禀赋、基础代谢、能量场恢复基率、分泌/自然分裂规则不在这里猜测。
+//! 基础代谢只接受显式实验契约；未定义的出生禀赋、能量场恢复基率、分泌/自然分裂不在这里猜测。
 //! 仅显式 PvE 世界可启用；旧世界/排位保持原语义及规范根。个体池不是新脑模拟器。
 
 use super::ArenaWorld;
@@ -18,6 +18,39 @@ pub const ECOL_TAG: [u8; 4] = *b"ECOL";
 pub enum EcologyVersion {
     EnergyExchangeV1,
     ForagerBudgetV2,
+}
+
+/// 生存参数是显式实验契约，不是冒充v1冻结数值的默认平衡。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ForagerSurvivalContract {
+    pub activation: SurvivalActivation,
+    pub basal_cost_micro_per_tick: u32,
+    pub reserve_ticks: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurvivalActivation {
+    /// 没有有来源出生禀赋时，不将尚未获得第一份真实营养的个体全体饿死。
+    /// 是否曾摄食由原账本received_q永久推导，耗尽后不能重置激活或复活。
+    AfterFirstUptake,
+}
+
+impl ForagerSurvivalContract {
+    pub fn validate(self) -> Result<(), &'static str> {
+        if self.basal_cost_micro_per_tick == 0 {
+            return Err("实验基础代谢成本必须显式大于0");
+        }
+        self.reserve_q().ok_or("实验代谢预留超出精确能量表示范围")?;
+        Ok(())
+    }
+
+    pub fn reserve_q(self) -> Option<u64> {
+        u64::from(self.basal_cost_micro_per_tick)
+            .checked_mul(u64::from(self.reserve_ticks))?
+            .checked_mul(4)
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +84,9 @@ impl ArenaWorld {
     }
 
     pub(super) fn validate_ecology(&self) -> bool {
+        if self.config.validate_energy_contract().is_err() {
+            return false;
+        }
         match (&self.config.ecology, &self.ecology) {
             (None, None) => true,
             (Some(_), Some(e)) => {
@@ -59,6 +95,11 @@ impl ArenaWorld {
                     && e.bodies.iter().all(|(id, b)| {
                         b.account.is_conserved()
                             && b.account.returned_q == 0
+                            // 稳定权威边界必须已退役耗尽的激活个体，不能存成活体等待新食物复活。
+                            && (self.config.forager_survival.is_none()
+                                || !self.has_neural_energy_budget(*id)
+                                || b.account.received_q == 0
+                                || b.account.stored_q > 0)
                             && (!self.has_neural_energy_budget(*id)
                                 || (b.pending_spikes == 0 && b.account.unfunded_q == 0))
                             && b.pending_spikes
@@ -105,6 +146,8 @@ impl ArenaWorld {
             } else {
                 0
             };
+            let survival = if budgeted { self.config.forager_survival } else { None };
+            let reserve_q = reserve_q.saturating_add(survival.map_or(0, |c| c.reserve_q().expect("创建/恢复已验证")));
             let room = self
                 .faction(faction)
                 .map_or(0, |f| (f.ledger.capacity.biomass - f.ledger.balance.biomass).max(0))
@@ -121,11 +164,22 @@ impl ArenaWorld {
             } else {
                 b.account.charge_spikes(std::mem::take(&mut b.pending_spikes), cost);
             }
-            let exported = if forager {
+            let starved = if let Some(contract) = survival.filter(|_| b.account.received_q > 0) {
+                b.account.dissipate_micro(contract.basal_cost_micro_per_tick);
+                b.account.stored_q == 0
+            } else {
+                false
+            };
+            let exported = if forager && !starved {
                 b.account.export_milli_retaining(room, reserve_q)
             } else {
                 0
             };
+            if starved {
+                // 在代谢边界通过同一死亡/遗骸路径退役，不能随后再攻击、治疗或重新采集。
+                self.units.get_mut(&id).expect("存活个体").defense.hp_milli = 0;
+                self.retire_dead_unit(id);
+            }
             if exported > 0 {
                 let ledger = &mut self.faction_mut(faction).expect("玩家阵营存在").ledger;
                 let accepted = ledger.deposit(crate::ResourceKind::Biomass, exported as i64);

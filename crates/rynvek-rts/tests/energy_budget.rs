@@ -184,3 +184,22 @@ fn already_dead_forager_does_not_pay_for_another_candidate_epoch() {
     assert_eq!(remains.unfunded_q, 0);
     assert!(remains.is_conserved());
 }
+
+#[test]
+fn delivered_budget_v2_snapshot_and_following_roots_stay_frozen() {
+    let f: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/arena/forager-budget-v2.json")).unwrap();
+    let bytes: Vec<u8> = f["snapshot_hex"]
+        .as_str()
+        .unwrap()
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
+        .collect();
+    let mut w = ArenaWorld::decode_snapshot(&bytes).unwrap();
+    assert_eq!(w.config.ecology, Some(EcologyVersion::ForagerBudgetV2));
+    for root in f["next_roots"].as_array().unwrap() {
+        w.step();
+        assert_eq!(format!("{:?}", w.state_hash()), root.as_str().unwrap());
+    }
+}

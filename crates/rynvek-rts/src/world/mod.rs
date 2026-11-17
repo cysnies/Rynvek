@@ -90,6 +90,9 @@ pub struct MatchConfig {
     /// 显式、未认证的 PvE 规则版本；缺省绝不默默升级旧世界或排位。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ecology: Option<ecology::EcologyVersion>,
+    /// 既有V2里的显式实验参数；缺省None且不序列化，绝不自动升级旧世界。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forager_survival: Option<ecology::ForagerSurvivalContract>,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +104,8 @@ struct MatchConfigWire {
     players: u8,
     #[serde(default)]
     ecology: Option<ecology::EcologyVersion>,
+    #[serde(default)]
+    forager_survival: Option<ecology::ForagerSurvivalContract>,
 }
 
 impl TryFrom<MatchConfigWire> for MatchConfig {
@@ -109,18 +114,34 @@ impl TryFrom<MatchConfigWire> for MatchConfig {
         if w.ecology.is_some() && w.mode != MatchMode::PveSurvival {
             return Err("未认证的能量规则不能进入PvP/排位");
         }
-        Ok(Self {
+        let config = Self {
             mode: w.mode,
             map_size: w.map_size,
             map_seed: w.map_seed,
             world_seed: w.world_seed,
             players: w.players,
             ecology: w.ecology,
-        })
+            forager_survival: w.forager_survival,
+        };
+        config.validate_energy_contract()?;
+        Ok(config)
     }
 }
 
 impl MatchConfig {
+    pub fn validate_energy_contract(&self) -> Result<(), &'static str> {
+        if self.ecology.is_some() && self.mode != MatchMode::PveSurvival {
+            return Err("未认证的能量规则不能进入PvP/排位");
+        }
+        if let Some(contract) = self.forager_survival {
+            if self.ecology != Some(ecology::EcologyVersion::ForagerBudgetV2) {
+                return Err("Forager实验生存参数仅可在显式forager_budget_v2新PvE世界启用");
+            }
+            contract.validate()?;
+        }
+        Ok(())
+    }
+
     pub const fn duel(map_seed: u64) -> Self {
         Self {
             mode: MatchMode::PvpRanked,
@@ -129,6 +150,7 @@ impl MatchConfig {
             world_seed: map_seed,
             players: 2,
             ecology: None,
+            forager_survival: None,
         }
     }
 
@@ -140,6 +162,7 @@ impl MatchConfig {
             world_seed: map_seed,
             players,
             ecology: None,
+            forager_survival: None,
         }
     }
 }
@@ -479,6 +502,9 @@ impl ArenaWorld {
         let nav = NavGrid::from_terrain(map.width, map.height, &map.tiles);
         let hpa = HpaGraph::build(&nav);
         let fields = FieldGrid::for_terrain(map.width, map.height, &map.tiles);
+        config
+            .validate_energy_contract()
+            .expect("世界能量/生存契约必须通过验证");
         let mut world = Self {
             ecology: config.ecology.map(|_| ecology::EcologyState::default()),
             pve: (config.mode == MatchMode::PveSurvival).then(|| PveDirector::new(config.world_seed)),
@@ -1267,7 +1293,13 @@ impl ArenaWorld {
             h.update(&self.map.seed.to_le_bytes());
             h.update(&self.map.tiles_hash().0);
             if self.config.ecology.is_some() {
+                // 已交付V1/V2共用此legacy标签；不能破坏旧快照后续根来暗改身份格式。
                 h.update(b"energy_exchange_v1");
+            }
+            if let Some(contract) = self.config.forager_survival {
+                // 新显式契约必须独立域分离并绑定全部参数与实际模式，不能只保存JSON。
+                h.update(b"RYNVEK_FORAGER_SURVIVAL_CONTRACT_V1");
+                h.update(&serde_json::to_vec(&(self.config.ecology, contract)).expect("显式契约仅含枚举与整数"));
             }
             Blake3Hash(*h.finalize().as_bytes())
         };
