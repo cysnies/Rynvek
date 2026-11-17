@@ -5,6 +5,31 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第三十批：私有Agent包、受限运行与SDK真实消费链（从main 9ba04b8继续）
+
+**主体持续开发，整体未完成。** 主要实现锚点 `9abdc3f87733cc3d0a2e3fa645328a19d7ae1fd0`（SDK `bacdcc0`，私有后端 `ec6b1a3`，产品入口 `9abdc3f`）；后续集成前提说明及本进度记录也是普通细提交，最终完整HEAD见同一项目Page/交付回执。未公共Hub发行、外部部署、创建假对手或独立虚构Agent主体。Arena `/9`、`CURRENT_9` 与唯一WAL `rynvek-tick/2` 不变。
+
+### 完整可用段与真实入口
+
+- `/arena` → 正式身份连接**本人已有Private单人PvE** →「私有Agent包 / 真实工具委托」：本人版本发现、SDK签名JSON扫描私有发布、验摘要/签名下载、撤销、显式单步真实工具、停止与断开清理。不是静态页面、空容器或浏览器eval；包始终在服务端无I/O QuickJS运行。签名私钥不进工作台/包；SDK外部sign回调产出上传JSON，Bearer只在内存/认证头。
+- 复用RYPK `.rpack` 严格三文件profile（agent.json、dependencies.lock、main.js），engine_compat=rynvek-agent-tools/1；严格profile/未知字段/工具schema/容器与文件hash、凭据标记校验。私有签名域绑定owner、ID、版本及整个artifact BLAKE3，与公开Hub不同。程序只能请求声明的原六工具，无module/OS/网络宿主入口。
+- owner-private registry独立于公共索引；制品存原私有world_snapshots CAS、不写public blobs。公开Agent发布或把agent.json容器伪装rpack均拒绝，历史数据不删除。版本与撤销墓碑不可覆盖、每主体最多256；Memory共用Store锁，PG新增0005_private_agents.sql并用Principal行锁/事务重验配额、公钥与整个精确依赖闭包。
+- 仅同owner签名精确CID library依赖：每节点8项、图16库/深度4/组合源码256KiB；冻结词法deps实际调用纯函数，环/摘要冲突拒绝。撤销任一依赖阻断后续求值。100000 gas/16MiB堆/256KiB栈、每节点两并发且取消不提早释放阻塞名额；64个决策步扫描固定Trust 3，**不是1000世界Tick/Trust 2资格或长稳**。标记扫描不证明能识别所有编码秘密。
+- 真实链：原Actor本人固定阵营fog → 有界memory/last_result → 沙箱候选 → SDK核对owner/世界/CID/阵营/模式/租约fence → 本人现有ArenaClient.callTool → 原ToolBroker限速/控制层/命令Tick/WAL/真实回执。evaluate永不执行工具或开局/夺控制。HTTP输入不接全世界/凭据/源码；求值后重验授权/撤销/世界fence。stop/换身份/换包/fence后丢迟到候选；已发工具不可撤回，未知回执停止且不自动重试。
+- 此段是所有者明确委托**自己的当前PvE控制**，非独立注册Agent、Agent排位赛道、LLM服务、后台自动循环或持久运行记忆；不允许Human排位代打。刷新后runner记忆清空。当前已有六工具都可由声明profile请求，不只是查询；直接测试已验证战略工具真实写入己方单位HoldPosition。
+
+### 必要快验与边界
+
+- Rust定向3项通过：TS容器/签名域跨语言及无网络/死循环/越权/结构拒绝；owner/签名/未知字段/公共误发隔离；**实际Node22 SDK**私有发布→发现→BLAKE3/Ed25519下载→原Actor fog/精确依赖求值→ArenaClient真实WS/租约→查询→间隔30Tick→战略写入/己方真实order→依赖撤销。跨语言用例需先构建SDK/client并显式`--include-ignored`；本阶段确实执行通过，不把默认ignored算通过。
+- SDK 5项、工作台JSDOM 2项，共**10个不同直接用例**，不累计重跑。SDK/client构建、SDK及web-platform源码类型与git diff --check通过；服务端必要编译与定向测试通过。仅格式化触及Rust文件，无全workspace/Clippy/license/SBOM/soak/CI轮询、无WASM/Vite重编。
+- 真回环HTTP/WS/Node/原Actor不等于实际浏览器/多机。PG迁移与事务仅Rust编译，未接实库；同MemoryStore不跨OS进程持久化，更不是PG灾备。真实受限浏览器/物理GPU/音频设备/PG多连接多机/断电/24h未验，既有网络策略不绕过。私有registry持久化仍依赖既有持久Store、私有持久CAS与稳定鉴权；不自动清理预写孤立CAS、不宣称持久自主Agent恢复。
+
+技术协议、可运行SDK组合示例及准确验证命令见 [PRIVATE_AGENT_PACKAGES.md](PRIVATE_AGENT_PACKAGES.md)。
+
+### 下一主体继续
+
+**优先C# SDK真实鉴权/HTTP/WS/租约与ToolBroker消费，再接现有音频模块到原事件、用户手势/静音/断开生命周期与神经声化。** 目前没有C#主体源码，音频已有模块但未接本真实入口，不把placeholder synth当真实硬件验收。Hub独立Agent/模型服务、多用户私有分享与后台执行治理仍欠；一般规则绑定/非基因模板/任意TS/rpack/.rview/协作、Lab一般W3/持久作业及完整生命成本继续保留。避免无限仅磨Arena，主体齐后集中全面验收，整体任务不关闭。
+
 ## 第二十九批：持久排位队列、唯一席位与宿主发现恢复（从main 9b7c5ce继续）
 
 **主体持续开发，整体未完成。** 本批代码锚点 `889a902d08280f5edf629a8e33e8485765861e8f`（后端 `1c20fcc`，浏览器 `889a902`）；最终进度记录提交及普通push后的确切HEAD见同一项目Page/交付回执。Arena `/9`、`CURRENT_9` 和唯一WAL `rynvek-tick/2` 不变；未造对手、联系真人或对外部署。
@@ -319,7 +344,8 @@
 | 已推进，仍有边界 | 第二十七批自创私有世界定向阵营观战：持久准入、撤销/离开、原Actor fog与产品入口 | 无控制席位或全知视角，原私有CID/源码/完整归档保持封闭；多观察者性能/真实PG未验 |
 | 已推进，仍有边界 | 第二十八批私有自创双人控制席位邀请/本人确认/冻结/原Actor开局重连与恢复/整局回收 | 固定两席，不热换人、不公开发布、不计排位；原fog与私有源码/CID隔离，PG实库/长稳未验 |
 | 已推进，仍有边界 | 第二十九批持久排位队列/完整配对预留、唯一席位、宿主租约与原CAS/WAL恢复、终局一次性对账 | 同Store双服务/真实WS通过；健康远端只发现并手动切换，不自动转发Bearer；PG实库多机/掉电未验 |
-| 下一主体优先 | Hub registry/agent真实模型消费与SDK端到端接入，随后C# SDK、音频接入与神经声化 | 当前模型端到端消费、真实设备/服务边界和隐私；非占位API |
+| 已推进，仍有边界 | 第三十批owner-private签名Agent三文件包/精确依赖/受限QuickJS/原ToolBroker与SDK真实端到端 | Node真实私有发布下载与战略写入通过；非独立持久Agent/公共Hub发行，PG未实库 |
+| 下一主体优先 | C# SDK真实鉴权HTTP/WS/租约/工具消费，其后音频接原事件与用户手势/生命周期和神经声化 | 当前工具链实消费，不能只生成类型；音频需实际设备边界，不能占位事件或声称硬件验收 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付持久排位队列、完整配对预留、席位/宿主发现、fencing恢复和终局对账；下一适时推进Hub/SDK/音频主体，不宣称整个Arena、项目、全生态、W3一般规则/持久作业治理或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
+本阶段交付私有Agent包/依赖/沙箱/原ToolBroker与SDK真实消费；下一推进C# SDK和音频主体，不宣称整个Arena、项目、全生态、W3一般规则/持久作业治理或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
