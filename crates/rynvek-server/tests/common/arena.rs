@@ -133,6 +133,16 @@ pub async fn full_match(t: Transport, store: Store) {
     let f = b.recv_on(WireChannelId::StateStream, |_| {}).await;
     assert!(f.header.tick_low32 > 0);
 
+    // 排位宿主即便收到内部编辑请求也必须拒绝，不能借创作能力污染比赛。
+    let forbidden: rynvek_world::WorldPatch = serde_json::from_value(json!({
+        "patch_id":vec![55;16],"base_authoring_revision":handle.status().revision,
+        "hlc":{"wall_time_ms":1,"logical_counter":0,"author_node_id":1},
+        "safety_class":"TickBoundarySafe", "operations":[{"PaintTerrainRect":{"x0":100,"y0":100,"width":1,"height":1,"tile_kind":4}}]
+    })).unwrap();
+    let denied = handle.apply_patch(forbidden).await.unwrap_err();
+    assert_eq!(denied.status.as_u16(), 403);
+    assert!(denied.message.contains("排位对局"));
+
     // Alice 获取最高租约并投降
     let tick = handle.status().tick;
     let r = a
@@ -140,12 +150,21 @@ pub async fn full_match(t: Transport, store: Store) {
         .await;
     assert_eq!(r["type"], "lease", "{r}");
     let token = r["lease"]["fencing_token"].as_u64().unwrap();
-    let r = a
-        .command(
+    let (r, _) = tokio::join!(
+        a.command(
             tick,
-            json!({ "type": "command", "seq": 3, "fencing_token": token, "command": { "type": "surrender" } }),
-        )
-        .await;
+            json!({ "type": "command", "seq": 3, "fencing_token": token, "command": { "type": "surrender" } })
+        ),
+        async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                handle.wait_for(|s| s.pending_inputs > 0),
+            )
+            .await
+            .unwrap();
+            handle.advance(1).await.unwrap();
+        }
+    );
     assert_eq!(r["type"], "ack", "{r}");
     assert!(r.get("error").is_none(), "{r}");
     for _ in 0..10 {
