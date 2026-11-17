@@ -55,8 +55,23 @@ impl EnergyAccount {
         paid
     }
 
+    /// 先验支付许可：不足时整个账户不变，不生成“计算债务”掩盖免费提交。
+    pub fn try_charge_spikes(&mut self, spikes: u32, cost_micro: u32) -> bool {
+        let requested = u128::from(spikes) * u128::from(cost_micro) * 4;
+        if requested > u128::from(self.stored_q) {
+            return false;
+        }
+        self.charge_spikes(spikes, cost_micro);
+        true
+    }
+
     pub fn export_milli(&mut self, room_milli: u64) -> u64 {
-        let milli = (self.stored_q / ENERGY_Q_PER_MILLI).min(room_milli);
+        self.export_milli_retaining(room_milli, 0)
+    }
+
+    /// 预算只是原池内保留，不是额外资源、禀赋或新耗能常数。
+    pub fn export_milli_retaining(&mut self, room_milli: u64, reserve_q: u64) -> u64 {
+        let milli = (self.stored_q.saturating_sub(reserve_q) / ENERGY_Q_PER_MILLI).min(room_milli);
         let q = milli * ENERGY_Q_PER_MILLI;
         self.stored_q -= q;
         self.exported_q += q;
@@ -123,6 +138,55 @@ mod tests {
         a.export_milli(u64::MAX);
         a.prepare_remains(90);
         a.return_field_raw(u32::MAX);
+        assert!(a.is_conserved());
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    #[test]
+    fn payment_is_atomic_at_exact_boundaries_and_never_overflows() {
+        for cost in [0, 480, 800, u32::MAX] {
+            for spikes in [0, 1, 96, u32::MAX] {
+                let needed = u128::from(cost) * u128::from(spikes) * 4;
+                for available in [
+                    0,
+                    needed.saturating_sub(1).min(u64::MAX.into()) as u64,
+                    needed.min(u64::MAX.into()) as u64,
+                    u64::MAX,
+                ] {
+                    let mut a = EnergyAccount {
+                        received_q: available,
+                        stored_q: available,
+                        ..Default::default()
+                    };
+                    let before = a.clone();
+                    let accepted = a.try_charge_spikes(spikes, cost);
+                    assert_eq!(accepted, needed <= u128::from(available));
+                    if !accepted {
+                        assert_eq!(a, before);
+                    } else {
+                        assert_eq!(u128::from(a.dissipated_q), needed);
+                    }
+                    assert!(a.is_conserved());
+                    assert_eq!(a.unfunded_q, 0);
+                }
+            }
+        }
+    }
+    #[test]
+    fn reserve_never_creates_energy_or_exports_fractional_budget() {
+        let mut a = EnergyAccount::default();
+        a.receive_field_raw(32);
+        let initial = a.stored_q;
+        assert_eq!(a.export_milli_retaining(u64::MAX, u64::MAX), 0);
+        assert_eq!(a.stored_q, initial);
+        let reserve = 96 * 800 * 4;
+        let exported = a.export_milli_retaining(u64::MAX, reserve);
+        assert!(exported > 0);
+        assert!(a.stored_q >= reserve);
+        assert!(a.stored_q < reserve + ENERGY_Q_PER_MILLI);
         assert!(a.is_conserved());
     }
 }

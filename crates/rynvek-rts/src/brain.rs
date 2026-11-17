@@ -102,6 +102,25 @@ impl UnitBrain {
         (out, spikes)
     }
 
+    /// 以真实共享脑核计价候选Epoch，支付许可与脑/动作一起提交。
+    /// 不足时膜电位、脉冲环、可塑性等全部不变；候选CPU评估不是免付费权威推理。
+    pub fn step_epoch_budgeted(
+        &mut self,
+        sensory: &[i16; GENOME_INPUTS],
+        m: ModulatorsQ8,
+        plasticity: bool,
+        account: &mut rynvek_neural::metabolism::EnergyAccount,
+        cost_micro: u32,
+    ) -> Option<([i16; 6], u32)> {
+        let mut candidate = self.clone();
+        let (actions, spikes) = candidate.step_epoch_metered(sensory, m, plasticity);
+        if !account.try_charge_spikes(spikes, cost_micro) {
+            return None;
+        }
+        *self = candidate;
+        Some((actions, spikes))
+    }
+
     /// LIF 脑的后天可塑性偏移 δw（鲍德温同化的来源）；其他模型为 `None`
     pub fn plasticity_delta(&self) -> Option<&[i16]> {
         match &self.0 {
