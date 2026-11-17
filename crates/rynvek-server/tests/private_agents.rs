@@ -147,6 +147,7 @@ async fn recv(ws: &mut Ws, kind: &str) -> Value {
     .expect("真实Actor JSON回执超时")
 }
 #[tokio::test]
+#[ignore = "需先构建TS SDK/client并具备Node22；显式--include-ignored运行，见docs/PRIVATE_AGENT_PACKAGES.md"]
 async fn private_signed_dependency_consumes_real_fog_and_existing_fenced_toolbroker() {
     let server = start_server(false).await;
     let base = server.base_url();
