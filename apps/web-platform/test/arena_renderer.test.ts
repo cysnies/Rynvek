@@ -145,6 +145,18 @@ it("真实开局观察的GPU屏幕点选→选择环→地形采集命令复用�
   if (sent.type !== "command") throw new Error("命令必须走原SDK");
   transport.deliver({type: "ack", seq: sent.seq, tick: obs.tick + 1, ack: {type: "order_issued", units: 1}});
   await app.controller.idle(); expect(app.client.observation).toBe(obs); expect(worker.posted).toHaveLength(before);
+  app.controller.chooseBuilding("bld.signal_beacon");
+  const buildPoint = unproject(gpuView, ...project(gpuView, 4.8, 4.1));
+  const origin = [Math.floor(buildPoint[0]), Math.floor(buildPoint[1])] as const;
+  renderer.overlay(null, {kind: app.ui.buildMode!, origin});
+  expect(worker.posted.at(-1)).toMatchObject({type: "ARENA_OVERLAY", placement: {kind: "bld.signal_beacon", origin: [4,4]}});
+  app.router.handlePointer({kind: "click", button: "left", x: buildPoint[0], y: buildPoint[1]});
+  const build = transport.sent.at(-1)!;
+  expect(build).toMatchObject({type: "command", fencing_token: 77, command: {type: "place_building", kind: "bld.signal_beacon", origin: [4,4]}});
+  if (build.type !== "command") throw new Error("建造必须走原SDK");
+  transport.deliver({type: "ack", seq: build.seq, tick: obs.tick, error: {code: 0x8001, name: "TestServerRejection", message: "服务器拒绝此落点"}});
+  await app.controller.idle(); expect(app.client.observation).toBe(obs); expect(app.ui.buildMode).toBeNull();
+  renderer.overlay(null, null); expect(worker.posted.at(-1)).toMatchObject({placement: null, drag: null});
   transport.deliver({type: "lease_revoked", faction: 0, by: "other:human"});
   const count = transport.sent.length;
   app.router.handlePointer({kind: "click", button: "right", x: destination[0], y: destination[1]});
@@ -169,4 +181,15 @@ it("超宽高DPI缩放的命中尺度与Rust Camera2D上限512一致", () => {
   const screen = project(wide, 33, 33);
   expect((screen[0] - wide.width / 2) * 3).toBeCloseTo(512);
   expect(unproject(wide, ...screen)[1]).toBeCloseTo(33); renderer.dispose();
+});
+
+it("建造/拖框意图仅发GPU叠层，反向拖动保留世界坐标，取消与卸载清理", () => {
+  const {renderer, worker} = setup();
+  const drag = [[7, 6], [2, 3]] as const;
+  const placement = {kind: "bld.signal_beacon", origin: [4, 4]} as const;
+  renderer.overlay(drag, placement);
+  expect(worker.posted.at(-1)).toEqual({type: "ARENA_OVERLAY", worldId: "0".repeat(32), drag, placement});
+  const n = worker.posted.length; renderer.overlay(drag, placement); expect(worker.posted).toHaveLength(n);
+  renderer.overlay(null, null); expect(worker.posted.at(-1)).toMatchObject({drag: null, placement: null});
+  renderer.dispose(); const done = worker.posted.length; renderer.overlay(drag, placement); expect(worker.posted).toHaveLength(done);
 });

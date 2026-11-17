@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-import type { ArenaClient } from "@rynvek/client";
+import type { ArenaClient, BuildingKind } from "@rynvek/client";
 import { createArenaRenderHost, type WorkerLike } from "@rynvek/engine";
 import { viewScale, type Viewport } from "./arena-view.js";
 
@@ -74,5 +74,17 @@ export function mountArenaRenderer(canvas: HTMLCanvasElement,
     renderer!.host.send({type: "ARENA_SELECTION", worldId: options.worldId, units: ids, building});
     selection = key;
   };
-  return { sync, select, dispose };
+  let overlayKey = "";
+  const overlay = (drag: readonly [readonly [number, number], readonly [number, number]] | null,
+    placement: {kind: BuildingKind; origin: readonly [number, number]} | null) => {
+    if (disposed) return;
+    const key = JSON.stringify([drag, placement]);
+    if (key === overlayKey) return;
+    // 只转发用户意图，不在显示侧判定占地/资源/科技或发送游戏命令。
+    renderer!.host.send({type: "ARENA_OVERLAY", worldId: options.worldId,
+      drag: drag ? [[...drag[0]], [...drag[1]]] : null,
+      placement: placement ? {kind: placement.kind, origin: [...placement.origin]} : null});
+    overlayKey = key;
+  };
+  return { sync, select, overlay, dispose };
 }
