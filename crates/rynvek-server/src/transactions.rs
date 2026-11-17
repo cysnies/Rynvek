@@ -143,6 +143,23 @@ impl std::fmt::Debug for TickCommitter {
 pub const CHECKPOINT_INTERVAL: u64 = 300;
 
 impl TickCommitter {
+    pub async fn ranked_origin(&self) -> ApiResult<rynvek_rts::runtime::RuntimeCheckpoint> {
+        let commits = self.store.list_commits(self.world_id).await?;
+        let first = commits
+            .first()
+            .filter(|c| c.world_revision == 0)
+            .ok_or_else(|| conflict("缺少排位首提交"))?;
+        let cid = first.snapshot_cid.ok_or_else(|| conflict("缺少排位初始快照"))?;
+        let bytes = self.snapshots.get(&Blake3Hash(cid))?;
+        if Blake3Hash::of(&bytes).0 != cid {
+            return Err(conflict("初始CID不一致"));
+        }
+        ArenaRuntime::restore(self.world_id.0, 0, first.state_root_blake3, &bytes)
+            .map_err(ApiError::from)?
+            .checkpoint()
+            .map_err(ApiError::from)
+    }
+
     pub async fn persist(&self, runtime: &ArenaRuntime, record: &TickRecord) -> ApiResult<()> {
         let root = runtime.state_root();
         if runtime.world_id() != self.world_id.0

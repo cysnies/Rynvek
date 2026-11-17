@@ -20,7 +20,7 @@ pub const WINDOW_GROWTH_PER_S: f64 = 25.0;
 pub const MAX_WINDOW: f64 = 600.0;
 
 /// 队列条目
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct QueueEntry {
     pub principal_id: u64,
     pub rating: f64,

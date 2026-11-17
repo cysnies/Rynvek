@@ -18,6 +18,9 @@ use crate::error::ApiError;
 
 #[derive(Debug, Default)]
 struct Tables {
+    ranked_deadlines: BTreeMap<WireUuid, u64>,
+    ranked_tickets: Vec<crate::ranked::QueueTicket>,
+    ranked_hosts: BTreeMap<WireUuid, crate::ranked::HostLease>,
     principals: BTreeMap<u64, PrincipalRow>,
     organizations: BTreeMap<u64, OrgRow>,
     worlds: BTreeMap<WireUuid, WorldRow>,
@@ -50,42 +53,287 @@ fn missing_fk(what: &str) -> ApiError {
 }
 
 impl MemoryStore {
+    pub fn settle_ranked(&self, row: MatchRow, fence: u64, mut parts: Vec<ParticipantRow>) -> StoreResult<()> {
+        let mut t = self.lock();
+        if !t.worlds.get(&row.world_id).is_some_and(|w| w.fencing_token == fence)
+            || t.ranked_hosts
+                .get(&row.world_id)
+                .is_some_and(|h| h.fence != fence || h.expires_at_s <= crate::ids::unix_now_s())
+        {
+            return Err(conflict("终局fence/租约失效"));
+        }
+        let current = t.matches.get(&row.match_id).ok_or_else(|| missing_fk("对局"))?;
+        if current.match_state == super::MatchState::Completed {
+            return if current.replay_cid_blake3 == row.replay_cid_blake3 {
+                Ok(())
+            } else {
+                Err(conflict("已结算不同终局"))
+            };
+        }
+        if current.match_state.is_terminal()
+            || row.game_mode != "PvP_Ranked"
+            || parts.len() != 2
+            || parts.iter().any(|p| {
+                !t.match_participants
+                    .get(&(p.match_id, p.faction_id))
+                    .is_some_and(|old| old.principal_id == p.principal_id && p.match_id == row.match_id)
+            })
+        {
+            return Err(conflict("终局席位无效"));
+        }
+        let old: Vec<_> = parts
+            .iter()
+            .map(|p| {
+                t.glicko2_ratings
+                    .get(&(p.principal_id, p.controller_league))
+                    .cloned()
+                    .unwrap_or_else(|| RatingRow::fresh(p.principal_id, p.controller_league))
+            })
+            .collect();
+        let ratings = crate::ranked::ratings_for(&row, &mut parts, &old);
+        for r in ratings {
+            t.glicko2_ratings.insert((r.principal_id, r.league), r);
+        }
+        for p in parts {
+            t.match_participants.insert((p.match_id, p.faction_id), p);
+        }
+        t.matches.insert(row.match_id, row);
+        Ok(())
+    }
+
+    pub fn ranked_queue(
+        &self,
+        req: crate::ranked::QueueCommand,
+        genesis: Option<crate::ranked::RankedGenesis>,
+    ) -> StoreResult<crate::ranked::QueueDecision> {
+        use crate::ranked::*;
+        let mut t = self.lock();
+        let pid = req.ticket.entry.principal_id;
+        expire_reservations(&mut t, crate::ids::unix_now_s())?;
+        if !t
+            .principals
+            .get(&pid)
+            .is_some_and(|p| p.status == PrincipalStatus::Active)
+        {
+            return Err(missing_fk("有效主体"));
+        }
+        if let Some(row) = t
+            .match_participants
+            .values()
+            .filter(|p| p.principal_id == pid)
+            .filter_map(|p| t.matches.get(&p.match_id))
+            .find(|m| !m.match_state.is_terminal())
+        {
+            if row.game_mode != "PvP_Ranked" {
+                return Err(occupied_error());
+            }
+            return Ok(QueueDecision::Matched(row.match_id));
+        }
+        let mut tickets = t.ranked_tickets.clone();
+        tickets.retain(|q| {
+            t.principals
+                .get(&q.entry.principal_id)
+                .is_some_and(|p| p.status == PrincipalStatus::Active)
+                && !t.match_participants.values().any(|p| {
+                    p.principal_id == q.entry.principal_id
+                        && t.matches.get(&p.match_id).is_some_and(|m| !m.match_state.is_terminal())
+                })
+        });
+        let (mut decision, pair) = decide(&mut tickets, &req, genesis.is_some());
+        if let Some(pair) = pair {
+            let mut g = genesis.expect("有首提交");
+            g.bind(&pair);
+            let org = t.organizations.get(&g.world.org_id).ok_or_else(|| missing_fk("组织"))?;
+            if t.worlds.values().filter(|w| w.org_id == org.org_id).count() >= org.quota_max_worlds.max(0) as usize {
+                return Err(conflict("组织世界配额已满"));
+            }
+            if t.worlds.contains_key(&g.world.world_id) || t.matches.contains_key(&g.row.match_id) {
+                return Err(conflict("预留ID冲突"));
+            }
+            let parts = g.participants(&pair);
+            for p in parts {
+                t.match_participants.insert((p.match_id, p.faction_id), p);
+            }
+            t.ranked_deadlines.insert(
+                g.row.match_id,
+                crate::ids::unix_now_s() + crate::ranked::READY_TIMEOUT_S,
+            );
+            decision = QueueDecision::Matched(g.row.match_id);
+            t.world_commits
+                .insert((g.commit.world_id, g.commit.world_revision), g.commit);
+            t.worlds.insert(g.world.world_id, g.world);
+            t.matches.insert(g.row.match_id, g.row);
+        }
+        if req.action != QueueAction::Read {
+            t.ranked_tickets = tickets;
+        }
+        Ok(decision)
+    }
+    pub fn ranked_host(&self, world: WireUuid) -> StoreResult<Option<crate::ranked::HostLease>> {
+        Ok(self.lock().ranked_hosts.get(&world).cloned())
+    }
+    pub fn claim_ranked_host(&self, c: crate::ranked::HostClaim) -> StoreResult<crate::ranked::HostLease> {
+        use crate::ranked::*;
+        let mut t = self.lock();
+        let now = crate::ids::unix_now_s();
+        let w = t.worlds.get(&c.world).ok_or_else(|| missing_fk("世界"))?;
+        if w.game_mode != "PvP_Ranked"
+            || !t
+                .matches
+                .values()
+                .any(|m| m.world_id == c.world && !m.match_state.is_terminal())
+        {
+            return Err(conflict("排位已终局"));
+        }
+        if let Some(h) = t.ranked_hosts.get(&c.world) {
+            if h.expires_at_s > now && h.fence == w.fencing_token {
+                return Ok(h.clone());
+            }
+        }
+        if w.latest_revision != c.revision || w.fencing_token != c.fence || c.fence >= i64::MAX as u64 {
+            return Err(conflict("恢复基线过期，请刷新"));
+        }
+        let lease = HostLease {
+            world_id: c.world,
+            node: c.node,
+            origin: c.origin,
+            fence: c.fence + 1,
+            expires_at_s: now + HOST_TTL_S,
+        };
+        let w = t.worlds.get_mut(&c.world).unwrap();
+        w.fencing_token = lease.fence;
+        w.lease_holder_node = Some(lease.node.clone());
+        t.ranked_hosts.insert(c.world, lease.clone());
+        Ok(lease)
+    }
+    pub fn renew_ranked_host(&self, world: WireUuid, fence: u64) -> StoreResult<bool> {
+        let mut t = self.lock();
+        let now = crate::ids::unix_now_s();
+        let valid = t.worlds.get(&world).is_some_and(|w| w.fencing_token == fence)
+            && t.matches
+                .values()
+                .any(|m| m.world_id == world && !m.match_state.is_terminal())
+            && t.ranked_hosts
+                .get(&world)
+                .is_some_and(|h| h.fence == fence && h.expires_at_s > now);
+        if valid {
+            t.ranked_hosts.get_mut(&world).unwrap().expires_at_s = now + crate::ranked::HOST_TTL_S;
+        }
+        Ok(valid)
+    }
+    pub fn release_ranked_hosts(&self, node: String) -> StoreResult<()> {
+        let mut t = self.lock();
+        let worlds: Vec<_> = t
+            .ranked_hosts
+            .values()
+            .filter(|h| h.node == node)
+            .map(|h| h.world_id)
+            .collect();
+        for id in worlds {
+            let fence = t.ranked_hosts[&id].fence;
+            if let Some(w) = t.worlds.get_mut(&id) {
+                if w.fencing_token == fence {
+                    w.fencing_token = w.fencing_token.checked_add(1).ok_or_else(|| conflict("fence溢出"))?;
+                    w.lease_holder_node = None;
+                }
+            }
+            t.ranked_hosts.get_mut(&id).unwrap().expires_at_s = 0;
+        }
+        Ok(())
+    }
+
     pub fn custom_live(&self, world: WireUuid, match_id: WireUuid, fence: u64) -> StoreResult<bool> {
-        let t=self.lock();
-        Ok(t.custom_rooms.get(&world).is_some_and(|r|r.active&&!r.closed&&r.match_id==match_id
-            && t.worlds.get(&world).is_some_and(|w|w.fencing_token==fence && t.principals.get(&w.owner_principal_id).is_some_and(|p|p.status==PrincipalStatus::Active))
-            && t.principals.get(&r.guest_id).is_some_and(|p|p.status==PrincipalStatus::Active)))
+        let t = self.lock();
+        Ok(t.custom_rooms.get(&world).is_some_and(|r| {
+            r.active
+                && !r.closed
+                && r.match_id == match_id
+                && t.worlds.get(&world).is_some_and(|w| {
+                    w.fencing_token == fence
+                        && t.principals
+                            .get(&w.owner_principal_id)
+                            .is_some_and(|p| p.status == PrincipalStatus::Active)
+                })
+                && t.principals
+                    .get(&r.guest_id)
+                    .is_some_and(|p| p.status == PrincipalStatus::Active)
+        }))
     }
     pub fn custom_room(&self, world: WireUuid) -> StoreResult<Option<super::CustomRoom>> {
         Ok(self.lock().custom_rooms.get(&world).cloned())
     }
-    pub fn save_custom_room(&self, room: super::CustomRoom, expected: Option<WireUuid>, activation: Option<(MatchRow, Vec<ParticipantRow>)>) -> StoreResult<()> {
-        let mut t=self.lock();
-        if !t.worlds.contains_key(&room.world_id) || !t.principals.contains_key(&room.guest_id) {return Err(missing_fk("自创世界或主体"))}
-        if t.custom_rooms.get(&room.world_id).map(|r|r.version)!=expected {return Err(conflict("房间版本冲突，请刷新"))}
-        let next_fence=t.worlds[&room.world_id].fencing_token.checked_add(1).ok_or_else(||conflict("fence溢出"))?;
-        if let Some((row,parts))=activation {
-            if t.matches.contains_key(&row.match_id) || row.match_id!=room.match_id || row.world_id!=room.world_id || parts.len()!=2
-                || parts.iter().any(|p|p.match_id!=row.match_id || !t.principals.contains_key(&p.principal_id)) {return Err(conflict("冻结完整参赛席位失败"))}
-            for p in parts {t.match_participants.insert((p.match_id,p.faction_id),p);}
-            t.matches.insert(row.match_id,row);
+    pub fn save_custom_room(
+        &self,
+        room: super::CustomRoom,
+        expected: Option<WireUuid>,
+        activation: Option<(MatchRow, Vec<ParticipantRow>)>,
+    ) -> StoreResult<()> {
+        let mut t = self.lock();
+        if !t.worlds.contains_key(&room.world_id) || !t.principals.contains_key(&room.guest_id) {
+            return Err(missing_fk("自创世界或主体"));
+        }
+        if t.custom_rooms.get(&room.world_id).map(|r| r.version) != expected {
+            return Err(conflict("房间版本冲突，请刷新"));
+        }
+        let next_fence = t.worlds[&room.world_id]
+            .fencing_token
+            .checked_add(1)
+            .ok_or_else(|| conflict("fence溢出"))?;
+        if let Some((row, parts)) = activation {
+            for p in &parts {
+                ensure_free(&t, p.principal_id)?;
+            }
+            if t.matches.contains_key(&row.match_id)
+                || row.match_id != room.match_id
+                || row.world_id != room.world_id
+                || parts.len() != 2
+                || parts
+                    .iter()
+                    .any(|p| p.match_id != row.match_id || !t.principals.contains_key(&p.principal_id))
+            {
+                return Err(conflict("冻结完整参赛席位失败"));
+            }
+            for p in parts {
+                t.match_participants.insert((p.match_id, p.faction_id), p);
+            }
+            t.matches.insert(row.match_id, row);
         }
         if room.closed {
-            t.worlds.get_mut(&room.world_id).unwrap().fencing_token=next_fence;
-            if let Some(row)=t.matches.get_mut(&room.match_id) {if !row.match_state.is_terminal(){row.match_state=super::MatchState::Aborted;}}
+            t.worlds.get_mut(&room.world_id).unwrap().fencing_token = next_fence;
+            if let Some(row) = t.matches.get_mut(&room.match_id) {
+                if !row.match_state.is_terminal() {
+                    row.match_state = super::MatchState::Aborted;
+                }
+            }
         }
-        t.custom_rooms.insert(room.world_id,room);Ok(())
+        t.custom_rooms.insert(room.world_id, room);
+        Ok(())
     }
     pub fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<super::ObserverGrant>> {
-        Ok(self.lock().observers.values().filter(|g| g.world_id == world && g.active).cloned().collect())
+        Ok(self
+            .lock()
+            .observers
+            .values()
+            .filter(|g| g.world_id == world && g.active)
+            .cloned()
+            .collect())
     }
     pub fn set_observer_grant(&self, grant: super::ObserverGrant) -> StoreResult<()> {
         let mut t = self.lock();
         if !t.worlds.contains_key(&grant.world_id) || !t.principals.contains_key(&grant.principal_id) {
             return Err(missing_fk("观战世界或身份"));
         }
-        if grant.active && !t.observers.get(&(grant.world_id, grant.principal_id)).is_some_and(|g|g.active)
-            && t.observers.values().filter(|g|g.world_id==grant.world_id && g.active).count()>=32 {
+        if grant.active
+            && !t
+                .observers
+                .get(&(grant.world_id, grant.principal_id))
+                .is_some_and(|g| g.active)
+            && t.observers
+                .values()
+                .filter(|g| g.world_id == grant.world_id && g.active)
+                .count()
+                >= 32
+        {
             return Err(conflict("单世界最多32个有效观战准入"));
         }
         t.observers.insert((grant.world_id, grant.principal_id), grant);
@@ -93,8 +341,12 @@ impl MemoryStore {
     }
     pub fn revoke_observer(&self, world: WireUuid, principal: u64, grant: WireUuid) -> StoreResult<bool> {
         let mut t = self.lock();
-        let Some(row) = t.observers.get_mut(&(world, principal)) else { return Ok(false) };
-        if row.grant_id != grant || !row.active { return Ok(false) }
+        let Some(row) = t.observers.get_mut(&(world, principal)) else {
+            return Ok(false);
+        };
+        if row.grant_id != grant || !row.active {
+            return Ok(false);
+        }
         row.active = false; // 保留原授权对象；操作事实另入审计，不删除历史。
         Ok(true)
     }
@@ -130,6 +382,30 @@ impl MemoryStore {
         p.handle = format!("deleted-{id}");
         p.email_hash = None;
         p.ed25519_pubkey = [0; 32];
+        t.ranked_tickets.retain(|q| q.entry.principal_id != id);
+        let ids: Vec<_> = t
+            .match_participants
+            .values()
+            .filter(|p| p.principal_id == id)
+            .map(|p| p.match_id)
+            .collect();
+        for mid in ids {
+            let world = if let Some(m) = t.matches.get_mut(&mid) {
+                if m.game_mode == "PvP_Ranked" && !m.match_state.is_terminal() {
+                    m.match_state = super::MatchState::Aborted;
+                    Some(m.world_id)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if let Some(world) = world {
+                if let Some(w) = t.worlds.get_mut(&world) {
+                    w.fencing_token = w.fencing_token.checked_add(1).ok_or_else(|| conflict("fence溢出"))?;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -229,7 +505,11 @@ impl MemoryStore {
     pub fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
         let mut t = self.lock();
         let world = t.worlds.get(&commit.world_id).ok_or_else(|| missing_fk("world_id"))?;
-        if world.fencing_token != expected_fencing_token {
+        if world.fencing_token != expected_fencing_token
+            || t.ranked_hosts
+                .get(&commit.world_id)
+                .is_some_and(|h| h.fence != expected_fencing_token || h.expires_at_s <= crate::ids::unix_now_s())
+        {
             return Err(ApiError::new(
                 RynvekErrorCode::StalePartitionFencingToken,
                 "fencing_token 已过期：世界租约已被其他节点接管",
@@ -305,6 +585,9 @@ impl MemoryStore {
 
     pub fn insert_match(&self, row: MatchRow, participants: Vec<ParticipantRow>) -> StoreResult<()> {
         let mut t = self.lock();
+        for p in &participants {
+            ensure_free(&t, p.principal_id)?;
+        }
         if !t.worlds.contains_key(&row.world_id) {
             return Err(missing_fk("world_id"));
         }
@@ -348,10 +631,18 @@ impl MemoryStore {
             .get(&row.match_id)
             .ok_or_else(|| missing_fk("match_id"))?
             .world_id;
-        if fencing_token.is_some_and(|token| !t.worlds.get(&world_id).is_some_and(|w| w.fencing_token == token)) {
+        if fencing_token.is_some_and(|token| {
+            !t.worlds.get(&world_id).is_some_and(|w| w.fencing_token == token)
+                || t.ranked_hosts
+                    .get(&world_id)
+                    .is_some_and(|h| h.fence != token || h.expires_at_s <= crate::ids::unix_now_s())
+        }) {
             return Err(conflict("旧宿主不得覆盖恢复后的对局状态"));
         }
         let match_id = row.match_id;
+        if row.match_state == super::MatchState::Running || row.match_state.is_terminal() {
+            t.ranked_deadlines.remove(&match_id);
+        }
         *t.matches.get_mut(&match_id).expect("已校验") = row;
         Ok(())
     }
@@ -436,5 +727,137 @@ impl MemoryStore {
             .filter(|a| a.principal_id == Some(principal_id))
             .cloned()
             .collect())
+    }
+}
+
+fn ensure_free(t: &Tables, pid: u64) -> StoreResult<()> {
+    if t.ranked_tickets.iter().any(|q| q.entry.principal_id == pid)
+        || t.match_participants
+            .values()
+            .any(|p| p.principal_id == pid && t.matches.get(&p.match_id).is_some_and(|m| !m.match_state.is_terminal()))
+    {
+        return Err(crate::ranked::occupied_error());
+    }
+    Ok(())
+}
+
+fn expire_reservations(t: &mut Tables, now: u64) -> StoreResult<()> {
+    let ids: Vec<_> = t
+        .ranked_deadlines
+        .iter()
+        .filter(|(_, deadline)| **deadline <= now)
+        .map(|(id, _)| *id)
+        .collect();
+    for id in ids {
+        let row = t.matches.get_mut(&id).expect("预留有完整对局");
+        if !row.match_state.is_terminal()
+            && row.match_state != super::MatchState::Running
+            && t.worlds.get(&row.world_id).is_some_and(|w| w.latest_revision == 0)
+        {
+            row.match_state = super::MatchState::Aborted;
+            row.completed_at_unix_s = Some(now);
+            let w = t.worlds.get_mut(&row.world_id).unwrap();
+            w.fencing_token = w.fencing_token.checked_add(1).ok_or_else(|| conflict("fence溢出"))?;
+        }
+        t.ranked_deadlines.remove(&id);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod ranked_time_tests {
+    use super::*;
+    use crate::ranked::*;
+    #[tokio::test]
+    async fn expired_ranked_host_cannot_renew_commit_or_finalize_and_unseated_reservation_expires() {
+        let memory = MemoryStore::new();
+        for id in [1, 2] {
+            memory
+                .insert_principal(PrincipalRow {
+                    principal_id: id,
+                    handle: format!("clock-{id}"),
+                    kind: rynvek_security::PrincipalKindCode::Human,
+                    ed25519_pubkey: [id as u8; 32],
+                    email_hash: None,
+                    status: PrincipalStatus::Active,
+                })
+                .unwrap();
+            memory
+                .insert_org(OrgRow {
+                    org_id: id,
+                    slug: format!("clock-{id}"),
+                    display_name: "test".into(),
+                    owner_principal_id: id,
+                    quota_max_worlds: 10,
+                    quota_storage_bytes: 1000000,
+                })
+                .unwrap();
+        }
+        let app = crate::app::AppState::new(
+            crate::app::AppConfig::default(),
+            super::super::Store::Memory(memory.clone()),
+            rynvek_security::ServerSigningKey::from_seed(1, [9; 32]),
+        )
+        .unwrap();
+        let req = |pid, action| QueueCommand {
+            action,
+            ticket: QueueTicket {
+                league: League::Human,
+                ruleset: crate::app::arena_ruleset_hash(),
+                entry: crate::matchmaking::QueueEntry {
+                    principal_id: pid,
+                    rating: 1500.0,
+                    deviation: 100.0,
+                    enqueued_at_s: crate::ids::unix_now_s(),
+                },
+            },
+        };
+        memory.ranked_queue(req(1, QueueAction::Join), None).unwrap();
+        memory.ranked_queue(req(2, QueueAction::Join), None).unwrap();
+        let g = app.prepare_ranked_genesis().unwrap();
+        let world = g.world.world_id;
+        let QueueDecision::Matched(id) = memory.ranked_queue(req(2, QueueAction::Poll), Some(g)).unwrap() else {
+            panic!("配对")
+        };
+        let w = memory.get_world(world).unwrap().unwrap();
+        let lease = memory
+            .claim_ranked_host(HostClaim {
+                world,
+                revision: 0,
+                fence: w.fencing_token,
+                node: "old".into(),
+                origin: "http://localhost".into(),
+            })
+            .unwrap();
+        // 只改测试夹具中的时钟边界；不是等30秒长稳，更不是PG真实时钟试验。
+        memory.lock().ranked_hosts.get_mut(&world).unwrap().expires_at_s = crate::ids::unix_now_s() - 1;
+        assert!(!memory.renew_ranked_host(world, lease.fence).unwrap());
+        let mut row = memory.get_match(id).unwrap().unwrap().0;
+        row.match_state = super::super::MatchState::Aborted;
+        assert!(memory.update_match_fenced(row, lease.fence).is_err());
+        let mut commit = memory.list_commits(world).unwrap()[0].clone();
+        commit.parent_revision = Some(0);
+        commit.world_revision = 1;
+        assert!(memory.append_commit(commit, lease.fence).is_err());
+        let new = memory
+            .claim_ranked_host(HostClaim {
+                world,
+                revision: 0,
+                fence: lease.fence,
+                node: "new".into(),
+                origin: "http://localhost:2".into(),
+            })
+            .unwrap();
+        assert!(new.fence > lease.fence);
+        memory.lock().ranked_deadlines.insert(id, crate::ids::unix_now_s() - 1);
+        assert!(matches!(
+            memory.ranked_queue(req(1, QueueAction::Read), None).unwrap(),
+            QueueDecision::Idle
+        ));
+        assert_eq!(
+            memory.get_match(id).unwrap().unwrap().0.match_state,
+            super::super::MatchState::Aborted
+        );
+        assert!(!memory.renew_ranked_host(world, new.fence).unwrap());
     }
 }

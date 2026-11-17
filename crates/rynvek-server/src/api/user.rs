@@ -116,7 +116,6 @@ pub async fn delete_account(State(app): State<AppState>, headers: HeaderMap) -> 
     let pid = subject.principal_id;
     app.store().tombstone_principal(pid).await?;
     app.tokens_mut().revoke_principal(pid);
-    app.matchmaker().cancel(pid);
     let now = unix_now_s();
     app.audit(
         Some(pid),

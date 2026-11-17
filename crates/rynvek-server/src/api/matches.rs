@@ -15,9 +15,9 @@ use serde::Deserialize;
 
 use crate::app::{AppState, arena_ruleset_hash, league_resource};
 use crate::error::{ApiError, ApiResult};
-use crate::host::MatchHandle;
 use crate::ids::{hex, parse_hex, unix_now_s};
 use crate::matchmaking::QueueEntry;
+use crate::ranked::{QueueAction, QueueCommand, QueueDecision, QueueTicket};
 use crate::store::{MatchRow, MatchState};
 
 #[derive(Deserialize)]
@@ -34,20 +34,61 @@ struct QueueRequest {
     poll: bool,
 }
 
-fn matched_json(app: &AppState, h: &MatchHandle, principal_id: u64) -> serde_json::Value {
-    let status = h.status();
-    serde_json::json!({
-        "status": "matched",
-        "principal_id": principal_id.to_string(),
-        "mode": h.mode,
-        "tick": status.tick,
-        "faction": h.seats.get(&principal_id),
-        "match_id": h.match_id.to_string(),
-        "world_id": h.world_id.to_string(),
-        "league": h.league,
-        "match_state": status.state,
-        "stream": app.stream_urls(&h.world_id),
-    })
+async fn matched_json(app: &AppState, id: WireUuid, pid: u64) -> ApiResult<serde_json::Value> {
+    let (row, parts) = app
+        .store()
+        .get_match(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("对局不存在"))?;
+    let part = parts
+        .iter()
+        .find(|p| p.principal_id == pid)
+        .ok_or_else(|| ApiError::forbidden("不是本人席位"))?;
+    let world = app
+        .store()
+        .get_world(row.world_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("世界不存在"))?;
+    let lease = app.store().ranked_host(row.world_id).await?;
+    let live = lease
+        .as_ref()
+        .filter(|h| h.fence == world.fencing_token && h.expires_at_s > unix_now_s());
+    let local = app.registry().get(&id).filter(|h| {
+        !h.status().state.is_terminal()
+            && live.is_some_and(|l| h.fencing_token == Some(l.fence) && l.node == app.inner.ranked_node)
+    });
+    let status = local.as_ref().map(|h| h.status());
+    Ok(
+        serde_json::json!({"status":"matched","principal_id":pid.to_string(),"mode":row.game_mode,
+        "tick":status.as_ref().map_or(world.latest_tick,|s|s.tick),"faction":part.faction_id,
+        "match_id":id.to_string(),"world_id":row.world_id.to_string(),"league":part.controller_league,
+        "match_state":status.as_ref().map_or(row.match_state,|s|s.state),
+        "host":{"state":if local.is_some(){"local"}else if live.is_some_and(|h|h.node!=app.inner.ranked_node){"remote"}else{"recoverable"},
+            "origin":live.map(|h|h.origin.as_str()),"expires_at_s":live.map(|h|h.expires_at_s)},
+        "stream":if local.is_some(){app.stream_urls(&row.world_id)}else{serde_json::Value::Null}}),
+    )
+}
+fn command(
+    pid: u64,
+    league: League,
+    ruleset: [u8; 32],
+    action: QueueAction,
+    rating: f64,
+    deviation: f64,
+) -> QueueCommand {
+    QueueCommand {
+        action,
+        ticket: QueueTicket {
+            league,
+            ruleset,
+            entry: QueueEntry {
+                principal_id: pid,
+                rating,
+                deviation,
+                enqueued_at_s: unix_now_s(),
+            },
+        },
+    }
 }
 
 /// `10 POST /api/v1/matches/queue`（`match.play`）
@@ -83,81 +124,100 @@ async fn queue_inner(State(app): State<AppState>, headers: HeaderMap, body: Byte
         ));
     }
     let pid = subject.principal_id;
-    let _gate = app.inner.matchmaking_gate.lock().await;
-    if let Some(h) = app.registry().active_for(pid) {
-        // 取消不能撤销已经配对的对局；明确回报实际席位而非假离队。
-        return Ok(Json(matched_json(&app, &h, pid)).into_response());
-    }
-    if req.cancel {
-        let removed = app.matchmaker().cancel(pid);
-        return Ok(Json(serde_json::json!({
-            "status": if removed { "cancelled" } else { "not_queued" }
-        }))
-        .into_response());
-    }
-    if req.poll && !app.matchmaker().is_queued(pid) {
-        return Ok(Json(serde_json::json!({"status":"not_queued"})).into_response());
+    if req.cancel && req.poll {
+        return Err(ApiError::bad_request("cancel/poll不可同时指定"));
     }
     let rating = app.store().get_rating(pid, league).await?;
-    let now = unix_now_s();
-    let (position, pairings) = {
-        let mut mm = app.matchmaker();
-        let pos = mm.enqueue(
-            (league, ruleset),
-            QueueEntry {
-                principal_id: pid,
-                rating: rating.rating,
-                deviation: rating.deviation,
-                enqueued_at_s: now,
-            },
-        );
-        (pos, mm.pair(now))
+    let action = if req.cancel {
+        QueueAction::Cancel
+    } else if req.poll {
+        QueueAction::Poll
+    } else {
+        QueueAction::Join
     };
-    for p in &pairings {
-        if let Err(e) = app.start_match(p).await {
-            // 建局失败：把双方放回队列，避免丢人
-            let mut mm = app.matchmaker();
-            for q in p.players {
-                mm.enqueue((p.league, p.ruleset_hash), q);
+    let req = command(pid, league, ruleset, action, rating.rating, rating.deviation);
+    let mut decision = app.store().ranked_queue(req.clone(), None).await?;
+    if matches!(decision, QueueDecision::Prepare) {
+        let genesis = app.prepare_ranked_genesis()?;
+        let mut poll = req.clone();
+        poll.action = QueueAction::Poll;
+        decision = app.store().ranked_queue(poll, Some(genesis)).await?;
+    }
+    let (status, body) = match decision {
+        QueueDecision::Matched(id) => {
+            if action != QueueAction::Cancel {
+                app.ensure_ranked_host(id).await?;
             }
-            return Err(e);
+            (StatusCode::OK, matched_json(&app, id, pid).await?)
         }
-    }
-    if let Some(h) = app.registry().active_for(pid) {
-        return Ok(Json(matched_json(&app, &h, pid)).into_response());
-    }
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(serde_json::json!({
-            "status": "queued",
-            "league": league,
-            "position": position,
-            "rating": rating.rating,
-        })),
-    )
-        .into_response())
+        QueueDecision::Queued { position, rating } => (
+            StatusCode::ACCEPTED,
+            serde_json::json!({"status":"queued","league":league,"position":position,"rating":rating}),
+        ),
+        QueueDecision::Cancelled => (StatusCode::OK, serde_json::json!({"status":"cancelled"})),
+        QueueDecision::Idle => (StatusCode::OK, serde_json::json!({"status":"not_queued"})),
+        QueueDecision::Prepare => return Err(ApiError::internal("配对首提交未完成，请刷新队列")),
+    };
+    Ok((status, Json(body)).into_response())
 }
 
-/// 已认证的人类排位入口上下文；只读，不入队、不分配身份、不创建对手。
-/// 可刷新后找回当前席位；队列与活动宿主仍为本节点进程内状态。
+/// 持久席位/队列只读发现：不入队、不认领宿主、不创造对手。
 pub async fn queue_context(State(app): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
     let subject = app.require(&headers, CapabilityScope::MatchPlay).await?;
     authorize(&subject, CapabilityScope::MatchPlay, &league_resource(League::Human)).map_err(ApiError::from)?;
-    let _gate = app.inner.matchmaking_gate.lock().await;
-    let active = app.registry().active_for(subject.principal_id);
-    let queued = app.matchmaker().is_queued(subject.principal_id);
+    let decision = app
+        .store()
+        .ranked_queue(
+            command(
+                subject.principal_id,
+                League::Human,
+                arena_ruleset_hash(),
+                QueueAction::Read,
+                0.0,
+                0.0,
+            ),
+            None,
+        )
+        .await?;
+    let active = if let QueueDecision::Matched(id) = decision {
+        Some(matched_json(&app, id, subject.principal_id).await?)
+    } else {
+        None
+    };
+    Ok(([(header::CACHE_CONTROL,"private, no-store"),(header::VARY,"Authorization")],Json(serde_json::json!({
+        "principal_id":subject.principal_id.to_string(),"league":"human","ruleset_hash":hex(&arena_ruleset_hash()),
+        "status":if active.is_some(){"matched"}else if matches!(decision,QueueDecision::Queued {..}){"queued"}else{"idle"},"active":active
+    }))).into_response())
+}
+/// 已配对主体显式连接/恢复；远端健康宿主只回报地址，不跨origin转发任何凭据。
+pub async fn connect(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
+    let subject = app.require(&headers, CapabilityScope::MatchPlay).await?;
+    let id = parse_match_id(&id)?;
+    let (row, parts) = app
+        .store()
+        .get_match(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("对局不存在"))?;
+    let p = parts
+        .iter()
+        .find(|p| p.principal_id == subject.principal_id)
+        .ok_or_else(|| ApiError::forbidden("只能连接本人席位"))?;
+    if row.game_mode != "PvP_Ranked" {
+        return Err(ApiError::forbidden("仅用于排位，私有自创走原准入"));
+    }
+    authorize(
+        &subject,
+        CapabilityScope::MatchPlay,
+        &league_resource(p.controller_league),
+    )
+    .map_err(ApiError::from)?;
+    app.ensure_ranked_host(id).await?;
     Ok((
         [
             (header::CACHE_CONTROL, "private, no-store"),
             (header::VARY, "Authorization"),
         ],
-        Json(serde_json::json!({
-            "principal_id": subject.principal_id.to_string(),
-            "league": "human",
-            "ruleset_hash": hex(&arena_ruleset_hash()),
-            "status": if active.is_some() { "matched" } else if queued { "queued" } else { "idle" },
-            "active": active.as_ref().map(|h| matched_json(&app, h, subject.principal_id)),
-        })),
+        Json(matched_json(&app, id, subject.principal_id).await?),
     )
         .into_response())
 }
@@ -175,7 +235,22 @@ pub async fn get_match(State(app): State<AppState>, headers: HeaderMap, Path(id)
         .await?
         .ok_or_else(|| ApiError::not_found("对局不存在"))?;
     access(&app, &headers, &row, false).await?;
-    let live = app.registry().get(&match_id).map(|h| h.status());
+    let candidate = app.registry().get(&match_id);
+    let live = if row.game_mode == "PvP_Ranked" {
+        let world = app.store().get_world(row.world_id).await?;
+        let lease = app.store().ranked_host(row.world_id).await?;
+        candidate
+            .filter(|h| {
+                lease.as_ref().is_some_and(|l| {
+                    l.expires_at_s > unix_now_s()
+                        && Some(l.fence) == h.fencing_token
+                        && world.as_ref().is_some_and(|w| w.fencing_token == l.fence)
+                })
+            })
+            .map(|h| h.status())
+    } else {
+        candidate.map(|h| h.status())
+    };
     // 持久化可能略滞后于宿主：进行中对局以宿主实时状态为准
     let (state, tick) = match live {
         Some(s) if !row.match_state.is_terminal() => (s.state, s.tick),

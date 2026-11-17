@@ -50,6 +50,11 @@ impl RunningServer {
     /// 优雅停机：停止接入新连接并等待监听任务退出
     pub async fn shutdown(self) {
         let _ = self.shutdown.send(true);
+        let _ = self
+            .state
+            .store()
+            .release_ranked_hosts(self.state.inner.ranked_node.clone())
+            .await;
         for t in self.tasks {
             let _ = t.await;
         }

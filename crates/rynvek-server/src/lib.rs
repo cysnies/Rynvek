@@ -26,6 +26,7 @@ pub mod ids;
 pub mod local;
 pub mod matchmaking;
 pub mod patch;
+pub mod ranked;
 pub mod replay;
 pub mod server;
 pub mod source;

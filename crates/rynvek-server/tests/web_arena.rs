@@ -753,7 +753,10 @@ async fn ranked_entry_discovers_real_identity_cancels_and_reconnects_authorized_
             .unwrap()["status"],
         "not_queued"
     );
-    assert_eq!(server.state.matchmaker().len(), 0);
+    assert_eq!(
+        client::get(&path, Some(&alice.token)).await.unwrap().json().unwrap()["status"],
+        "idle"
+    );
     assert_eq!(
         client::send_json("POST", &path, Some(&alice.token), &req)
             .await
@@ -856,6 +859,27 @@ async fn ranked_entry_discovers_real_identity_cancels_and_reconnects_authorized_
     host.advance(1).await.unwrap();
     assert_eq!(recv_type(&mut again, "ack").await["ack"]["type"], "surrendered");
     host.wait_for(|s| s.state.is_terminal()).await;
+    // 持久发现必须等待真实终局事务，不把本地Actor关闭当成已经释放持久席位。
+    tokio::time::timeout(std::time::Duration::from_secs(8), async {
+        loop {
+            if server
+                .state
+                .store()
+                .get_match(host.match_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .0
+                .match_state
+                .is_terminal()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(
         client::send_json("POST", &path, Some(&alice.token), &poll)
             .await
@@ -864,132 +888,642 @@ async fn ranked_entry_discovers_real_identity_cancels_and_reconnects_authorized_
             .unwrap()["status"],
         "not_queued"
     );
-    assert_eq!(server.state.matchmaker().len(), 0);
+    assert_eq!(
+        client::get(&path, Some(&alice.token)).await.unwrap().json().unwrap()["status"],
+        "idle"
+    );
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn private_observer_admission_revoke_leave_and_node_recovery() {
-    use rynvek_server::{AppConfig, ServerConfig, host::TickDriver, store::Store, client};
-    let dir=tempfile::tempdir().unwrap();let store=Store::memory();
-    let config=AppConfig{public_base_url:String::new(),blob_dir:Some(dir.path().to_owned()),tick_driver:TickDriver::Manual,lobby_timeout:None,..Default::default()};
-    let start=|app|rynvek_server::start(ServerConfig{http_addr:"127.0.0.1:0".parse().unwrap(),webtransport_addr:None,app,store:store.clone(),signer:server_key()});
-    let server=start(config.clone()).await.unwrap();let base=server.base_url();
-    let owner=register(&base,"observer-owner","human",101).await;
-    let viewer=register(&base,"observer-viewer","human",102).await;
-    let outsider=register(&base,"observer-outsider","human",103).await;
-    let created=authored_post(&server,"/api/v1/worlds",&owner.token,json!({"title":"私有阵营观战","template":"arena_pve","visibility":"Private"})).await.json().unwrap();
-    let world=created["world_id"].as_str().unwrap();let id=world.parse().unwrap();
-    let arena_path=format!("/api/v1/worlds/{world}/arena");let grants_path=format!("/api/v1/worlds/{world}/observers");let observe_path=format!("/api/v1/worlds/{world}/observation");
-    let get=|server:&rynvek_server::RunningServer,path:&str,token:&str|{let url=format!("{}{path}",server.base_url());let token=token.to_owned();async move {client::get(&url,Some(&token)).await.unwrap()}};
-    assert_eq!(get(&server,&observe_path,&viewer.token).await.status,404);
-    let run=authored_post(&server,&arena_path,&owner.token,json!({})).await.json().unwrap();
-    let host=server.state.registry().by_world(&id).unwrap();let before=host.status();
-    assert_eq!(authored_post(&server,&grants_path,&outsider.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":0})).await.status,404);
-    assert_eq!(authored_post(&server,&grants_path,&owner.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":1})).await.status,403);
-    let granted=authored_post(&server,&grants_path,&owner.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":0})).await;
-    assert_eq!(granted.status,200,"{:?}",granted.json());let grant=granted.json().unwrap();
-    let first=get(&server,&format!("{observe_path}?faction=1"),&viewer.token).await;
-    assert_eq!(first.status,200);assert_eq!(first.header("cache-control"),Some("private, no-store"));assert_eq!(first.header("vary"),Some("Authorization"));
-    let frame=first.json().unwrap();assert_eq!(get(&server,&observe_path,&outsider.token).await.status,404);assert_eq!(frame["role"],"observer");assert_eq!(frame["faction"],0);assert_eq!(frame["messages"]["observation"]["observation"]["faction"],0);
-    assert_eq!(frame["messages"]["welcome"]["tools"],json!([]));
-    assert_eq!(host.status(),before,"观战不能入座、取得租约或自动开局");
-    for suffix in ["authoring","commits","observers"] {assert_eq!(get(&server,&format!("/api/v1/worlds/{world}/{suffix}"),&viewer.token).await.status,404);}
-    assert_eq!(authored_post(&server,&arena_path,&viewer.token,json!({})).await.status,404);
-    assert_eq!(get(&server,&format!("/api/v1/matches/{}/replay",run["match_id"].as_str().unwrap()),&viewer.token).await.status,404);
-    let mut bad=json_connect(&server,&run,&viewer.token,0).await;recv_type(&mut bad,"error").await;drop(bad);
-    assert_eq!(host.status().connections,0,"观战准入绝不转成WS控制席位");
-    let mut ws=json_connect(&server,&run,&owner.token,0).await;recv_type(&mut ws,"welcome").await;recv_type(&mut ws,"observation").await;
-    host.advance(3).await.unwrap();let row=server.state.store().get_world(id).await.unwrap().unwrap();
-    let runtime=rynvek_server::transactions::restore_committed(server.state.store(),server.state.inner.world_snapshots.as_ref(),&row).await.unwrap();
-    let projected=get(&server,&observe_path,&viewer.token).await.json().unwrap();
-    assert_eq!(projected["messages"]["observation"]["observation"],json!(runtime.world().observe(rynvek_rts::FactionId(0)).unwrap()),"必须是原fog投影，不是全世界快照");
-    let cid=server.state.store().list_commits(id).await.unwrap()[0].snapshot_cid.unwrap();
-    assert_eq!(get(&server,&format!("/api/v1/hub/blobs/{}",rynvek_server::ids::hex(&cid)),&viewer.token).await.status,404);
-    assert!(projected.get("state_root").is_none());assert!(projected.get("snapshot_cid").is_none());
+    use rynvek_server::{AppConfig, ServerConfig, client, host::TickDriver, store::Store};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let config = AppConfig {
+        public_base_url: String::new(),
+        blob_dir: Some(dir.path().to_owned()),
+        tick_driver: TickDriver::Manual,
+        lobby_timeout: None,
+        ..Default::default()
+    };
+    let start = |app| {
+        rynvek_server::start(ServerConfig {
+            http_addr: "127.0.0.1:0".parse().unwrap(),
+            webtransport_addr: None,
+            app,
+            store: store.clone(),
+            signer: server_key(),
+        })
+    };
+    let server = start(config.clone()).await.unwrap();
+    let base = server.base_url();
+    let owner = register(&base, "observer-owner", "human", 101).await;
+    let viewer = register(&base, "observer-viewer", "human", 102).await;
+    let outsider = register(&base, "observer-outsider", "human", 103).await;
+    let created = authored_post(
+        &server,
+        "/api/v1/worlds",
+        &owner.token,
+        json!({"title":"私有阵营观战","template":"arena_pve","visibility":"Private"}),
+    )
+    .await
+    .json()
+    .unwrap();
+    let world = created["world_id"].as_str().unwrap();
+    let id = world.parse().unwrap();
+    let arena_path = format!("/api/v1/worlds/{world}/arena");
+    let grants_path = format!("/api/v1/worlds/{world}/observers");
+    let observe_path = format!("/api/v1/worlds/{world}/observation");
+    let get = |server: &rynvek_server::RunningServer, path: &str, token: &str| {
+        let url = format!("{}{path}", server.base_url());
+        let token = token.to_owned();
+        async move { client::get(&url, Some(&token)).await.unwrap() }
+    };
+    assert_eq!(get(&server, &observe_path, &viewer.token).await.status, 404);
+    let run = authored_post(&server, &arena_path, &owner.token, json!({}))
+        .await
+        .json()
+        .unwrap();
+    let host = server.state.registry().by_world(&id).unwrap();
+    let before = host.status();
+    assert_eq!(
+        authored_post(
+            &server,
+            &grants_path,
+            &outsider.token,
+            json!({"principal_id":viewer.principal_id.to_string(),"faction":0})
+        )
+        .await
+        .status,
+        404
+    );
+    assert_eq!(
+        authored_post(
+            &server,
+            &grants_path,
+            &owner.token,
+            json!({"principal_id":viewer.principal_id.to_string(),"faction":1})
+        )
+        .await
+        .status,
+        403
+    );
+    let granted = authored_post(
+        &server,
+        &grants_path,
+        &owner.token,
+        json!({"principal_id":viewer.principal_id.to_string(),"faction":0}),
+    )
+    .await;
+    assert_eq!(granted.status, 200, "{:?}", granted.json());
+    let grant = granted.json().unwrap();
+    let first = get(&server, &format!("{observe_path}?faction=1"), &viewer.token).await;
+    assert_eq!(first.status, 200);
+    assert_eq!(first.header("cache-control"), Some("private, no-store"));
+    assert_eq!(first.header("vary"), Some("Authorization"));
+    let frame = first.json().unwrap();
+    assert_eq!(get(&server, &observe_path, &outsider.token).await.status, 404);
+    assert_eq!(frame["role"], "observer");
+    assert_eq!(frame["faction"], 0);
+    assert_eq!(frame["messages"]["observation"]["observation"]["faction"], 0);
+    assert_eq!(frame["messages"]["welcome"]["tools"], json!([]));
+    assert_eq!(host.status(), before, "观战不能入座、取得租约或自动开局");
+    for suffix in ["authoring", "commits", "observers"] {
+        assert_eq!(
+            get(&server, &format!("/api/v1/worlds/{world}/{suffix}"), &viewer.token)
+                .await
+                .status,
+            404
+        );
+    }
+    assert_eq!(
+        authored_post(&server, &arena_path, &viewer.token, json!({}))
+            .await
+            .status,
+        404
+    );
+    assert_eq!(
+        get(
+            &server,
+            &format!("/api/v1/matches/{}/replay", run["match_id"].as_str().unwrap()),
+            &viewer.token
+        )
+        .await
+        .status,
+        404
+    );
+    let mut bad = json_connect(&server, &run, &viewer.token, 0).await;
+    recv_type(&mut bad, "error").await;
+    drop(bad);
+    assert_eq!(host.status().connections, 0, "观战准入绝不转成WS控制席位");
+    let mut ws = json_connect(&server, &run, &owner.token, 0).await;
+    recv_type(&mut ws, "welcome").await;
+    recv_type(&mut ws, "observation").await;
+    host.advance(3).await.unwrap();
+    let row = server.state.store().get_world(id).await.unwrap().unwrap();
+    let runtime = rynvek_server::transactions::restore_committed(
+        server.state.store(),
+        server.state.inner.world_snapshots.as_ref(),
+        &row,
+    )
+    .await
+    .unwrap();
+    let projected = get(&server, &observe_path, &viewer.token).await.json().unwrap();
+    assert_eq!(
+        projected["messages"]["observation"]["observation"],
+        json!(runtime.world().observe(rynvek_rts::FactionId(0)).unwrap()),
+        "必须是原fog投影，不是全世界快照"
+    );
+    let cid = server.state.store().list_commits(id).await.unwrap()[0]
+        .snapshot_cid
+        .unwrap();
+    assert_eq!(
+        get(
+            &server,
+            &format!("/api/v1/hub/blobs/{}", rynvek_server::ids::hex(&cid)),
+            &viewer.token
+        )
+        .await
+        .status,
+        404
+    );
+    assert!(projected.get("state_root").is_none());
+    assert!(projected.get("snapshot_cid").is_none());
     // 下方通过新节点同磁盘CAS读取原Actor；不声称真实PG/断电验收。
-    let resumed=start(config).await.unwrap();
-    assert_eq!(get(&resumed,&observe_path,&viewer.token).await.status,409,"观战不能自行恢复宿主");
-    let persistent=get(&resumed,&grants_path,&owner.token).await.json().unwrap();assert_eq!(persistent["grants"][0],grant);
-    let recovered=authored_post(&resumed,&arena_path,&owner.token,json!({})).await.json().unwrap();assert_eq!(recovered["match_id"],run["match_id"]);assert_eq!(recovered["recovered"],true);
-    let second=get(&resumed,&observe_path,&viewer.token).await.json().unwrap();assert_eq!(second["grant_id"],grant["grant_id"]);assert_eq!(second["messages"]["welcome"]["tick"],3);
-    let revoke=format!("{}{grants_path}/{}",resumed.base_url(),viewer.principal_id);
-    assert_eq!(client::send_json("DELETE",&revoke,Some(&owner.token),&json!({"grant_id":grant["grant_id"]})).await.unwrap().status,200);
-    assert_eq!(get(&resumed,&observe_path,&viewer.token).await.status,404);
-    let newer=authored_post(&resumed,&grants_path,&owner.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":0})).await.json().unwrap();assert_ne!(newer["grant_id"],grant["grant_id"]);
-    assert_eq!(client::send_json("DELETE",&revoke,Some(&owner.token),&json!({"grant_id":grant["grant_id"]})).await.unwrap().status,409,"旧版本撤销不得删掉新授权");
-    let leave=format!("{}{observe_path}",resumed.base_url());assert_eq!(client::send_json("DELETE",&leave,Some(&viewer.token),&json!({"grant_id":newer["grant_id"]})).await.unwrap().status,200);
-    assert_eq!(get(&resumed,&observe_path,&viewer.token).await.status,404);
+    let resumed = start(config).await.unwrap();
+    assert_eq!(
+        get(&resumed, &observe_path, &viewer.token).await.status,
+        409,
+        "观战不能自行恢复宿主"
+    );
+    let persistent = get(&resumed, &grants_path, &owner.token).await.json().unwrap();
+    assert_eq!(persistent["grants"][0], grant);
+    let recovered = authored_post(&resumed, &arena_path, &owner.token, json!({}))
+        .await
+        .json()
+        .unwrap();
+    assert_eq!(recovered["match_id"], run["match_id"]);
+    assert_eq!(recovered["recovered"], true);
+    let second = get(&resumed, &observe_path, &viewer.token).await.json().unwrap();
+    assert_eq!(second["grant_id"], grant["grant_id"]);
+    assert_eq!(second["messages"]["welcome"]["tick"], 3);
+    let revoke = format!("{}{grants_path}/{}", resumed.base_url(), viewer.principal_id);
+    assert_eq!(
+        client::send_json(
+            "DELETE",
+            &revoke,
+            Some(&owner.token),
+            &json!({"grant_id":grant["grant_id"]})
+        )
+        .await
+        .unwrap()
+        .status,
+        200
+    );
+    assert_eq!(get(&resumed, &observe_path, &viewer.token).await.status, 404);
+    let newer = authored_post(
+        &resumed,
+        &grants_path,
+        &owner.token,
+        json!({"principal_id":viewer.principal_id.to_string(),"faction":0}),
+    )
+    .await
+    .json()
+    .unwrap();
+    assert_ne!(newer["grant_id"], grant["grant_id"]);
+    assert_eq!(
+        client::send_json(
+            "DELETE",
+            &revoke,
+            Some(&owner.token),
+            &json!({"grant_id":grant["grant_id"]})
+        )
+        .await
+        .unwrap()
+        .status,
+        409,
+        "旧版本撤销不得删掉新授权"
+    );
+    let leave = format!("{}{observe_path}", resumed.base_url());
+    assert_eq!(
+        client::send_json(
+            "DELETE",
+            &leave,
+            Some(&viewer.token),
+            &json!({"grant_id":newer["grant_id"]})
+        )
+        .await
+        .unwrap()
+        .status,
+        200
+    );
+    assert_eq!(get(&resumed, &observe_path, &viewer.token).await.status, 404);
     assert!(resumed.state.store().observer_grants(id).await.unwrap().is_empty());
-    drop(runtime);drop(ws);host.abort("观战定向测试完成").await;resumed.state.registry().by_world(&id).unwrap().abort("观战恢复完成").await;
-    server.shutdown().await;resumed.shutdown().await;
+    drop(runtime);
+    drop(ws);
+    host.abort("观战定向测试完成").await;
+    resumed
+        .state
+        .registry()
+        .by_world(&id)
+        .unwrap()
+        .abort("观战恢复完成")
+        .await;
+    server.shutdown().await;
+    resumed.shutdown().await;
 }
 
 #[tokio::test]
 async fn private_custom_pvp_full_seats_fog_reconnect_recovery_and_leave() {
-    use rynvek_server::{AppConfig,ServerConfig,host::TickDriver,store::{Store,MatchState},client};
-    let dir=tempfile::tempdir().unwrap();let store=Store::memory();let config=AppConfig{public_base_url:String::new(),blob_dir:Some(dir.path().to_owned()),tick_driver:TickDriver::Manual,lobby_timeout:None,..Default::default()};
-    let start=|app|rynvek_server::start(ServerConfig{http_addr:"127.0.0.1:0".parse().unwrap(),webtransport_addr:None,app,store:store.clone(),signer:server_key()});
-    let server=start(config.clone()).await.unwrap();let base=server.base_url();let owner=register(&base,"custom-owner","human",111).await;let guest=register(&base,"custom-player","human",112).await;let viewer=register(&base,"custom-outsider","human",113).await;
-    let created=authored_post(&server,"/api/v1/worlds",&owner.token,json!({"title":"真实私有双人","template":"arena_duel","visibility":"Private","map_seed":42})).await.json().unwrap();let world=created["world_id"].as_str().unwrap();let id=world.parse().unwrap();let path=format!("/api/v1/worlds/{world}/multiplayer");
-    let get=|s:&rynvek_server::RunningServer,p:&str,t:&str|{let url=format!("{}{p}",s.base_url());let token=t.to_owned();async move{client::get(&url,Some(&token)).await.unwrap()}};
-    assert_eq!(get(&server,&path,&guest.token).await.status,404);
-    let invitation=authored_post(&server,&path,&owner.token,json!({"action":"invite","guest_id":guest.principal_id.to_string()})).await;assert_eq!(invitation.status,200,"{:?}",invitation.json());let invitation=invitation.json().unwrap();
-    assert_eq!(get(&server,&path,&viewer.token).await.status,404);
-    assert_eq!(authored_post(&server,&path,&guest.token,json!({"action":"connect","version":invitation["version"]})).await.status,409);
-    assert_eq!(authored_post(&server,&path,&owner.token,json!({"action":"accept","version":invitation["version"]})).await.status,403);
-    let accepted=authored_post(&server,&path,&guest.token,json!({"action":"accept","version":invitation["version"]})).await.json().unwrap();assert_eq!(accepted["status"],"ready");
-    assert_eq!(authored_post(&server,&path,&owner.token,json!({"action":"connect","version":invitation["version"]})).await.status,409);
-    let opened=authored_post(&server,&path,&owner.token,json!({"action":"connect","version":accepted["version"]})).await;assert_eq!(opened.status,200,"{:?}",opened.json());let opened=opened.json().unwrap();let run=opened["seat"].clone();assert_eq!(run["custom"],true);
-    let host=server.state.registry().by_world(&id).unwrap();assert_eq!(host.seats.len(),2);
-    let mut a=json_connect(&server,&run,&owner.token,0).await;recv_type(&mut a,"welcome").await;let own_obs=recv_type(&mut a,"observation").await["observation"].clone();assert_eq!(host.status().state,MatchState::Lobby);
-    send_json(&mut a,json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;recv_type(&mut a,"lease").await;
-    let mut b=json_connect(&server,&run,&guest.token,1).await;let welcome=recv_type(&mut b,"welcome").await;assert_eq!(welcome["faction"],1);let obs=recv_type(&mut b,"observation").await["observation"].clone();assert_eq!(host.status().state,MatchState::Running);
-    assert!(own_obs["units"].as_array().unwrap().iter().all(|u|u["faction"]==0));assert!(obs["units"].as_array().unwrap().iter().all(|u|u["faction"]==1),"远处对手必须经过原fog裁剪");
-    let mut wrong=json_connect(&server,&run,&guest.token,0).await;recv_type(&mut wrong,"error").await;drop(wrong);assert_eq!(host.status().connections,2);
-    for suffix in ["authoring","commits","observers"]{assert_eq!(get(&server,&format!("/api/v1/worlds/{world}/{suffix}"),&guest.token).await.status,404);}
-    let observer_path=format!("/api/v1/worlds/{world}/observers");
-    assert_eq!(authored_post(&server,&observer_path,&owner.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":0})).await.status,200);
-    let projection=get(&server,&format!("/api/v1/worlds/{world}/observation"),&viewer.token).await.json().unwrap();assert_eq!(projection["faction"],0);
-    let mut forbidden=json_connect(&server,&run,&viewer.token,0).await;recv_type(&mut forbidden,"error").await;drop(forbidden);
-    send_json(&mut b,json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;let lease=recv_type(&mut b,"lease").await["lease"]["fencing_token"].clone();let unit=obs["units"][0]["id"].clone();let pos=obs["units"][0]["position"].clone();
+    use rynvek_server::{
+        AppConfig, ServerConfig, client,
+        host::TickDriver,
+        store::{MatchState, Store},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let config = AppConfig {
+        public_base_url: String::new(),
+        blob_dir: Some(dir.path().to_owned()),
+        tick_driver: TickDriver::Manual,
+        lobby_timeout: None,
+        ..Default::default()
+    };
+    let start = |app| {
+        rynvek_server::start(ServerConfig {
+            http_addr: "127.0.0.1:0".parse().unwrap(),
+            webtransport_addr: None,
+            app,
+            store: store.clone(),
+            signer: server_key(),
+        })
+    };
+    let server = start(config.clone()).await.unwrap();
+    let base = server.base_url();
+    let owner = register(&base, "custom-owner", "human", 111).await;
+    let guest = register(&base, "custom-player", "human", 112).await;
+    let viewer = register(&base, "custom-outsider", "human", 113).await;
+    let created = authored_post(
+        &server,
+        "/api/v1/worlds",
+        &owner.token,
+        json!({"title":"真实私有双人","template":"arena_duel","visibility":"Private","map_seed":42}),
+    )
+    .await
+    .json()
+    .unwrap();
+    let world = created["world_id"].as_str().unwrap();
+    let id = world.parse().unwrap();
+    let path = format!("/api/v1/worlds/{world}/multiplayer");
+    let get = |s: &rynvek_server::RunningServer, p: &str, t: &str| {
+        let url = format!("{}{p}", s.base_url());
+        let token = t.to_owned();
+        async move { client::get(&url, Some(&token)).await.unwrap() }
+    };
+    assert_eq!(get(&server, &path, &guest.token).await.status, 404);
+    let invitation = authored_post(
+        &server,
+        &path,
+        &owner.token,
+        json!({"action":"invite","guest_id":guest.principal_id.to_string()}),
+    )
+    .await;
+    assert_eq!(invitation.status, 200, "{:?}", invitation.json());
+    let invitation = invitation.json().unwrap();
+    assert_eq!(get(&server, &path, &viewer.token).await.status, 404);
+    assert_eq!(
+        authored_post(
+            &server,
+            &path,
+            &guest.token,
+            json!({"action":"connect","version":invitation["version"]})
+        )
+        .await
+        .status,
+        409
+    );
+    assert_eq!(
+        authored_post(
+            &server,
+            &path,
+            &owner.token,
+            json!({"action":"accept","version":invitation["version"]})
+        )
+        .await
+        .status,
+        403
+    );
+    let accepted = authored_post(
+        &server,
+        &path,
+        &guest.token,
+        json!({"action":"accept","version":invitation["version"]}),
+    )
+    .await
+    .json()
+    .unwrap();
+    assert_eq!(accepted["status"], "ready");
+    assert_eq!(
+        authored_post(
+            &server,
+            &path,
+            &owner.token,
+            json!({"action":"connect","version":invitation["version"]})
+        )
+        .await
+        .status,
+        409
+    );
+    let opened = authored_post(
+        &server,
+        &path,
+        &owner.token,
+        json!({"action":"connect","version":accepted["version"]}),
+    )
+    .await;
+    assert_eq!(opened.status, 200, "{:?}", opened.json());
+    let opened = opened.json().unwrap();
+    let run = opened["seat"].clone();
+    assert_eq!(run["custom"], true);
+    let host = server.state.registry().by_world(&id).unwrap();
+    assert_eq!(host.seats.len(), 2);
+    let mut a = json_connect(&server, &run, &owner.token, 0).await;
+    recv_type(&mut a, "welcome").await;
+    let own_obs = recv_type(&mut a, "observation").await["observation"].clone();
+    assert_eq!(host.status().state, MatchState::Lobby);
+    send_json(&mut a, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
+    recv_type(&mut a, "lease").await;
+    let mut b = json_connect(&server, &run, &guest.token, 1).await;
+    let welcome = recv_type(&mut b, "welcome").await;
+    assert_eq!(welcome["faction"], 1);
+    let obs = recv_type(&mut b, "observation").await["observation"].clone();
+    assert_eq!(host.status().state, MatchState::Running);
+    assert!(own_obs["units"].as_array().unwrap().iter().all(|u| u["faction"] == 0));
+    assert!(
+        obs["units"].as_array().unwrap().iter().all(|u| u["faction"] == 1),
+        "远处对手必须经过原fog裁剪"
+    );
+    let mut wrong = json_connect(&server, &run, &guest.token, 0).await;
+    recv_type(&mut wrong, "error").await;
+    drop(wrong);
+    assert_eq!(host.status().connections, 2);
+    for suffix in ["authoring", "commits", "observers"] {
+        assert_eq!(
+            get(&server, &format!("/api/v1/worlds/{world}/{suffix}"), &guest.token)
+                .await
+                .status,
+            404
+        );
+    }
+    let observer_path = format!("/api/v1/worlds/{world}/observers");
+    assert_eq!(
+        authored_post(
+            &server,
+            &observer_path,
+            &owner.token,
+            json!({"principal_id":viewer.principal_id.to_string(),"faction":0})
+        )
+        .await
+        .status,
+        200
+    );
+    let projection = get(&server, &format!("/api/v1/worlds/{world}/observation"), &viewer.token)
+        .await
+        .json()
+        .unwrap();
+    assert_eq!(projection["faction"], 0);
+    let mut forbidden = json_connect(&server, &run, &viewer.token, 0).await;
+    recv_type(&mut forbidden, "error").await;
+    drop(forbidden);
+    send_json(&mut b, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
+    let lease = recv_type(&mut b, "lease").await["lease"]["fencing_token"].clone();
+    let unit = obs["units"][0]["id"].clone();
+    let pos = obs["units"][0]["position"].clone();
     send_json(&mut b,json!({"type":"command","seq":2,"fencing_token":lease,"command":{"type":"issue_order","units":{"kind":"ids","value":[unit]},"order":"Move","target":[pos[0].as_i64().unwrap()+(2i64<<32),pos[1]]}})).await;
-    host.wait_for(|s|s.pending_inputs==1).await;host.advance(3).await.unwrap();let ack=recv_type(&mut b,"ack").await;assert!(ack["error"].is_null());let before=server.state.store().get_world(id).await.unwrap().unwrap();
-    let resumed=start(config).await.unwrap();let recovered=authored_post(&resumed,&path,&guest.token,json!({"action":"connect","version":opened["version"]})).await;assert_eq!(recovered.status,200,"{:?}",recovered.json());let recovered=recovered.json().unwrap();assert_eq!(recovered["seat"]["match_id"],run["match_id"]);assert_eq!(recovered["seat"]["faction"],1);assert_eq!(recovered["seat"]["recovered"],true);
-    let current=resumed.state.registry().by_world(&id).unwrap();assert_eq!(current.status().state_root,before.latest_state_root);assert_eq!(current.status().tick,3);assert!(host.advance(1).await.is_err());
-    let mut a2=json_connect(&resumed,&run,&owner.token,0).await;recv_type(&mut a2,"welcome").await;recv_type(&mut a2,"observation").await;
-    let mut b2=json_connect(&resumed,&run,&guest.token,1).await;recv_type(&mut b2,"welcome").await;let continued=recv_type(&mut b2,"observation").await;assert_ne!(continued["observation"]["units"][0]["position"],pos,"原Actor命令必须改变实际位置并从WAL恢复");
-    send_json(&mut b2,json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;let fence=recv_type(&mut b2,"lease").await["lease"]["fencing_token"].clone();
-    send_json(&mut b2,json!({"type":"command","seq":2,"fencing_token":fence,"command":{"type":"issue_order","units":{"kind":"ids","value":[unit]},"order":"Move","target":pos}})).await;current.wait_for(|s|s.pending_inputs==1).await;
-    let root=current.status().state_root;let closed=authored_post(&resumed,&path,&guest.token,json!({"action":"close","version":opened["version"]})).await;assert_eq!(closed.status,200,"{:?}",closed.json());assert_eq!(closed.json().unwrap()["status"],"closed");assert_eq!(current.status().state,MatchState::Aborted);assert_eq!(current.status().connections,0);assert_eq!(current.status().pending_inputs,0);assert_eq!(current.status().state_root,root);assert!(current.advance(1).await.is_err());
-    let mut denied=json_connect(&resumed,&run,&guest.token,1).await;recv_type(&mut denied,"error").await;drop(denied);
-    let row=resumed.state.store().get_match(run["match_id"].as_str().unwrap().parse().unwrap()).await.unwrap().unwrap().0;assert_eq!(row.match_state,MatchState::Aborted);assert!(row.winner_faction_id.is_none());
-    assert_eq!(resumed.state.store().get_rating(guest.principal_id,rynvek_security::League::Human).await.unwrap().matches_played,0);
-    drop(a);drop(b);drop(a2);drop(b2);server.shutdown().await;resumed.shutdown().await;
+    host.wait_for(|s| s.pending_inputs == 1).await;
+    host.advance(3).await.unwrap();
+    let ack = recv_type(&mut b, "ack").await;
+    assert!(ack["error"].is_null());
+    let before = server.state.store().get_world(id).await.unwrap().unwrap();
+    let resumed = start(config).await.unwrap();
+    let recovered = authored_post(
+        &resumed,
+        &path,
+        &guest.token,
+        json!({"action":"connect","version":opened["version"]}),
+    )
+    .await;
+    assert_eq!(recovered.status, 200, "{:?}", recovered.json());
+    let recovered = recovered.json().unwrap();
+    assert_eq!(recovered["seat"]["match_id"], run["match_id"]);
+    assert_eq!(recovered["seat"]["faction"], 1);
+    assert_eq!(recovered["seat"]["recovered"], true);
+    let current = resumed.state.registry().by_world(&id).unwrap();
+    assert_eq!(current.status().state_root, before.latest_state_root);
+    assert_eq!(current.status().tick, 3);
+    assert!(host.advance(1).await.is_err());
+    let mut a2 = json_connect(&resumed, &run, &owner.token, 0).await;
+    recv_type(&mut a2, "welcome").await;
+    recv_type(&mut a2, "observation").await;
+    let mut b2 = json_connect(&resumed, &run, &guest.token, 1).await;
+    recv_type(&mut b2, "welcome").await;
+    let continued = recv_type(&mut b2, "observation").await;
+    assert_ne!(
+        continued["observation"]["units"][0]["position"], pos,
+        "原Actor命令必须改变实际位置并从WAL恢复"
+    );
+    send_json(&mut b2, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
+    let fence = recv_type(&mut b2, "lease").await["lease"]["fencing_token"].clone();
+    send_json(&mut b2,json!({"type":"command","seq":2,"fencing_token":fence,"command":{"type":"issue_order","units":{"kind":"ids","value":[unit]},"order":"Move","target":pos}})).await;
+    current.wait_for(|s| s.pending_inputs == 1).await;
+    let root = current.status().state_root;
+    let closed = authored_post(
+        &resumed,
+        &path,
+        &guest.token,
+        json!({"action":"close","version":opened["version"]}),
+    )
+    .await;
+    assert_eq!(closed.status, 200, "{:?}", closed.json());
+    assert_eq!(closed.json().unwrap()["status"], "closed");
+    assert_eq!(current.status().state, MatchState::Aborted);
+    assert_eq!(current.status().connections, 0);
+    assert_eq!(current.status().pending_inputs, 0);
+    assert_eq!(current.status().state_root, root);
+    assert!(current.advance(1).await.is_err());
+    let mut denied = json_connect(&resumed, &run, &guest.token, 1).await;
+    recv_type(&mut denied, "error").await;
+    drop(denied);
+    let row = resumed
+        .state
+        .store()
+        .get_match(run["match_id"].as_str().unwrap().parse().unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    assert_eq!(row.match_state, MatchState::Aborted);
+    assert!(row.winner_faction_id.is_none());
+    assert_eq!(
+        resumed
+            .state
+            .store()
+            .get_rating(guest.principal_id, rynvek_security::League::Human)
+            .await
+            .unwrap()
+            .matches_played,
+        0
+    );
+    drop(a);
+    drop(b);
+    drop(a2);
+    drop(b2);
+    server.shutdown().await;
+    resumed.shutdown().await;
 }
 
 #[tokio::test]
 async fn custom_owner_cancel_pending_and_completed_match_remains_private_unrated() {
-    use rynvek_server::{client,store::MatchState};
-    let server=start_server(false).await;let base=server.base_url();let owner=register(&base,"custom-end-owner","human",121).await;let guest=register(&base,"custom-end-player","human",122).await;
-    for cancel_before_accept in [true,false] {
-        let made=authored_post(&server,"/api/v1/worlds",&owner.token,json!({"title":"私有席位生命周期","template":"arena_duel","visibility":"Private"})).await.json().unwrap();let world=made["world_id"].as_str().unwrap();let id=world.parse().unwrap();let path=format!("/api/v1/worlds/{world}/multiplayer");
-        let invited=authored_post(&server,&path,&owner.token,json!({"action":"invite","guest_id":guest.principal_id.to_string()})).await.json().unwrap();
+    use rynvek_server::{client, store::MatchState};
+    let server = start_server(false).await;
+    let base = server.base_url();
+    let owner = register(&base, "custom-end-owner", "human", 121).await;
+    let guest = register(&base, "custom-end-player", "human", 122).await;
+    for cancel_before_accept in [true, false] {
+        let made = authored_post(
+            &server,
+            "/api/v1/worlds",
+            &owner.token,
+            json!({"title":"私有席位生命周期","template":"arena_duel","visibility":"Private"}),
+        )
+        .await
+        .json()
+        .unwrap();
+        let world = made["world_id"].as_str().unwrap();
+        let id = world.parse().unwrap();
+        let path = format!("/api/v1/worlds/{world}/multiplayer");
+        let invited = authored_post(
+            &server,
+            &path,
+            &owner.token,
+            json!({"action":"invite","guest_id":guest.principal_id.to_string()}),
+        )
+        .await
+        .json()
+        .unwrap();
         if cancel_before_accept {
-            let before=server.state.store().get_world(id).await.unwrap().unwrap();
-            let ended=authored_post(&server,&path,&owner.token,json!({"action":"close","version":invited["version"]})).await.json().unwrap();assert_eq!(ended["status"],"closed");
-            assert_eq!(authored_post(&server,&path,&guest.token,json!({"action":"accept","version":invited["version"]})).await.status,409);
-            assert!(server.state.registry().by_world(&id).is_none());let after=server.state.store().get_world(id).await.unwrap().unwrap();assert_eq!(before.latest_state_root,after.latest_state_root);assert_eq!(before.fencing_token+1,after.fencing_token);
+            let before = server.state.store().get_world(id).await.unwrap().unwrap();
+            let ended = authored_post(
+                &server,
+                &path,
+                &owner.token,
+                json!({"action":"close","version":invited["version"]}),
+            )
+            .await
+            .json()
+            .unwrap();
+            assert_eq!(ended["status"], "closed");
+            assert_eq!(
+                authored_post(
+                    &server,
+                    &path,
+                    &guest.token,
+                    json!({"action":"accept","version":invited["version"]})
+                )
+                .await
+                .status,
+                409
+            );
+            assert!(server.state.registry().by_world(&id).is_none());
+            let after = server.state.store().get_world(id).await.unwrap().unwrap();
+            assert_eq!(before.latest_state_root, after.latest_state_root);
+            assert_eq!(before.fencing_token + 1, after.fencing_token);
             continue;
         }
-        let accepted=authored_post(&server,&path,&guest.token,json!({"action":"accept","version":invited["version"]})).await.json().unwrap();let opened=authored_post(&server,&path,&owner.token,json!({"action":"connect","version":accepted["version"]})).await.json().unwrap();let run=opened["seat"].clone();let host=server.state.registry().by_world(&id).unwrap();
-        let mut a=json_connect(&server,&run,&owner.token,0).await;recv_type(&mut a,"welcome").await;recv_type(&mut a,"observation").await;let mut b=json_connect(&server,&run,&guest.token,1).await;recv_type(&mut b,"welcome").await;recv_type(&mut b,"observation").await;
-        send_json(&mut a,json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;let fence=recv_type(&mut a,"lease").await["lease"]["fencing_token"].clone();send_json(&mut a,json!({"type":"command","seq":2,"fencing_token":fence,"command":{"type":"surrender"}})).await;host.wait_for(|s|s.pending_inputs==1).await;host.advance(1).await.unwrap();recv_type(&mut a,"ack").await;
-        let match_id=run["match_id"].as_str().unwrap();let completed=archived(&server,match_id.parse().unwrap()).await;assert_eq!(completed.match_state,MatchState::Completed);assert_eq!(completed.winner_faction_id,Some(1));
-        assert_eq!(server.state.store().get_rating(owner.principal_id,rynvek_security::League::Human).await.unwrap().matches_played,0);assert_eq!(server.state.store().get_rating(guest.principal_id,rynvek_security::League::Human).await.unwrap().matches_played,0);
-        let replay=format!("{base}/api/v1/matches/{match_id}/replay");assert_eq!(client::get(&replay,Some(&guest.token)).await.unwrap().status,404);assert_eq!(client::get(&replay,Some(&owner.token)).await.unwrap().status,200);
-        let closed=authored_post(&server,&path,&owner.token,json!({"action":"close","version":opened["version"]})).await;assert_eq!(closed.status,200);let preserved=server.state.store().get_match(match_id.parse().unwrap()).await.unwrap().unwrap().0;assert_eq!(preserved.match_state,MatchState::Completed);assert_eq!(preserved.winner_faction_id,Some(1));
-        drop(a);drop(b);
+        let accepted = authored_post(
+            &server,
+            &path,
+            &guest.token,
+            json!({"action":"accept","version":invited["version"]}),
+        )
+        .await
+        .json()
+        .unwrap();
+        let opened = authored_post(
+            &server,
+            &path,
+            &owner.token,
+            json!({"action":"connect","version":accepted["version"]}),
+        )
+        .await
+        .json()
+        .unwrap();
+        let run = opened["seat"].clone();
+        let host = server.state.registry().by_world(&id).unwrap();
+        let mut a = json_connect(&server, &run, &owner.token, 0).await;
+        recv_type(&mut a, "welcome").await;
+        recv_type(&mut a, "observation").await;
+        let mut b = json_connect(&server, &run, &guest.token, 1).await;
+        recv_type(&mut b, "welcome").await;
+        recv_type(&mut b, "observation").await;
+        send_json(&mut a, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
+        let fence = recv_type(&mut a, "lease").await["lease"]["fencing_token"].clone();
+        send_json(
+            &mut a,
+            json!({"type":"command","seq":2,"fencing_token":fence,"command":{"type":"surrender"}}),
+        )
+        .await;
+        host.wait_for(|s| s.pending_inputs == 1).await;
+        host.advance(1).await.unwrap();
+        recv_type(&mut a, "ack").await;
+        let match_id = run["match_id"].as_str().unwrap();
+        let completed = archived(&server, match_id.parse().unwrap()).await;
+        assert_eq!(completed.match_state, MatchState::Completed);
+        assert_eq!(completed.winner_faction_id, Some(1));
+        assert_eq!(
+            server
+                .state
+                .store()
+                .get_rating(owner.principal_id, rynvek_security::League::Human)
+                .await
+                .unwrap()
+                .matches_played,
+            0
+        );
+        assert_eq!(
+            server
+                .state
+                .store()
+                .get_rating(guest.principal_id, rynvek_security::League::Human)
+                .await
+                .unwrap()
+                .matches_played,
+            0
+        );
+        let replay = format!("{base}/api/v1/matches/{match_id}/replay");
+        assert_eq!(client::get(&replay, Some(&guest.token)).await.unwrap().status, 404);
+        assert_eq!(client::get(&replay, Some(&owner.token)).await.unwrap().status, 200);
+        let closed = authored_post(
+            &server,
+            &path,
+            &owner.token,
+            json!({"action":"close","version":opened["version"]}),
+        )
+        .await;
+        assert_eq!(closed.status, 200);
+        let preserved = server
+            .state
+            .store()
+            .get_match(match_id.parse().unwrap())
+            .await
+            .unwrap()
+            .unwrap()
+            .0;
+        assert_eq!(preserved.match_state, MatchState::Completed);
+        assert_eq!(preserved.winner_faction_id, Some(1));
+        drop(a);
+        drop(b);
     }
     server.shutdown().await;
 }

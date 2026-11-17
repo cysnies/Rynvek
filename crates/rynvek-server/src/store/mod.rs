@@ -307,6 +307,30 @@ macro_rules! dispatch {
 }
 
 impl Store {
+    pub async fn settle_ranked(&self, row: MatchRow, fence: u64, parts: Vec<ParticipantRow>) -> StoreResult<()> {
+        dispatch!(self.settle_ranked(row, fence, parts))
+    }
+
+    pub async fn ranked_queue(
+        &self,
+        request: crate::ranked::QueueCommand,
+        genesis: Option<crate::ranked::RankedGenesis>,
+    ) -> StoreResult<crate::ranked::QueueDecision> {
+        dispatch!(self.ranked_queue(request, genesis))
+    }
+    pub async fn ranked_host(&self, world: WireUuid) -> StoreResult<Option<crate::ranked::HostLease>> {
+        dispatch!(self.ranked_host(world))
+    }
+    pub async fn claim_ranked_host(&self, claim: crate::ranked::HostClaim) -> StoreResult<crate::ranked::HostLease> {
+        dispatch!(self.claim_ranked_host(claim))
+    }
+    pub async fn renew_ranked_host(&self, world: WireUuid, fence: u64) -> StoreResult<bool> {
+        dispatch!(self.renew_ranked_host(world, fence))
+    }
+    pub async fn release_ranked_hosts(&self, node: String) -> StoreResult<()> {
+        dispatch!(self.release_ranked_hosts(node))
+    }
+
     pub fn memory() -> Self {
         Self::Memory(MemoryStore::new())
     }
@@ -372,7 +396,12 @@ impl Store {
         dispatch!(self.custom_room(world))
     }
     /// CAS房间；首次激活同时插入完整MatchRow/participants，关闭同时轮换世界fence。
-    pub async fn save_custom_room(&self, room: CustomRoom, expected: Option<WireUuid>, activation: Option<(MatchRow, Vec<ParticipantRow>)>) -> StoreResult<()> {
+    pub async fn save_custom_room(
+        &self,
+        room: CustomRoom,
+        expected: Option<WireUuid>,
+        activation: Option<(MatchRow, Vec<ParticipantRow>)>,
+    ) -> StoreResult<()> {
         dispatch!(self.save_custom_room(room, expected, activation))
     }
 

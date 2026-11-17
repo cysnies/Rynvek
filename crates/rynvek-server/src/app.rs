@@ -21,14 +21,10 @@ use rynvek_storage::{BlobStore, FsBlobStore, MemoryBlobStore};
 use tokio::sync::mpsc;
 
 use crate::error::{ApiError, ApiResult};
-use crate::glicko2;
 use crate::host::{self, HostConfig, HostEvent, MatchHandle, MatchSpec, SeatSpec, TickDriver};
 use crate::ids::{new_uuid_v7, unix_now_s};
-use crate::matchmaking::{Matchmaker, Pairing};
 use crate::source::SourceOffer;
-use crate::store::{
-    CommitRow, MatchRow, MatchState, NewAudit, OrgRow, ParticipantRow, PrincipalRow, RatingRow, Store, WorldRow,
-};
+use crate::store::{CommitRow, MatchRow, MatchState, NewAudit, OrgRow, ParticipantRow, PrincipalRow, Store, WorldRow};
 
 /// 本服务器唯一支持的规则集标识；`ruleset_hash` = BLAKE3(此字符串)
 pub const ARENA_RULESET_ID: &str = "rynvek.ruleset.arena-duel@1";
@@ -161,7 +157,7 @@ pub struct AppInner {
     pub world_snapshots: Arc<dyn BlobStore>,
     pub tokens: RwLock<TokenAuthority>,
     pub challenges: Mutex<AuthChallenges>,
-    pub matchmaker: Mutex<Matchmaker>,
+    pub ranked_node: String,
     /// 配对到宿主发布期间串行化查询/取消，避免报告虚假离队或重复建局。
     pub matchmaking_gate: tokio::sync::Mutex<()>,
     pub registry: Mutex<MatchRegistry>,
@@ -224,7 +220,7 @@ impl AppState {
                 },
                 tokens: RwLock::new(TokenAuthority::new(signer.clone())),
                 challenges: Mutex::new(AuthChallenges::new().map_err(ApiError::from)?),
-                matchmaker: Mutex::new(Matchmaker::new()),
+                ranked_node: new_uuid_v7().to_string(),
                 matchmaking_gate: tokio::sync::Mutex::new(()),
                 registry: Mutex::new(MatchRegistry::default()),
                 experiments: Mutex::new(BTreeMap::new()),
@@ -258,10 +254,6 @@ impl AppState {
 
     pub fn registry(&self) -> std::sync::MutexGuard<'_, MatchRegistry> {
         lock(&self.inner.registry)
-    }
-
-    pub fn matchmaker(&self) -> std::sync::MutexGuard<'_, Matchmaker> {
-        lock(&self.inner.matchmaker)
     }
 
     pub fn challenges(&self) -> std::sync::MutexGuard<'_, AuthChallenges> {
@@ -437,129 +429,158 @@ impl AppState {
     }
 
     /// 为一次配对创建世界、对局记录并启动宿主
-    pub async fn start_match(&self, pairing: &Pairing) -> ApiResult<MatchHandle> {
+    /// 首提交只写私有CAS；配对事务成功前不会产生可发现的世界/对局/席位。
+    pub fn prepare_ranked_genesis(&self) -> ApiResult<crate::ranked::RankedGenesis> {
         let match_id = new_uuid_v7();
         let world_id = new_uuid_v7();
         let map_seed = self
             .inner
             .config
             .fixed_map_seed
-            .unwrap_or_else(|| u64::from_le_bytes(match_id.0[8..16].try_into().expect("8 字节")) >> 1);
+            .unwrap_or_else(|| u64::from_le_bytes(match_id.0[8..16].try_into().expect("8字节")) >> 1);
         let config = MatchConfig::duel(map_seed);
-        let runtime = rynvek_rts::ArenaRuntime::new(world_id.0, ArenaWorld::new(config.clone()));
+        let runtime = rynvek_rts::ArenaRuntime::new(world_id.0, ArenaWorld::new(config));
         let checkpoint = runtime.checkpoint().map_err(ApiError::from)?;
         let initial_root = checkpoint.state_root;
         let snapshot = self.inner.world_snapshots.put(&checkpoint.bytes)?;
-        let owner = pairing.players[0].principal_id;
-        let store = self.store();
-        let mut seats = Vec::new();
-        for (faction, q) in pairing.players.iter().enumerate() {
-            let p = store
-                .get_principal(q.principal_id)
-                .await?
-                .ok_or_else(|| ApiError::not_found("参赛者不存在"))?;
-            seats.push(SeatSpec {
-                faction: faction as u8,
-                principal_id: q.principal_id,
-                kind: p.kind,
-            });
-        }
         let empty_journal = self.inner.world_snapshots.put(b"")?;
-        store
-            .insert_world(
-                WorldRow {
-                    world_id,
-                    org_id: owner,
-                    owner_principal_id: owner,
-                    title: format!("Ranked {} {}", pairing.league.as_str(), match_id),
-                    world_profile: "RTS_Standard".to_owned(),
-                    game_mode: "PvP_Ranked".to_owned(),
-                    execution_profile: "D0_Strict".to_owned(),
-                    visibility: rynvek_security::Visibility::Public,
-                    parent_world_id: None,
-                    forked_at_revision: None,
-                    latest_tick: 0,
-                    latest_revision: 0,
-                    latest_state_root: initial_root,
-                    lease_holder_node: Some("rynvek-server".to_owned()),
-                    fencing_token: 1,
-                },
-                CommitRow {
-                    world_id,
-                    world_revision: 0,
-                    tick: 0,
-                    parent_revision: None,
-                    state_root_blake3: initial_root,
-                    journal_segment_cid: empty_journal.0,
-                    snapshot_cid: Some(snapshot.0),
-                },
-            )
-            .await?;
-        store
-            .insert_match(
-                MatchRow {
-                    match_id,
-                    world_id,
-                    game_mode: "PvP_Ranked".to_owned(),
-                    ruleset_blake3: pairing.ruleset_hash,
-                    map_seed,
-                    match_state: MatchState::Created,
-                    winner_faction_id: None,
-                    win_reason: None,
-                    total_ticks: 0,
-                    replay_cid_blake3: None,
-                    started_at_unix_s: None,
-                    completed_at_unix_s: None,
-                },
-                seats
-                    .iter()
-                    .map(|s| ParticipantRow {
-                        match_id,
-                        faction_id: i16::from(s.faction),
-                        principal_id: s.principal_id,
-                        controller_league: pairing.league,
-                        final_score: 0,
-                        rating_delta: None,
-                    })
-                    .collect(),
-            )
-            .await?;
-        let handle = host::spawn_runtime(
-            MatchSpec {
-                custom: false,
+        let owner = 0;
+        Ok(crate::ranked::RankedGenesis {
+            world: WorldRow {
+                world_id,
+                org_id: owner,
+                owner_principal_id: owner,
+                title: format!("Ranked {} {}", "human", match_id),
+                world_profile: "RTS_Standard".to_owned(),
+                game_mode: "PvP_Ranked".to_owned(),
+                execution_profile: "D0_Strict".to_owned(),
+                visibility: rynvek_security::Visibility::Public,
+                parent_world_id: None,
+                forked_at_revision: None,
+                latest_tick: 0,
+                latest_revision: 0,
+                latest_state_root: initial_root,
+                lease_holder_node: None,
+                fencing_token: 1,
+            },
+            commit: CommitRow {
+                world_id,
+                world_revision: 0,
+                tick: 0,
+                parent_revision: None,
+                state_root_blake3: initial_root,
+                journal_segment_cid: empty_journal.0,
+                snapshot_cid: Some(snapshot.0),
+            },
+            row: MatchRow {
                 match_id,
                 world_id,
-                league: pairing.league,
-                ruleset_hash: pairing.ruleset_hash,
-                config,
-                seats: seats.clone(),
+                game_mode: "PvP_Ranked".to_owned(),
+                ruleset_blake3: arena_ruleset_hash(),
+                map_seed,
+                match_state: MatchState::Created,
+                winner_faction_id: None,
+                win_reason: None,
+                total_ticks: 0,
+                replay_cid_blake3: None,
+                started_at_unix_s: None,
+                completed_at_unix_s: None,
             },
+        })
+    }
+    /// 恢复已提交的真实排位预留；健康的远端宿主只返回发现结果，绝不抢占或转发Bearer。
+    pub async fn ensure_ranked_host(&self, id: WireUuid) -> ApiResult<crate::ranked::HostLease> {
+        let _gate = self.inner.matchmaking_gate.lock().await;
+        let (row, parts) = self
+            .store()
+            .get_match(id)
+            .await?
+            .ok_or_else(|| ApiError::not_found("对局不存在"))?;
+        if row.game_mode != "PvP_Ranked"
+            || row.match_state.is_terminal()
+            || parts.len() != 2
+            || row.ruleset_blake3 != arena_ruleset_hash()
+        {
+            return Err(crate::transactions::conflict("不是可恢复的当前规则排位"));
+        }
+        let world = self
+            .store()
+            .get_world(row.world_id)
+            .await?
+            .ok_or_else(|| ApiError::not_found("世界不存在"))?;
+        let existing = self.store().ranked_host(world.world_id).await?;
+        if let Some(ref lease) = existing {
+            if lease.fence == world.fencing_token && lease.expires_at_s > unix_now_s() {
+                let active = self
+                    .registry()
+                    .get(&id)
+                    .is_some_and(|h| !h.status().state.is_terminal() && h.fencing_token == Some(lease.fence));
+                if lease.node != self.inner.ranked_node || active {
+                    return Ok(lease.clone());
+                }
+            }
+        }
+        let mut seats = Vec::new();
+        for p in &parts {
+            let principal = self
+                .store()
+                .get_principal(p.principal_id)
+                .await?
+                .ok_or_else(|| ApiError::forbidden("主体不存在"))?;
+            if principal.status != rynvek_security::PrincipalStatus::Active {
+                return Err(ApiError::forbidden("参赛主体已失效"));
+            }
+            seats.push(SeatSpec {
+                principal_id: p.principal_id,
+                faction: u8::try_from(p.faction_id).map_err(|_| ApiError::internal("阵营无效"))?,
+                kind: principal.kind,
+            });
+        }
+        let runtime = crate::api::worlds::restore_runtime(self, &world).await?;
+        if runtime.config != MatchConfig::duel(row.map_seed) {
+            return Err(crate::transactions::conflict("恢复的真实配置不匹配"));
+        }
+        let lease = self
+            .store()
+            .claim_ranked_host(crate::ranked::HostClaim {
+                world: world.world_id,
+                revision: world.latest_revision,
+                fence: world.fencing_token,
+                node: self.inner.ranked_node.clone(),
+                origin: self.config().public_base_url.clone(),
+            })
+            .await?;
+        if lease.node != self.inner.ranked_node {
+            return Ok(lease);
+        }
+        let spec = MatchSpec {
+            custom: false,
+            match_id: id,
+            world_id: world.world_id,
+            league: parts[0].controller_league,
+            ruleset_hash: row.ruleset_blake3,
+            config: runtime.config.clone(),
+            seats: seats.clone(),
+        };
+        let handle = host::spawn_runtime(
+            spec,
             self.host_config(),
             self.inner.events.clone(),
             runtime,
             Some(crate::transactions::TickCommitter {
                 store: self.store().clone(),
                 snapshots: self.inner.world_snapshots.clone(),
-                world_id,
-                fencing_token: 1,
+                world_id: world.world_id,
+                fencing_token: lease.fence,
             }),
         )?;
-        {
-            let mut reg = self.registry();
-            reg.by_match.insert(match_id, handle.clone());
-            reg.by_world.insert(world_id, match_id);
-            for s in &seats {
-                reg.by_principal.insert(s.principal_id, match_id);
-            }
+        let mut registry = self.registry();
+        registry.by_match.insert(id, handle);
+        registry.by_world.insert(world.world_id, id);
+        for seat in seats {
+            registry.by_principal.insert(seat.principal_id, id);
         }
-        self.audit(
-            None,
-            "match.created",
-            format!("match:{match_id}"),
-            serde_json::json!({ "league": pairing.league, "principals": seats.iter().map(|s| s.principal_id).collect::<Vec<_>>() }),
-        )
-        .await;
-        Ok(handle)
+        Ok(lease)
     }
 
     /// 服务端启动/恢复既有创作世界；调用方须先建立对局及席位记录，不对外暴露任意认领接口。
@@ -830,6 +851,9 @@ async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) ->
     let Some((mut row, participants)) = store.get_match(c.match_id).await? else {
         return Err(ApiError::not_found("对局不存在"));
     };
+    if row.match_state == MatchState::Completed && row.replay_cid_blake3 == Some(replay_cid.0) {
+        return Ok(());
+    }
     // Lobby/Ready 迁移事件可能晚于 Running → Completed：按状态机补齐
     for step in [MatchState::Lobby, MatchState::Ready, MatchState::Running] {
         if row.match_state.can_transition(step) {
@@ -851,44 +875,25 @@ async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) ->
     row.started_at_unix_s = row.started_at_unix_s.or(row.completed_at_unix_s);
 
     if row.game_mode == "PvP_Ranked" {
-        // Glicko-2：两人局，胜 1 / 平 0.5 / 负 0
-        let mut ratings = Vec::new();
-        for p in &participants {
-            ratings.push(store.get_rating(p.principal_id, c.league).await?);
-        }
-        if let [a, b] = ratings.as_slice() {
-            let score_a = match c.winner_faction {
-                Some(w) if i16::from(w) == participants[0].faction_id => 1.0,
-                Some(_) => 0.0,
-                None => 0.5,
-            };
-            let (na, nb) = glicko2::update_pair(a.glicko(), b.glicko(), score_a, glicko2::DEFAULT_TAU);
-            for ((p, old), new) in participants.iter().zip([a, b]).zip([na, nb]) {
-                let final_score = c
+        let parts = participants
+            .iter()
+            .map(|p| ParticipantRow {
+                final_score: c
                     .scores
                     .iter()
                     .find(|s| i16::from(s.0) == p.faction_id)
-                    .map(|s| s.2)
-                    .unwrap_or_default();
-                store
-                    .update_participant(ParticipantRow {
-                        final_score,
-                        rating_delta: Some(new.rating - old.rating),
-                        ..p.clone()
-                    })
-                    .await?;
-                store
-                    .put_rating(RatingRow {
-                        principal_id: p.principal_id,
-                        league: c.league,
-                        rating: new.rating,
-                        deviation: new.deviation,
-                        volatility: new.volatility,
-                        matches_played: old.matches_played + 1,
-                    })
-                    .await?;
-            }
-        }
+                    .map_or(0, |s| s.2),
+                ..p.clone()
+            })
+            .collect();
+        store
+            .settle_ranked(
+                row.clone(),
+                c.fencing_token
+                    .ok_or_else(|| crate::transactions::conflict("终局缺少fence"))?,
+                parts,
+            )
+            .await?;
     } else {
         // 自定义世界可以创作编辑，但不能据此制造排位分数。
         for participant in &participants {
@@ -906,13 +911,15 @@ async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) ->
                 .await?;
         }
     }
-    store
-        .update_match_fenced(
-            row,
-            c.fencing_token
-                .ok_or_else(|| crate::transactions::conflict("终局缺少fence"))?,
-        )
-        .await?;
+    if row.game_mode != "PvP_Ranked" {
+        store
+            .update_match_fenced(
+                row,
+                c.fencing_token
+                    .ok_or_else(|| crate::transactions::conflict("终局缺少fence"))?,
+            )
+            .await?;
+    }
     {
         let mut reg = state.registry();
         reg.by_principal.retain(|_, m| *m != c.match_id);

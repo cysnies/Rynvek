@@ -195,9 +195,14 @@ pub struct QueryReply {
 }
 
 enum HostMsg {
-    CloseCustom { reply: oneshot::Sender<()> },
+    CloseCustom {
+        reply: oneshot::Sender<()>,
+    },
     /// 仅内部已准入HTTP调用。无连接/命令/租约，沿同Actor一致边界读取fog投影。
-    Observe { faction: u8, reply: oneshot::Sender<Result<serde_json::Value, ApiError>> },
+    Observe {
+        faction: u8,
+        reply: oneshot::Sender<Result<serde_json::Value, ApiError>>,
+    },
     Patch {
         patch: WorldPatch,
         reply: oneshot::Sender<Result<PatchApplied, ApiError>>,
@@ -232,6 +237,7 @@ enum HostMsg {
 /// 对局句柄（可克隆，供 HTTP 与流连接共享）
 #[derive(Clone, Debug)]
 pub struct MatchHandle {
+    pub fencing_token: Option<u64>,
     pub match_id: WireUuid,
     pub world_id: WireUuid,
     pub league: League,
@@ -264,13 +270,18 @@ fn ended() -> ApiError {
 
 impl MatchHandle {
     pub(crate) async fn close_custom(&self) -> Result<(), ApiError> {
-        let (reply,rx)=oneshot::channel();
-        if self.tx.send(HostMsg::CloseCustom {reply}).await.is_err() {return Ok(())}
-        rx.await.map_err(|_|ended())
+        let (reply, rx) = oneshot::channel();
+        if self.tx.send(HostMsg::CloseCustom { reply }).await.is_err() {
+            return Ok(());
+        }
+        rx.await.map_err(|_| ended())
     }
     pub(crate) async fn observe_faction(&self, faction: u8) -> Result<serde_json::Value, ApiError> {
         let (reply, rx) = oneshot::channel();
-        self.tx.send(HostMsg::Observe { faction, reply }).await.map_err(|_| ended())?;
+        self.tx
+            .send(HostMsg::Observe { faction, reply })
+            .await
+            .map_err(|_| ended())?;
         rx.await.map_err(|_| ended())?
     }
     pub async fn apply_patch(&self, patch: WorldPatch) -> Result<PatchApplied, ApiError> {
@@ -388,6 +399,7 @@ pub fn spawn_runtime(
         state_root: runtime.state_root(),
     });
     let handle = MatchHandle {
+        fencing_token: committer.as_ref().map(|c| c.fencing_token),
         mode: spec.config.mode,
         match_id: spec.match_id,
         world_id: spec.world_id,
@@ -507,24 +519,47 @@ impl Host {
         if let Some(committer) = &self.committer {
             match committer.records().await {
                 Ok(records) => {
-                    for record in records {
-                        for input in record.inputs {
+                    for record in &records {
+                        for input in &record.inputs {
                             if let TickInput::Command {
                                 principal_id,
                                 idempotency_key,
                                 ..
                             } = input
                             {
-                                self.seen_commands.insert((principal_id, idempotency_key));
+                                self.seen_commands.insert((*principal_id, idempotency_key.clone()));
+                            }
+                        }
+                    }
+                    if self.is_persistent_ranked() {
+                        match committer.ranked_origin().await {
+                            Ok(origin) => {
+                                self.genesis = origin;
+                                self.records = records;
+                            }
+                            Err(error) => {
+                                self.retire_ranked(&format!("恢复原排位锚点失败：{error}"));
+                                return;
                             }
                         }
                     }
                 }
                 Err(error) => {
-                    self.abort(&format!("恢复幂等日志失败：{error}"));
+                    if self.is_persistent_ranked() {
+                        self.retire_ranked(&format!("恢复幂等日志失败：{error}"));
+                    } else {
+                        self.abort(&format!("恢复幂等日志失败：{error}"));
+                    }
                     return;
                 }
             }
+        }
+        if self.is_persistent_ranked() && self.session.world.outcome.is_some() {
+            if self.ranked_authorized().await {
+                self.state = MatchState::Running;
+                self.complete();
+            }
+            return;
         }
         self.transition(MatchState::Lobby);
         let hz = self.cfg.driver.hz();
@@ -532,6 +567,8 @@ impl Host {
         // 落后时不突发补帧：服务器过载时整局放慢而不是在单个事件循环里连跑多帧
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let lobby_deadline = self.cfg.lobby_timeout.map(|d| tokio::time::Instant::now() + d);
+        let mut lease_ticker = tokio::time::interval(Duration::from_secs(5));
+        lease_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let realtime_running = hz > 0 && self.state == MatchState::Running;
             let in_lobby = matches!(self.state, MatchState::Lobby | MatchState::Ready);
@@ -541,10 +578,11 @@ impl Host {
                     None => break,
                 },
                 _ = ticker.tick(), if realtime_running => self.tick_once().await,
+                _ = lease_ticker.tick(), if self.is_persistent_ranked() => {self.ranked_authorized().await;},
                 _ = async { tokio::time::sleep_until(lobby_deadline.expect("有截止时间")).await },
                     if in_lobby && lobby_deadline.is_some() =>
                 {
-                    self.abort("大厅超时：参赛者未全部入座");
+                    if self.ranked_authorized().await {self.abort("大厅超时：参赛者未全部入座");}
                 }
             }
             if self.state.is_terminal() {
@@ -560,8 +598,12 @@ impl Host {
         rx.close();
         while let Some(m) = rx.recv().await {
             match m {
-                HostMsg::CloseCustom {reply}=>{let _=reply.send(());}
-                HostMsg::Observe { reply, .. } => { let _ = reply.send(Err(ended())); }
+                HostMsg::CloseCustom { reply } => {
+                    let _ = reply.send(());
+                }
+                HostMsg::Observe { reply, .. } => {
+                    let _ = reply.send(Err(ended()));
+                }
                 HostMsg::Patch { reply, .. } => {
                     let _ = reply.send(Err(ended()));
                 }
@@ -611,32 +653,100 @@ impl Host {
         }));
     }
 
+    fn is_persistent_ranked(&self) -> bool {
+        !self.spec.custom
+            && self.committer.is_some()
+            && self.session.world.config.mode == rynvek_rts::world::MatchMode::PvpRanked
+    }
+    async fn ranked_authorized(&mut self) -> bool {
+        if !self.is_persistent_ranked() {
+            return true;
+        }
+        let c = self.committer.as_ref().unwrap();
+        let valid = c
+            .store
+            .renew_ranked_host(self.spec.world_id, c.fencing_token)
+            .await
+            .unwrap_or(false);
+        if !valid {
+            self.retire_ranked("宿主租约过期/被接管或持久服务不可用；仅退役本Actor，不终结持久对局");
+        }
+        valid
+    }
+    fn retire_ranked(&mut self, reason: &str) {
+        if self.state.is_terminal() {
+            return;
+        }
+        self.scheduled.clear();
+        for seat in &self.spec.seats {
+            self.session
+                .revoke_seat(&seat.principal_id.to_string(), u32::from(seat.faction));
+            self.gate.unbind(seat.principal_id);
+        }
+        self.audit(None, "host.retired", serde_json::json!({"reason":reason}));
+        self.state = MatchState::Aborted; // 不发送 HostEvent::State / Complete，旧宿主不能误终局/结算。
+        let ids: Vec<_> = self.conns.keys().copied().collect();
+        for id in ids {
+            self.disconnect(id, RynvekErrorCode::StalePartitionFencingToken.code().into(), reason);
+        }
+        self.publish();
+    }
     async fn custom_authorized(&mut self) -> bool {
-        if !self.spec.custom {return true}
-        let valid=if let Some(c)=&self.committer {c.store.custom_live(self.spec.world_id,self.spec.match_id,c.fencing_token).await.unwrap_or(false)}else{false};
-        if !valid {self.abort("自创房间准入/身份或世界fence已失效")}
+        if !self.ranked_authorized().await {
+            return false;
+        }
+        if !self.spec.custom {
+            return true;
+        }
+        let valid = if let Some(c) = &self.committer {
+            c.store
+                .custom_live(self.spec.world_id, self.spec.match_id, c.fencing_token)
+                .await
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        if !valid {
+            self.abort("自创房间准入/身份或世界fence已失效")
+        }
         valid
     }
     async fn on_msg(&mut self, msg: HostMsg) {
-        if let HostMsg::CloseCustom {reply}=msg {self.abort("自创席位撤销/离开：整局中止，禁止热换玩家");let _=reply.send(());return;}
+        if let HostMsg::CloseCustom { reply } = msg {
+            self.abort("自创席位撤销/离开：整局中止，禁止热换玩家");
+            let _ = reply.send(());
+            return;
+        }
         if !self.custom_authorized().await {
             match msg {
-                HostMsg::Observe {reply,..}=>{let _=reply.send(Err(ended()));}
-                HostMsg::Patch {reply,..}=>{let _=reply.send(Err(ended()));}
-                HostMsg::Join {reply,..}=>{let _=reply.send(Err(ended()));}
-                HostMsg::Advance {reply,..}=>{let _=reply.send(Err(ended()));}
-                _=>{}
+                HostMsg::Observe { reply, .. } => {
+                    let _ = reply.send(Err(ended()));
+                }
+                HostMsg::Patch { reply, .. } => {
+                    let _ = reply.send(Err(ended()));
+                }
+                HostMsg::Join { reply, .. } => {
+                    let _ = reply.send(Err(ended()));
+                }
+                HostMsg::Advance { reply, .. } => {
+                    let _ = reply.send(Err(ended()));
+                }
+                _ => {}
             }
             return;
         }
         match msg {
-            HostMsg::CloseCustom {..}=>unreachable!(),
+            HostMsg::CloseCustom { .. } => unreachable!(),
             HostMsg::Observe { faction, reply } => {
                 let world = &self.session.world;
-                let result = if let Some(observation) = world.observe(FactionId(faction)) { Ok(serde_json::json!({
-                    "welcome": ArenaServerMessage::Welcome { protocol:ARENA_PROTOCOL.into(), faction:u32::from(faction), mode:world.config.mode, tick:world.tick, map:map_info(world), tools:Vec::new() },
-                    "observation": ArenaServerMessage::Observation { observation:Box::new(observation), events:Vec::new() },
-                })) } else { Err(ApiError::not_found("阵营不存在")) };
+                let result = if let Some(observation) = world.observe(FactionId(faction)) {
+                    Ok(serde_json::json!({
+                        "welcome": ArenaServerMessage::Welcome { protocol:ARENA_PROTOCOL.into(), faction:u32::from(faction), mode:world.config.mode, tick:world.tick, map:map_info(world), tools:Vec::new() },
+                        "observation": ArenaServerMessage::Observation { observation:Box::new(observation), events:Vec::new() },
+                    }))
+                } else {
+                    Err(ApiError::not_found("阵营不存在"))
+                };
                 let _ = reply.send(result);
             }
             HostMsg::Patch { patch, reply } => self.enqueue_patch(patch, reply).await,
@@ -795,7 +905,9 @@ impl Host {
     fn drop_conn(&mut self, conn: u64) {
         if let Some(c) = self.conns.remove(&conn) {
             if !self.conns.values().any(|o| o.principal_id == c.principal_id) {
-                if self.spec.custom && self.state==MatchState::Lobby {self.joined.remove(&c.principal_id);}
+                if self.spec.custom && self.state == MatchState::Lobby {
+                    self.joined.remove(&c.principal_id);
+                }
                 // 离座但保留闸门绑定与租约：断线重连（ResumeToken）后可继续
                 self.session.leave(&c.principal_id.to_string());
             }
@@ -948,7 +1060,12 @@ impl Host {
             }
             _ => {}
         }
-        let lobby_lease=self.spec.custom && self.state==MatchState::Lobby && matches!(env.payload,ArenaClientMessage::AcquireLease{..}|ArenaClientMessage::ReleaseLease{..});
+        let lobby_lease = self.spec.custom
+            && self.state == MatchState::Lobby
+            && matches!(
+                env.payload,
+                ArenaClientMessage::AcquireLease { .. } | ArenaClientMessage::ReleaseLease { .. }
+            );
         if self.state != MatchState::Running && !lobby_lease {
             return self.reject(
                 conn,
@@ -1199,7 +1316,9 @@ impl Host {
     }
 
     async fn tick_once(&mut self) {
-        if !self.custom_authorized().await {return}
+        if !self.custom_authorized().await {
+            return;
+        }
         if self.state != MatchState::Running {
             return;
         }
@@ -1305,7 +1424,11 @@ impl Host {
                         let _ = reply.send(Err(conflict("权威 Tick 未提交")));
                     }
                 }
-                self.abort(&format!("持久化失败，停止宿主而不发布候选：{error}"));
+                if self.is_persistent_ranked() {
+                    self.retire_ranked(&format!("持久化失败，保留已提交世界供恢复：{error}"));
+                } else {
+                    self.abort(&format!("持久化失败，停止宿主而不发布候选：{error}"));
+                }
                 return;
             }
         };
@@ -1388,20 +1511,33 @@ impl Host {
                 league: self.spec.league,
             })
             .collect();
-        let recorded = replay::record_runtime(
-            world,
-            replay::RuntimeReplay {
-                world_id: self.spec.world_id.0,
-                initial_revision: self.genesis.revision,
-                initial_root: self.genesis.state_root,
-                initial_snapshot: self.genesis.bytes.clone(),
-                ticks: self.records.clone(),
-            },
-            self.spec.match_id.to_string(),
-            self.spec.world_id.to_string(),
-            crate::ids::hex(&self.spec.ruleset_hash),
-            participants,
-        )
+        let history = replay::RuntimeReplay {
+            world_id: self.spec.world_id.0,
+            initial_revision: self.genesis.revision,
+            initial_root: self.genesis.state_root,
+            initial_snapshot: self.genesis.bytes.clone(),
+            ticks: self.records.clone(),
+        };
+        let recorded = if self.is_persistent_ranked() {
+            // 检查点有意不保存调试command_log；以原始已提交WAL重建，不能拿恢复后的空本地日志作权威。
+            replay::record_world_history(
+                history,
+                world.tick,
+                world.state_root(),
+                self.spec.match_id.to_string(),
+                crate::ids::hex(&self.spec.ruleset_hash),
+                participants,
+            )
+        } else {
+            replay::record_runtime(
+                world,
+                history,
+                self.spec.match_id.to_string(),
+                self.spec.world_id.to_string(),
+                crate::ids::hex(&self.spec.ruleset_hash),
+                participants,
+            )
+        }
         .and_then(|body| replay::encode(&body, self.spec.world_id.0, &self.cfg.signer));
         let replay = match recorded {
             Ok(r) => r,
@@ -1462,7 +1598,11 @@ impl Host {
         }
         if self.spec.custom {
             self.scheduled.clear();
-            for seat in &self.spec.seats {self.session.revoke_seat(&seat.principal_id.to_string(),u32::from(seat.faction));self.gate.unbind(seat.principal_id);}
+            for seat in &self.spec.seats {
+                self.session
+                    .revoke_seat(&seat.principal_id.to_string(), u32::from(seat.faction));
+                self.gate.unbind(seat.principal_id);
+            }
         }
         self.audit(None, "match.aborted", serde_json::json!({ "reason": reason }));
         self.transition(MatchState::Aborted);
