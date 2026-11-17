@@ -43,6 +43,7 @@ public static async Task<ToolReceipt> ObserveOwnedWorld(
 ## 精确整数与生命周期
 
 - Principal/Org/owner是`PrincipalId`（u64），JSON强制规范十进制**字符串**，拒绝用浮点/JSON数替代。Tick、seq、fencing、seed、revision是`ulong`原生JSON整数；实体序号`uint`，资源/生命值/Q32.32原始坐标`long`。`RawVec2`严格两元素i64数组，无隐式double或“显示换算后再写回”。
+- 当前必需`FactionObservation.Neural`与服务端一致：仅己方真实LIF/Izhikevich的64子步重叠环窗口，以及MLP/CTRNN连续隐藏态均值；不把它当新增spikes/瞬时频率/相干度。C#这里只消费精确观测，不声称实现原生音频播放。
 - 工具连续值用decimal构造JSON，服务端依原规则量化；未知/超界仍由原工具拒绝。`JsonElement`保留未细分结果/事件/终局的原始数字，不反序列化到object/double。Decimal128整数文本可用`Wire.ExactInteger`转BigInteger（含2^96），不声称SDK已实现Lab客户端。
 - 所有HTTP默认不重定向、不使用Cookie、不自动重试，响应≤1MiB；只接受无用户名/密码/path/query/fragment的HTTP(S) origin。HTTP仅允许loopback，其余须HTTPS；TLS使用系统默认校验，无跳过证书或网络策略的选项。Bearer只在认证头和WS Hello JSON，绝不放URL；没有公开token getter，ToString/请求异常不打印会话/响应体/私钥。
 - 单WS reader、串行sender、单调u64 seq、最多32个在途请求；文本分片消息整体≤1MiB。候选/回执按seq和消息类型关联；工具名不符/未知协议/错误阵营立即终止，不把观察或别人的回复当成功。
