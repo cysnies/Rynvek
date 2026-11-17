@@ -59,7 +59,7 @@ it("作业发现、取消/重试消费真实状态；提交不确定时原键原
  });
  render(<LabWorkspace fetcher={fetcher as typeof fetch} initialBaseUrl="http://test"/>);connect();
  fireEvent.click(screen.getByText("提交真实实验"));await screen.findByText("响应丢失");
- fireEvent.change(screen.getByLabelText("实验Ticks"),{target:{value:"900"}});fireEvent.click(screen.getByText("原键对账重试提交"));await screen.findByText(/私有快验作业 · running/);expect(sent[0]).toEqual(sent[1]);
+ fireEvent.change(screen.getByLabelText("实验Ticks"),{target:{value:"0"}});fireEvent.click(screen.getByText("原键对账重试提交"));await screen.findByText(/私有快验作业 · running/);expect(sent[0]).toEqual(sent[1]);
  fireEvent.click(screen.getByText("取消此作业"));await screen.findByText(/私有快验作业 · cancelled/);
  fireEvent.click(screen.getByText("显式重试此作业"));await screen.findByText(/私有快验作业 · queued/);
  fireEvent.click(screen.getByText("发现我的持久作业"));await screen.findByRole("button",{name:/私有快验作业 · queued/});

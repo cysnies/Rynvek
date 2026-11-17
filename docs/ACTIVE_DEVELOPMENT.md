@@ -5,6 +5,46 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第三十三批：Lab持久实验作业治理（从main 53b7e0e继续）
+
+**主体持续开发，整体未完成。** 本批用原Store事务与私有CAS替换Lab进程内事实源：真实规格 → 幂等持久提交/发现 → 有界worker租约/fencing → 原RTS逐Tick实验 → run检查点 → 四张真实Parquet一次发布 → 原`/lab`和TS SDK消费。没有新影子仿真器，不公开Hub/NuGet、不外部部署。实际代码提交/最终HEAD与PRIVATE一次普通push证据见同一Page和交接。
+
+### 实际入口与协议
+
+- 原`/lab` → 使用本人已有`lab.submit/lab.read`能力令牌 →「提交真实实验」。新增「发现我的持久作业」分页找回任务、载入/刷新结构化状态、取消/显式重试；仍可看真实四表/谱系/能量账和下载原Parquet。令牌只在内存、不自动造身份；断开清空本地结果**不取消服务端**。
+- `POST /api/v1/lab/experiments` **必需**`submission_id: UUID`，同owner/键+同规范化规格返回同作业，异规格409。规格仍是原name/seeds/ticks/sample_every/variants。SDK `submit(spec, submissionId, signal?)`不盲造第二个键；工作台不确定响应保留原键与原规格，再次提交原样对账；显式放弃本地键不会撤销服务端，先发现对账以免重复计算。
+- `GET /api/v1/lab/experiments?offset=0&limit=25`，limit 1–100、offset≤512；`GET .../{id}`；`POST .../{id}/control`请求`{operation_id:UUID,generation:u32,action:"cancel"|"retry"}`。同操作键绑相同动作/代次，重放返回**当前**状态；不同请求同键409，新操作旧代次409，旧cancel回执重放不得取消新retry代次。retry仅failed/cancelled；completed不重做。同owner活动最多8、总量512、操作回执64且不驱逐、每代认领最多5，达到后failed，需所有者显式重试，检查点保留。
+- 状态`queued/running/completed/failed/cancelled`，新增generation/attempt/lease_expires_at_unix_s/submission_id/spec_digest/kernel_profile；owner_principal_id改为规范十进制**字符串**。SDK终态判定直接读状态，不再解析404错误文字。私有请求no-store、omit credentials、error redirects；工作台不自动取消远程作业，旧身份迟到响应不挂回页面。
+- 原`.../{id}/rows?table=…`、`.../{id}/parquet?table=…`保持真实四表消费，但结果改存**原私有world-checkpoints CAS**，不是公共Hub Blob；非所有者与未知作业均404。data-export读取同一Store作业，不漏重建后的历史。
+
+### 执行/恢复和原子性
+
+- 新增Lab专用`0006_lab_jobs.sql`及原Store Memory/PG分支。PG owner行锁串行提交配额/重试，唯一(owner,submission_id)；认领`FOR UPDATE OF job SKIP LOCKED`，数据库时钟，30s租约、2s续约，每节点1–16个有界worker（原lab_max_concurrent配置）。没有泛化作业框架或外部队列。内存后端仅同一Store对象保留元数据；真正跨进程需原Postgres Store、持久私有CAS和稳定签名鉴权，多个节点必须可见同一私有CAS。
+- 每次认领、取消/重试、回收均前进fence；心跳/检查点/失败/释放/最终提交都核对owner active、node、fence、running及未过期租约。迟到/取消/过期worker不可发布或误改新代状态。优雅shutdown等待原计算在Tick边界协作停止后释放回queued；崩溃需租约到期重新认领，CPU执行允许至少一次，不声称exactly-once。
+- 原`run_one`语义保留，新interruptible入口只加Tick边界/首尾检查，不加新状态/随机数。每个**完整run**先写私有CAS检查点，再fenced事务登记CID；检查点绑定显式`rynvek-lab-kernel/1`执行契约、不可变spec_digest、run编号/种子。直接typed JSON序列化/反序列化保留u128能量，**不经serde_json::Value**。恢复复用已完成run，未完成run从原种子重算；不是中途Tick/进程内存快照。执行语义变化须审查并升级kernel契约/明确迁移，不能拿Git文档HEAD当内核版本，也不隐式跨契约重算旧队列。
+- 原Arrow/Parquet生成runs/metrics/lineage/energy，四个私有CAS写入全部成功后，在一次Store锁/PG事务更新结果四CID和completed。取消/过期期间可有**未引用私有CAS孤立写入**，不自动清理；读者从未看见半套结果，不能用公共CID路由取回私有表。当前结果汇总仍在单作业内存中，沿用原规格上限，非流式无限量导出。
+
+### 必要快验与未验边界
+
+**18个不同直接用例通过，重跑不累计**：状态/fencing/代次/typed检查点4、真实本机认证HTTP→Node TS SDK治理→真实run检查点→同MemoryStore/文件CAS重建→四表消费1、SDK单文件9、原Lab React工作台4；server必要编译与TS类型通过；没有整workspace/Clippy/license/SBOM/soak/CI轮询。该重建集成**手动登记真实run检查点再释放租约**，不称硬杀进程或完整worker崩溃恢复测试。PG迁移/查询路径仅Rust编译，未接实库，多连接/多机/数据库故障切换/断电/长稳未验。React是JSDOM/传输夹具，不是实际浏览器；硬件/GPU/音频听验仍未验。没有删除原始资料、Git历史或无关缓存。
+
+实际执行命令：
+```sh
+cargo check -p rynvek-server
+cargo test -p rynvek-server --lib lab_jobs -- --nocapture
+pnpm --dir packages/lab exec tsc -p tsconfig.build.json
+cargo test -p rynvek-server --test lab_jobs -- --nocapture
+pnpm --dir packages/lab exec vitest run test/client.test.ts
+pnpm --dir apps/web-platform exec vitest run test/lab_workspace.test.tsx --config vite.config.mjs
+pnpm --dir apps/web-platform exec tsc --noEmit
+git diff --check
+```
+SDK真实回环测试通过stdin接收本机一次性测试身份，stdout只回非凭据收据；不把测试令牌输出或写进脚本。
+
+### 下一主体继续
+
+Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理**，严守原六工具ToolBroker权限/预算、持久执行/中断状态边界，外部LLM不进权威Tick；Pi仍仅已核对的设计参考，**未引入/复制/执行其代码**。随后按依赖补音频制品真实容器/校验/私有消费、一般Studio模板/规则与生命成本、未覆盖的一般W3/协作等主体，不能宣称全项目完工或无限只磨Arena/Lab。所有主体齐后再集中全面验收。
+
 ## 第三十二批：真实Arena事件音频与仅己方脑态声化（从main 069ae49继续）
 
 **主体持续开发，整体未完成。** 真实投影`9f19531`、声化内核`3c61c61`、实际Arena消费`74ec3a5`、直接验证`366dadf`；最终文档HEAD与一次普通push证据见同一Page/交接。不生成歌曲或媒体资产，不公开Hub/NuGet发行、无外部部署；Pi仍仅后续受控Adapter参考，**未引入/执行Pi代码**。
@@ -396,7 +436,7 @@
 | 顺序 | 可执行工作 | 完成时应有的实际证据 |
 | --- | --- | --- |
 | 已推进，仍有边界 | 第二十批已统一六角色配置，接通其他角色真实供能及运动/突触维护；继续补未覆盖生命成本 | 生物合成/生长、攻击/修复/分泌、野生与非脉冲计算等仍需显式规则；不冒充物质总守恒 |
-| 已推进，仍有边界 | 第二十一批已挂载Lab真实工作台并消费W3自然突变规则；一般规则编辑/持久任务治理待补 | 真四表、自然谱系图、BigInt能量曲线、seed/网格/消融、私有进度/下载已接通；规模上限/控制器干预明确 |
+| 已推进，仍有边界 | 第二十一批已挂载Lab真实工作台并消费W3自然突变规则；第三十三批补持久作业治理，一般W3规则仍欠 | 真四表、自然谱系图、BigInt能量曲线、seed/网格/消融、私有进度/下载已接通；规模上限/控制器干预明确 |
 | 已推进，仍有边界 | 第二十二批已挂载Studio参数/共享基因/动作规则/目录删除与权威撤销；一般TS/rpack/模板/协作流仍欠 | 当前只支持显式绑定范围，不伪称所有参数/编辑器完成 |
 | 已推进，仍有边界 | 第二十三批已有Studio世界运行/重连/节点上下文恢复、完整运行WAL私有签名重演 | 真实单人PvE/原Actor；前置编辑过程/多人席位/客户端独立验签/持久抽帧索引仍欠 |
 | 已推进，仍有边界 | 第二十四批已用结构化生产/科技/信标面板替换 JSON 命令主入口 | 真实观测与 ack，不预扣资源；排位/观战/多人席位、Studio 规则删除与一般绑定仍欠 |
@@ -408,7 +448,8 @@
 | 已推进，仍有边界 | 第三十批owner-private签名Agent三文件包/精确依赖/受限QuickJS/原ToolBroker与SDK真实端到端 | Node真实私有发布下载与战略写入通过；非独立持久Agent/公共Hub发行，PG未实库 |
 | 已推进，仍有边界 | 第三十一批C#真实注册/鉴权、私有HTTP/WS/fog/租约/原命令与六工具消费、同局重连 | .NET10编译、自检3组与Rust2直接用例通过；真实C#进程/原Actor，非全域SDK或多机灾备 |
 | 已推进，仍有边界 | 第三十二批原Arena真实阵营事件、手势/静音/断线换世界生命周期与仅己方真实脑态声化 | 必要编译与9个直接用例；节点/状态验证非硬件听验，无Hub音色资产链、观战/回放音频 |
-| 下一主体优先 | Lab持久实验作业提交/排队/取消、进度产物与重启恢复/工作台；其后Agent受控执行治理 | 真实Store/CAS与权限回执，不以同Store重建冒充PG灾备；Pi仅后续候选、未引入 |
+| 已推进，仍有边界 | 第三十三批Lab持久提交/发现、租约fencing、取消/重试幂等、run检查点恢复、私有四表原子发布与原工作台/TS SDK | 本机HTTP/Node与同Store重建通过，非PG实库灾备/硬杀恢复；未完成run从种子重算，单作业汇总仍在内存 |
+| 下一主体优先 | Pi参考的受控Agent Adapter/独立Agent执行治理；随后音频制品链、一般模板/规则与生命成本 | 六工具权限/预算与持久回执，不把外部LLM非确定性塞权威Tick；Pi代码未引入/执行 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付原Arena实时事件音频与仅己方真实脑态声化；下一推进Lab持久作业及后续Agent控制面，不宣称整个Arena、项目、全生态、W3一般规则/持久作业治理或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
+本阶段交付Lab持久作业治理、run检查点/私有四表原子发布及真实SDK/工作台消费；下一转Pi参考的受控Agent控制面，再按依赖补音频制品链/一般规则，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
