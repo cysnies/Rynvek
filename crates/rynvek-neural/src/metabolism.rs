@@ -65,6 +65,15 @@ impl EnergyAccount {
         true
     }
 
+    /// 实际基础代谢仅将现有能量转为热，不产生负池或虚构计算欠费。
+    /// 请求不足由宿主执行其显式生存规则；此层不决定角色或死亡。
+    pub fn dissipate_micro(&mut self, requested_micro: u32) -> u64 {
+        let paid = self.stored_q.min(u64::from(requested_micro) * 4);
+        self.stored_q -= paid;
+        self.dissipated_q += paid;
+        paid
+    }
+
     pub fn export_milli(&mut self, room_milli: u64) -> u64 {
         self.export_milli_retaining(room_milli, 0)
     }
@@ -188,5 +197,28 @@ mod budget_tests {
         assert!(a.stored_q >= reserve);
         assert!(a.stored_q < reserve + ENERGY_Q_PER_MILLI);
         assert!(a.is_conserved());
+    }
+}
+
+#[cfg(test)]
+mod basal_tests {
+    use super::*;
+    #[test]
+    fn basal_spending_is_exact_partial_and_never_creates_debt() {
+        for available in [0, 1, 3, 4, 4000, u64::MAX] {
+            for cost in [0, 1, 1000, u32::MAX] {
+                let mut a = EnergyAccount {
+                    received_q: available,
+                    stored_q: available,
+                    ..Default::default()
+                };
+                let paid = a.dissipate_micro(cost);
+                assert_eq!(paid, available.min(u64::from(cost) * 4));
+                assert_eq!(a.stored_q, available - paid);
+                assert_eq!(a.dissipated_q, paid);
+                assert_eq!(a.unfunded_q, 0);
+                assert!(a.is_conserved());
+            }
+        }
     }
 }

@@ -378,6 +378,43 @@ impl ArenaWorld {
         }
     }
 
+    /// 战斗死亡与显式代谢死亡共用唯一退役/遗骸/事件路径。
+    pub(super) fn retire_dead_unit(&mut self, id: EntitySerial) {
+        let u = self.units.remove(&id).expect("存在");
+        let recycle = self
+            .faction(u.faction)
+            .map(|f| f.modifiers().corpse_recycle_percent)
+            .unwrap_or(75);
+        if let Some(ecology) = &mut self.ecology {
+            let mut account = ecology.bodies.remove(&id).expect("死亡前存在个体账本").account;
+            account.prepare_remains(recycle as u32);
+            let (x, y) = u.tile();
+            ecology.remains.insert(
+                id,
+                super::ecology::RemainsEnergy {
+                    cell: (x.min(self.map.width - 1), y.min(self.map.height - 1)),
+                    account,
+                },
+            );
+        }
+        let nutrient_milli = unit_spec(u.kind).cost.biomass * recycle / 100;
+        if let Some((tx, ty)) = u.position.tile().filter(|_| self.ecology.is_none()) {
+            let (tx, ty) = (tx.min(self.map.width - 1), ty.min(self.map.height - 1));
+            self.fields
+                .add(FieldId::Nutrient, tx, ty, (nutrient_milli * 256 / 1000) as i32);
+        }
+        if u.faction.is_wild() {
+            let mut fit = u.fitness;
+            fit.survival_ticks = self.tick - u.born_tick;
+            self.pve_records.push((u.id.0, u.genome.clone(), fit));
+        }
+        self.events.push(RtsEvent::UnitDied {
+            id,
+            faction: u.faction,
+            kind: u.kind,
+        });
+    }
+
     pub(super) fn step_deaths(&mut self) {
         let dead_units: Vec<EntitySerial> = self
             .units
@@ -386,39 +423,7 @@ impl ArenaWorld {
             .map(|u| u.id)
             .collect();
         for id in dead_units {
-            let u = self.units.remove(&id).expect("存在");
-            let recycle = self
-                .faction(u.faction)
-                .map(|f| f.modifiers().corpse_recycle_percent)
-                .unwrap_or(75);
-            if let Some(ecology) = &mut self.ecology {
-                let mut account = ecology.bodies.remove(&id).expect("死亡前存在个体账本").account;
-                account.prepare_remains(recycle as u32);
-                let (x, y) = u.tile();
-                ecology.remains.insert(
-                    id,
-                    super::ecology::RemainsEnergy {
-                        cell: (x.min(self.map.width - 1), y.min(self.map.height - 1)),
-                        account,
-                    },
-                );
-            }
-            let nutrient_milli = unit_spec(u.kind).cost.biomass * recycle / 100;
-            if let Some((tx, ty)) = u.position.tile().filter(|_| self.ecology.is_none()) {
-                let (tx, ty) = (tx.min(self.map.width - 1), ty.min(self.map.height - 1));
-                self.fields
-                    .add(FieldId::Nutrient, tx, ty, (nutrient_milli * 256 / 1000) as i32);
-            }
-            if u.faction.is_wild() {
-                let mut fit = u.fitness;
-                fit.survival_ticks = self.tick - u.born_tick;
-                self.pve_records.push((u.id.0, u.genome.clone(), fit));
-            }
-            self.events.push(RtsEvent::UnitDied {
-                id,
-                faction: u.faction,
-                kind: u.kind,
-            });
+            self.retire_dead_unit(id);
         }
         let dead_buildings: Vec<EntitySerial> = self
             .buildings
