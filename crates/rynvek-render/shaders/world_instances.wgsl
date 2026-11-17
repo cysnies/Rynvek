@@ -1,6 +1,6 @@
-// crates/rynvek-render/shaders/world_instances.wgsl
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-// L2–L7 实例化图元（GPU Instancing）与 GPU ID 拾取：
+// L0、L2–L7 实例化图元（GPU Instancing）与 GPU ID 拾取：
 //   - 每个实例 6 个顶点（两个三角形组成的方块），形状在片元阶段裁剪（方块 / 圆 / 空心环）；
 //   - location(1) 输出到 R32Uint 拾取目标：pick_id = dense_index + 1，0 表示无对象；
 //   - 不可拾取层（L6 迷雾）使用写掩码为空的管线，不会擦除下层的拾取编号。
@@ -31,6 +31,7 @@ struct VsOut {
     @location(1) @interpolate(flat) color: u32,
     @location(2) @interpolate(flat) pick_id: u32,
     @location(3) @interpolate(flat) shape: u32,
+    @location(4) @interpolate(flat) half_extent_px: vec2<f32>,
 }
 
 @vertex
@@ -41,9 +42,15 @@ fn vs_instance(in: VsIn) -> VsOut {
     );
     let c = corners[in.vi % 6u];
     // 至少 1.5 像素半径，避免远景下图元消失
-    let half_px = max(in.size * camera.px_per_cell * 0.5, 1.5);
-    let cs = cos(in.rotation);
-    let sn = sin(in.rotation);
+    var half_px = vec2<f32>(max(in.size * camera.px_per_cell * 0.5, 1.5));
+    var angle = in.rotation;
+    // 矩形标签复用第二标量为高度；其余形状保持原旋转语义与32字节ABI。
+    if (in.layer_shape.y == 3u) {
+        half_px.y = max(in.rotation * camera.px_per_cell * 0.5, 1.5);
+        angle = 0.0;
+    }
+    let cs = cos(angle);
+    let sn = sin(angle);
     let local = vec2<f32>(c.x * cs - c.y * sn, c.x * sn + c.y * cs) * half_px;
     let screen = (in.position - camera.center) * camera.px_per_cell + camera.viewport * 0.5 + local;
     let ndc = screen / camera.viewport * 2.0 - 1.0;
@@ -54,6 +61,7 @@ fn vs_instance(in: VsIn) -> VsOut {
     out.color = in.color;
     out.pick_id = in.pick_id;
     out.shape = in.layer_shape.y;
+    out.half_extent_px = half_px;
     return out;
 }
 
@@ -70,6 +78,10 @@ fn fs_instance(in: VsOut) -> FsOut {
     }
     if (in.shape == 2u && (r > 1.0 || r < 0.7)) {
         discard;
+    }
+    if (in.shape == 3u) {
+        let edge = (vec2<f32>(1.0) - abs(in.uv)) * in.half_extent_px;
+        if (min(edge.x, edge.y) > 1.5) { discard; }
     }
     var out: FsOut;
     out.color = unpack4x8unorm(in.color);

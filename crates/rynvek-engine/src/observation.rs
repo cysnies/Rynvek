@@ -13,6 +13,8 @@ use rynvek_rts::{buildings::building_spec, fog::VISIBILITY_CELL_TILES, observati
 pub(crate) struct Selection {
     pub units: std::collections::BTreeSet<u32>,
     pub building: Option<u32>,
+    pub drag: Option<[[f32; 2]; 2]>,
+    pub placement: Option<crate::protocol::ArenaPlacement>,
 }
 
 pub(crate) fn validate_map(map: &crate::protocol::ArenaMapData) -> Result<(), EngineError> {
@@ -122,7 +124,11 @@ pub(crate) fn presentation_scene(
     if map.is_some() {
         allowed = allowed.with(RenderLayer::Terrain);
     }
-    if !selection.units.is_empty() || selection.building.is_some() {
+    if !selection.units.is_empty()
+        || selection.building.is_some()
+        || selection.drag.is_some()
+        || selection.placement.is_some()
+    {
         allowed = allowed.with(RenderLayer::Overlay);
     }
     let layers = RenderLayerMask(mask.0 & allowed.0);
@@ -175,6 +181,26 @@ pub(crate) fn presentation_scene(
                     Rgba8([17, 21, 19, 255])
                 },
                 InstanceShape::Square,
+            ));
+        }
+    }
+    if let Some([a, b]) = selection.drag {
+        scene.push(InstanceData::rectangle_outline(
+            [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0],
+            [(a[0] - b[0]).abs(), (a[1] - b[1]).abs()],
+            Rgba8([200, 239, 160, 255]),
+        ));
+    }
+    if let Some(placement) = &selection.placement {
+        let size = building_spec(placement.kind).footprint;
+        let [x, y] = placement.origin;
+        let (width, height) = map.map_or_else(|| dimensions(obs), |m| (m.width, m.height));
+        // 只按公开地图边界裁剪，固定中性黄；不猜资源/科技/碰撞，也不探查隐藏实体。
+        if x.checked_add(size).is_some_and(|end| end <= width) && y.checked_add(size).is_some_and(|end| end <= height) {
+            scene.push(InstanceData::rectangle_outline(
+                [x as f32 + size as f32 / 2.0, y as f32 + size as f32 / 2.0],
+                [size as f32; 2],
+                Rgba8([234, 214, 134, 255]),
             ));
         }
     }

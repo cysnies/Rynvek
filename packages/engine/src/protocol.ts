@@ -9,7 +9,7 @@
  * 跨语言一致性由共享夹具 `tests/engine/protocol_messages.json` 双端断言。
  */
 
-import type { FactionObservation } from "@rynvek/client";
+import type { BuildingKind, FactionObservation } from "@rynvek/client";
 
 /** GPU 使用策略 */
 export type GpuMode = "auto" | "disabled" | "required";
@@ -68,6 +68,7 @@ export type EngineCommand =
   | { type: "SIMULATE_DEVICE_LOST" }
   | { type: "ARENA_MAP"; worldId: string; map: {width: number; height: number; tiles: number[]; tilesHash: string} }
   | { type: "ARENA_SELECTION"; worldId: string; units: number[]; building: number | null }
+  | { type: "ARENA_OVERLAY"; worldId: string; drag: [[number, number], [number, number]] | null; placement: {kind: BuildingKind; origin: [number, number]} | null }
   | { type: "ARENA_OBSERVATION"; worldId: string; observation: FactionObservation }
   | { type: "SHUTDOWN" };
 
@@ -91,6 +92,7 @@ export const ENGINE_COMMAND_TYPES = [
   "SIMULATE_DEVICE_LOST",
   "ARENA_MAP",
   "ARENA_SELECTION",
+  "ARENA_OVERLAY",
   "ARENA_OBSERVATION",
   "SHUTDOWN",
 ] as const;

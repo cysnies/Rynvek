@@ -963,10 +963,26 @@ impl Engine {
                         message: "选择数量超过上限".into(),
                     });
                 }
-                self.arena_selection = crate::observation::Selection {
-                    units: units.into_iter().collect(),
-                    building,
-                };
+                self.arena_selection.units = units.into_iter().collect();
+                self.arena_selection.building = building;
+            }
+            EngineCommand::ArenaOverlay {
+                world_id,
+                drag,
+                placement,
+            } => {
+                self.require_arena_binding(&world_id)?;
+                if drag
+                    .as_ref()
+                    .is_some_and(|points| points.iter().flatten().any(|v| !v.is_finite() || v.abs() > 1_048_576.0))
+                {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "拖框坐标不是有界有限值".into(),
+                    });
+                }
+                self.arena_selection.drag = drag;
+                self.arena_selection.placement = placement;
             }
             EngineCommand::ArenaObservation { world_id, observation } => {
                 if self.shutdown

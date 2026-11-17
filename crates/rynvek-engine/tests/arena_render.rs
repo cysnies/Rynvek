@@ -365,3 +365,102 @@ fn software_gpu_pixels_cover_terrain_fog_selection_and_y_down_mapping() {
     assert!(owner.take_uncaptured_errors().is_empty());
     assert_eq!(engine.simulation().clock.tick, 0);
 }
+
+#[test]
+fn overlay_is_user_intent_not_server_placement_prediction_and_rejects_bad_binding() {
+    let mut engine = engine();
+    let world = world();
+    engine
+        .handle_command(frame(world.observe(FactionId(0)).unwrap()))
+        .unwrap();
+    let value = serde_json::json!({"type":"ARENA_OVERLAY", "worldId":"0".repeat(32), "drag":[[7.0,6.0],[2.0,3.0]], "placement":{"kind":"bld.signal_beacon","origin":[4,4]}});
+    engine.handle_command(command(value.clone())).unwrap();
+    let scene = engine.frame_scene();
+    assert_eq!(scene.layer_instances(RenderLayer::Overlay).len(), 2);
+    assert!(
+        scene
+            .layer_instances(RenderLayer::Overlay)
+            .iter()
+            .all(|i| i.pick_id == 0)
+    );
+    for bad in [
+        serde_json::json!({"worldId":"f".repeat(32)}),
+        serde_json::json!({"drag":[[1e10,0.0],[1.0,1.0]]}),
+    ] {
+        let mut invalid = value.clone();
+        for (key, val) in bad.as_object().unwrap() {
+            invalid[key] = val.clone();
+        }
+        assert!(engine.handle_command(command(invalid)).is_err());
+        assert_eq!(engine.frame_scene(), scene);
+    }
+    engine
+        .handle_command(command(
+            serde_json::json!({"type":"ARENA_OVERLAY", "worldId":"0".repeat(32), "drag":null,"placement":null}),
+        ))
+        .unwrap();
+    assert!(engine.frame_scene().layer_instances(RenderLayer::Overlay).is_empty());
+    assert_eq!(engine.simulation().clock.tick, 0);
+}
+
+#[test]
+fn real_gpu_draws_hollow_drag_and_neutral_placement_without_hidden_occupancy_signal() {
+    let Some(owner) = common::gpu() else {
+        return;
+    };
+    let world = world();
+    let mut engine = engine();
+    let mut obs = world.observe(FactionId(0)).unwrap();
+    let mut enemy = world.observe(FactionId(1)).unwrap().units.remove(0);
+    enemy.position = rynvek_rts::math::Vec2::new(
+        rynvek_core::fixed::Q32_32::from_int(5),
+        rynvek_core::fixed::Q32_32::from_int(5),
+    );
+    obs.units = vec![enemy];
+    obs.buildings.clear();
+    obs.visibility_width = 2;
+    obs.visibility = vec![0; 4];
+    engine.handle_command(frame(obs.clone())).unwrap();
+    engine.handle_command(command(serde_json::json!({"type":"ARENA_OVERLAY","worldId":"0".repeat(32),"drag":[[4.0,7.0],[2.0,4.0]],"placement":{"kind":"bld.signal_beacon","origin":[4,4]}}))).unwrap();
+    engine.attach_gpu(owner).unwrap();
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    engine.enable_rendering(format).unwrap();
+    engine.camera = Camera2D::new([4.0, 4.0], 32.0, [256, 256]);
+    let target = OffscreenTarget::new(engine.gpu_owner().unwrap().device(), [256, 256], format);
+    assert!(engine.render_frame(&target.color_view));
+    let owner = engine.gpu_owner().unwrap();
+    let pixels = target.read_color_blocking(owner.device(), owner.queue());
+    let at = |x: usize, y: usize| &pixels[(y * 256 + x) * 4..(y * 256 + x) * 4 + 4];
+    assert_eq!(at(64, 176), [200, 239, 160, 255]);
+    assert_eq!(at(96, 223), [200, 239, 160, 255]);
+    assert_eq!(at(160, 128), [234, 214, 134, 255]);
+    assert_eq!(at(96, 176), WorldPalette::NEUTRAL_DARK.background.0);
+    assert_eq!(at(160, 160), WorldPalette::NEUTRAL_DARK.background.0);
+    eprintln!(
+        "[原生软件GL，非浏览器] 反向非正方拖框={:?}，落点轮廓={:?}，隐藏占地内部={:?}",
+        at(64, 176),
+        at(160, 128),
+        at(160, 160)
+    );
+    // 隐藏占地有无敌人，预览全部像素必须相同，不能形成合法性/占用侧信道。
+    obs.units.clear();
+    obs.tick += 1;
+    engine.handle_command(frame(obs)).unwrap();
+    assert!(engine.render_frame(&target.color_view));
+    let owner = engine.gpu_owner().unwrap();
+    assert_eq!(pixels, target.read_color_blocking(owner.device(), owner.queue()));
+    engine
+        .handle_command(command(
+            serde_json::json!({"type":"ARENA_OVERLAY","worldId":"0".repeat(32),"drag":null,"placement":null}),
+        ))
+        .unwrap();
+    assert!(engine.render_frame(&target.color_view));
+    let owner = engine.gpu_owner().unwrap();
+    let cleared = target.read_color_blocking(owner.device(), owner.queue());
+    assert_eq!(
+        &cleared[(176 * 256 + 64) * 4..(176 * 256 + 64) * 4 + 4],
+        WorldPalette::NEUTRAL_DARK.background.0
+    );
+    assert!(owner.take_uncaptured_errors().is_empty());
+    assert_eq!(engine.simulation().clock.tick, 0);
+}

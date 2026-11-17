@@ -72,6 +72,9 @@ test("真实WASM接收服务端校验地图和选择协议，拒绝错哈希/错
     assert.ok(post(fixture.commands.find(x => x.type === "ARENA_OBSERVATION")).some(x => x.type === "ENGINE_ERROR"), "地图尺寸约束真实生效");
     assert.deepEqual(post({type: "ARENA_OBSERVATION", worldId, observation}), []);
     assert.deepEqual(post({type: "ARENA_SELECTION", worldId, units: [observation.units[0].id], building: null}), []);
+    assert.deepEqual(post({type: "ARENA_OVERLAY", worldId, drag: [[7,6],[2,3]], placement: {kind: "bld.signal_beacon", origin: [4,4]}}), []);
+    assert.ok(post({type: "ARENA_OVERLAY", worldId, drag: [[1e10,0],[2,3]], placement: null}).some(x => x.type === "ENGINE_ERROR"));
+    assert.deepEqual(post({type: "ARENA_OVERLAY", worldId, drag: null, placement: null}), []);
     assert.deepEqual(JSON.parse(worker.frame(3000)), []);
     assert.deepEqual(post({type: "ARENA_OBSERVATION", worldId, observation}), []);
     assert.ok(post({type: "ARENA_SELECTION", worldId: "f".repeat(32), units: [], building: null}).some(x => x.type === "ENGINE_ERROR"));

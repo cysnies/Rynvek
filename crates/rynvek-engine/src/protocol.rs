@@ -101,12 +101,25 @@ pub enum EngineCommand {
         units: Vec<u32>,
         building: Option<u32>,
     },
+    /// 用户的拖框/建造落点意图；不携带服务端合法性判决。
+    ArenaOverlay {
+        world_id: String,
+        drag: Option<[[f32; 2]; 2]>,
+        placement: Option<ArenaPlacement>,
+    },
     /// 服务器已经按阵营裁剪的观察；不是权威世界或本地仿真输入。
     ArenaObservation {
         world_id: String,
         observation: Box<rynvek_rts::observation::FactionObservation>,
     },
     Shutdown,
+}
+
+/// 建筑落点预览只提供类型和 Tile 原点，占地复用同一建筑规格。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArenaPlacement {
+    pub kind: rynvek_rts::ids::BuildingKind,
+    pub origin: [u32; 2],
 }
 
 /// 浏览器 SDK 解码后的权威静态地形；使用同一 BLAKE3 字节序列二次校验。
