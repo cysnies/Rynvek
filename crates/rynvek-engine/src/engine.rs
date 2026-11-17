@@ -786,7 +786,7 @@ impl Engine {
             self.last_tick,
             self.camera.lod(),
             self.layer_mask,
-            &[&EntityProvider],
+            &[&EntityProvider::default()],
         );
         let field = FieldOverlay {
             buffer: gpu.mirror.channel_buffer(self.heatmap_channel),
