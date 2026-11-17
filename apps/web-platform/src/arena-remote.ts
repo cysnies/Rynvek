@@ -4,6 +4,8 @@
 /** 当前权威世界的 HTTP/WS 与只读重演适配。不造世界、帧、资源、基因或本地仿真。 */
 import type { ArenaClientMessage, ArenaServerMessage, ArenaTransport, FactionObservation, MapInfo, MatchMode, RtsEvent } from "@rynvek/client";
 
+import { PrivateAgentHubClient } from "@rynvek/agent-sdk";
+
 export interface WorldRun {
   world_id:string;match_id:string;principal_id:string;faction:number;mode:MatchMode;
   match_state:string;tick:number;recovered:boolean;custom?:boolean;
@@ -43,13 +45,18 @@ function uuid(value:string):string {
 }
 export class ArenaWorldClient {
   readonly origin:string;
+  private agentHub:PrivateAgentHubClient|null=null;
   constructor(origin:string,private token:string,private readonly fetcher:typeof fetch=fetch){
     const u=new URL(origin);
     if(!["http:","https:"].includes(u.protocol)||u.username||u.password||u.pathname!=="/"||u.search||u.hash)throw new Error("服务地址只允许HTTP(S) origin");
     if(!token.trim())throw new Error("缺少内存凭据");
     this.origin=u.origin;
   }
-  destroy():void{this.token="";}
+  privateAgentHub(ownerId:string):PrivateAgentHubClient {
+    if(!this.agentHub||this.agentHub.ownerId!==ownerId){this.agentHub?.destroy();this.agentHub=new PrivateAgentHubClient(this.origin,ownerId,()=>this.token,this.fetcher);}
+    return this.agentHub;
+  }
+  destroy():void{this.agentHub?.destroy();this.agentHub=null;this.token="";}
   private headers():Record<string,string>{if(!this.token)throw new Error("身份已断开");return {Authorization:`Bearer ${this.token}`,"Content-Type":"application/json"};}
   private async request<T>(path:string,method:string,body:unknown,signal?:AbortSignal):Promise<T>{
     const r=await this.fetcher(`${this.origin}/api/v1/${path}`,{method,headers:this.headers(),cache:"no-store",redirect:"error",...(signal?{signal}:{}),...(body===undefined?{}:{body:JSON.stringify(body)})});

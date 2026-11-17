@@ -10,6 +10,7 @@ import { buildCommandPanelView, mountCommandPanel } from "./arena-command-panel.
 import { fogAt, project, unproject, viewScale, type Viewport } from "./arena-view.js";
 import { mountArenaRenderer } from "./arena-renderer.js";
 import { ArenaWorldClient, ReplayObservationTransport, ObserverTransport, type ObserverFrame, type ObserverGrant, type WorldRun, type PlaybackFrame, type QueueContext, type CustomRoomView } from "./arena-remote.js";
+import { mountPrivateAgentPanel } from "./private-agent-panel.js";
 import "./browser.css";
 
 const gpuRequested = new URLSearchParams(location.search).get("renderer") === "webgpu";
@@ -59,6 +60,8 @@ let armed:"Move"|"Harvest"|null=null;
 let pointer:[number,number]=[0,0];
 let drag:{x:number;y:number;world:[number,number]}|null=null;
 let logLines:string[]=[];
+const agentRoot=document.createElement("section");agentRoot.className="panel";el("capability").closest("section")!.after(agentRoot);
+const privateAgents=mountPrivateAgentPanel(agentRoot,()=>session&&!session.practice&&!session.custom&&session.mode==="PvE_Survival"&&connected&&!starting&&!playback&&!watching&&arena&&!arena.client.observation?.outcome?{worldId:session.world_id,principalId:session.principal_id,arena:arena.client,hub:session.client.privateAgentHub(session.principal_id)}:null);
 const labels:Partial<Record<BuildingKind,string>>={"bld.nexus_core":"主脑","bld.biomass_harvester":"萃取器","bld.signal_beacon":"信标","bld.spawning_vat":"孵化槽","bld.pulse_turret":"防御塔","bld.flux_reactor":"反应堆","bld.synapse_refinery":"精炼厂","bld.mutation_crucible":"坩埚"};
 const kinds:BuildingKind[]=["bld.biomass_harvester","bld.signal_beacon","bld.spawning_vat","bld.flux_reactor","bld.pulse_turret","bld.synapse_refinery","bld.mutation_crucible"];
 for(const kind of kinds){
@@ -81,6 +84,7 @@ function refreshPanel():void{
 }
 
 function controls():void{
+  privateAgents.update();
   const active=canControl() && !arena?.client.observation?.outcome;
   button("observe-world").disabled=starting||connected||!!playback||!!watching||!!rankClient||!!customClient;
   button("leave-observer").disabled=!watching||starting;
@@ -124,6 +128,7 @@ async function deadline<T>(pending:Promise<T>,label:string):Promise<T>{
   finally{clearTimeout(timer);}
 }
 function clearRuntime():void{
+  privateAgents.reset();
   request?.abort();request=null;
   if(customTimer)clearTimeout(customTimer);customTimer=null;customRead?.abort();customRead=null;
   grantRequest?.abort();grantRequest=null;grantBusy=false;observerGrants=[];el("observer-grants").replaceChildren();
