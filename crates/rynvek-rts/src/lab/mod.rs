@@ -189,7 +189,7 @@ pub struct RunPlan {
 }
 
 /// run 汇总行
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunRecord {
     pub run: u32,
     pub variant: String,
@@ -212,7 +212,7 @@ pub struct RunRecord {
 }
 
 /// 指标采样行（每个采样 Tick × 玩家阵营一行）
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MetricRow {
     pub run: u32,
     pub tick: u64,
@@ -232,7 +232,7 @@ pub struct MetricRow {
 }
 
 /// 真实单位谱系节点；非自然出生的亲代未知，不能从slug/目录猜测。
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LineageRow {
     pub run: u32,
     pub faction: u8,
@@ -249,7 +249,7 @@ pub struct LineageRow {
 }
 
 /// 一个run的全世界生命账采样；u128汇总后用Arrow Decimal128精确导出，不转浮点。
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnergyRow {
     pub enabled: bool,
     pub run: u32,
@@ -269,7 +269,7 @@ pub struct EnergyRow {
 }
 
 /// 一个实验的全部结果
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExperimentResult {
     pub runs: Vec<RunRecord>,
     pub metrics: Vec<MetricRow>,
@@ -376,6 +376,19 @@ pub fn outcome_parts(outcome: Option<&MatchOutcome>) -> (Option<u8>, String) {
 
 /// 执行单个 run
 pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResult {
+    run_one_interruptible(plan, ticks, sample_every, &|| false).expect("未设置中断")
+}
+
+/// 持久Lab执行器在Tick边界协作中断；已完成run可恢复，未完成run从种子重算。
+pub fn run_one_interruptible(
+    plan: &RunPlan,
+    ticks: u64,
+    sample_every: u64,
+    stop: &dyn Fn() -> bool,
+) -> Option<ExperimentResult> {
+    if stop() {
+        return None;
+    }
     let mut world = ArenaWorld::new(plan.variant.match_config(plan.seed));
     let players: Vec<FactionId> = world.factions.iter().map(|f| f.id).collect();
     let mut accepted = 0u64;
@@ -387,6 +400,9 @@ pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResul
     let mut energy = Vec::new();
     observe_lineage(&world, plan.run, &mut seen);
     while world.tick < ticks && !world.is_over() {
+        if stop() {
+            return None;
+        }
         for &f in &players {
             let o = run_policy(&mut world, f, plan.variant.policy);
             accepted += u64::from(o.accepted);
@@ -419,7 +435,10 @@ pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResul
     };
     let mut lineage: Vec<LineageRow> = seen.into_values().collect();
     lineage.sort_by_key(|r| (r.born_tick, r.entity));
-    ExperimentResult {
+    if stop() {
+        return None;
+    }
+    Some(ExperimentResult {
         runs: vec![RunRecord {
             run: plan.run,
             variant: plan.variant.label.clone(),
@@ -445,7 +464,7 @@ pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResul
         metrics,
         lineage,
         energy,
-    }
+    })
 }
 
 // 自然出生有不可变历史，即使同Tick被杀也不会漏记；不依赖采样时仍存活。

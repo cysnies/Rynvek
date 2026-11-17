@@ -69,12 +69,7 @@ pub async fn data_export(State(app): State<AppState>, headers: HeaderMap) -> Api
         }
     }
     let audit = store.audit_of(pid).await?;
-    let experiments: Vec<_> = app
-        .experiments()
-        .values()
-        .filter(|e| e.owner_principal_id == pid)
-        .cloned()
-        .collect();
+    let experiments = app.store().lab_list(pid, 512, 0).await?;
     let archive = serde_json::json!({
         "format": "rynvek-data-export/1",
         "generated_at_unix_s": unix_now_s(),

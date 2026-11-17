@@ -204,6 +204,11 @@ impl PostgresStore {
         ))
         .await
         .map_err(db_err)?;
+        c.batch_execute(include_str!(
+            "../../../rynvek-storage/migrations/postgres/0006_lab_jobs.sql"
+        ))
+        .await
+        .map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -1035,3 +1040,6 @@ async fn insert_match_tx(
 
 #[path = "postgres_agents.rs"]
 mod agents;
+
+#[path = "postgres_lab.rs"]
+mod lab;

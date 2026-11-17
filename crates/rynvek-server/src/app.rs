@@ -84,30 +84,6 @@ impl Default for AppConfig {
     }
 }
 
-/// Lab 实验任务：`queued` → `running` → `completed` / `failed`
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub struct Experiment {
-    pub exp_id: String,
-    pub owner_principal_id: u64,
-    pub name: String,
-    pub seeds: Vec<u64>,
-    pub ticks: u64,
-    pub sample_every: u64,
-    pub variants: Vec<rynvek_rts::lab::VariantSpec>,
-    pub status: String,
-    pub submitted_at_unix_s: u64,
-    pub started_at_unix_s: Option<u64>,
-    pub completed_at_unix_s: Option<u64>,
-    pub runs_total: usize,
-    pub runs_done: usize,
-    /// `metrics` 表 Parquet 的 CAS 标识（执行完成后才有；路由 18 缺省下载此表）
-    pub parquet_cid: Option<String>,
-    /// 全部结果表 → CAS 标识（`runs` / `metrics` / `lineage`）
-    pub tables: BTreeMap<String, String>,
-    /// 失败原因
-    pub error: Option<String>,
-}
-
 /// 进行中对局注册表
 #[derive(Debug, Default)]
 pub struct MatchRegistry {
@@ -162,9 +138,8 @@ pub struct AppInner {
     /// 配对到宿主发布期间串行化查询/取消，避免报告虚假离队或重复建局。
     pub matchmaking_gate: tokio::sync::Mutex<()>,
     pub registry: Mutex<MatchRegistry>,
-    pub experiments: Mutex<BTreeMap<String, Experiment>>,
-    /// Lab 执行并发槽
-    pub lab_slots: Arc<tokio::sync::Semaphore>,
+    pub lab_stop: tokio::sync::watch::Sender<bool>,
+    pub lab_workers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     pub practice_slots: Arc<tokio::sync::Semaphore>,
     /// 创作世界启动在本节点串行化；不持有同步注册表锁跨 await。
     pub authored_arena_start: tokio::sync::Mutex<()>,
@@ -225,8 +200,8 @@ impl AppState {
                 agent_slots: Arc::new(tokio::sync::Semaphore::new(2)),
                 matchmaking_gate: tokio::sync::Mutex::new(()),
                 registry: Mutex::new(MatchRegistry::default()),
-                experiments: Mutex::new(BTreeMap::new()),
-                lab_slots: Arc::new(tokio::sync::Semaphore::new(config.lab_max_concurrent.max(1))),
+                lab_stop: tokio::sync::watch::channel(false).0,
+                lab_workers: Mutex::new(Vec::new()),
                 plugins: std::sync::OnceLock::new(),
                 signer,
                 resume_secret: secret,
@@ -236,6 +211,7 @@ impl AppState {
             }),
         };
         tokio::spawn(finalizer(state.clone(), rx));
+        crate::lab_jobs::start_workers(&state);
         Ok(state)
     }
 
@@ -260,10 +236,6 @@ impl AppState {
 
     pub fn challenges(&self) -> std::sync::MutexGuard<'_, AuthChallenges> {
         lock(&self.inner.challenges)
-    }
-
-    pub fn experiments(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Experiment>> {
-        lock(&self.inner.experiments)
     }
 
     /// 共享的 WASM 插件运行时

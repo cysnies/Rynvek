@@ -472,7 +472,7 @@ async fn lab_and_account_lifecycle() {
         "POST",
         "/api/v1/lab/experiments",
         t,
-        json!({ "name": "种子扫描", "seeds": [1, 2, 3], "ticks": 600 }),
+        json!({ "submission_id":rynvek_server::ids::new_uuid_v7().to_string(),"name": "种子扫描", "seeds": [1, 2, 3], "ticks": 600 }),
     )
     .await;
     assert_eq!(r.status, 202);
@@ -485,7 +485,7 @@ async fn lab_and_account_lifecycle() {
             "POST",
             "/api/v1/lab/experiments",
             t,
-            json!({ "name": "x", "seeds": [], "ticks": 1 }),
+            json!({ "submission_id":rynvek_server::ids::new_uuid_v7().to_string(),"name": "x", "seeds": [], "ticks": 1 }),
         )
         .await,
         400,
@@ -792,6 +792,7 @@ async fn ecology_lab_exports_private_real_lineage_energy_and_structured_status()
     let owner = register(&base, "ecology-lab-owner", "human", 41).await;
     let other = register(&base, "ecology-lab-other", "human", 42).await;
     let spec = json!({"name":"自然家谱","seeds":[57],"ticks":600,"sample_every":300,
+    "submission_id":rynvek_server::ids::new_uuid_v7().to_string(),
     "variants":[{"label":"自然复制","policy":"ecology","ecology":{"roles":{"unit.forager":{
       "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
     ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50},"unit.striker":{
@@ -940,7 +941,12 @@ async fn studio_authoring_real_params_genome_rule_template_commit_and_private_re
     assert_eq!(send(&base, "POST", &path, t, patch).await.status, 409);
     assert_eq!(get(&base, &read, t).await.json().unwrap(), restored);
     let deletion = json!({"patch_id":vec![26;16],"base_authoring_revision":ack["world_revision"],"hlc":{"wall_time_ms":2,"logical_counter":0,"author_node_id":1},"safety_class":"EpochBoundarySafe","operations":[{"RemoveRuleModule":{"module_id":"control"}}]});
-    assert_eq!(send(&base, "POST", &path, Some(&other.token), deletion.clone()).await.status, 404);
+    assert_eq!(
+        send(&base, "POST", &path, Some(&other.token), deletion.clone())
+            .await
+            .status,
+        404
+    );
     let mut under = deletion.clone();
     under["safety_class"] = json!("TickBoundarySafe");
     assert_eq!(send(&base, "POST", &path, t, under).await.status, 422);
@@ -955,14 +961,18 @@ async fn studio_authoring_real_params_genome_rule_template_commit_and_private_re
     assert_eq!(send(&base, "POST", &path, t, deletion.clone()).await.status, 409);
     let mut missing = deletion.clone();
     missing["base_authoring_revision"] = removed["world_revision"].clone();
-    missing["patch_id"] = json!(vec![27;16]);
+    missing["patch_id"] = json!(vec![27; 16]);
     assert_eq!(send(&base, "POST", &path, t, missing).await.status, 422);
     assert_eq!(get(&base, &read, t).await.json().unwrap(), baseline);
     let mut restore = deletion;
-    restore["patch_id"] = json!(vec![28;16]);
+    restore["patch_id"] = json!(vec![28; 16]);
     restore["base_authoring_revision"] = removed["world_revision"].clone();
-    restore["operations"] = json!([{"UpdateRuleModule":{"module_id":"control","rule_graph_json":source,"compiled_rir_blake3":hash}}]);
+    restore["operations"] =
+        json!([{"UpdateRuleModule":{"module_id":"control","rule_graph_json":source,"compiled_rir_blake3":hash}}]);
     assert_eq!(send(&base, "POST", &path, t, restore).await.status, 200);
-    assert_eq!(get(&base, &read, t).await.json().unwrap()["baseline"]["rules"], restored["baseline"]["rules"]);
+    assert_eq!(
+        get(&base, &read, t).await.json().unwrap()["baseline"]["rules"],
+        restored["baseline"]["rules"]
+    );
     server.shutdown().await;
 }

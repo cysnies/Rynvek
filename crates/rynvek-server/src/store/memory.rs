@@ -18,6 +18,7 @@ use crate::error::ApiError;
 
 #[derive(Debug, Default)]
 struct Tables {
+    lab_jobs: BTreeMap<String, crate::lab_jobs::LabJob>,
     private_agents: BTreeMap<(u64, String, String), super::PrivateAgentRow>,
     ranked_deadlines: BTreeMap<WireUuid, u64>,
     ranked_tickets: Vec<crate::ranked::QueueTicket>,
@@ -54,6 +55,135 @@ fn missing_fk(what: &str) -> ApiError {
 }
 
 impl MemoryStore {
+    pub fn lab_submit(&self, job: crate::lab_jobs::LabJob) -> StoreResult<crate::lab_jobs::Experiment> {
+        let mut t = self.lock();
+        let owner = job.experiment.owner_principal_id;
+        if !t
+            .principals
+            .get(&owner)
+            .is_some_and(|p| p.status == PrincipalStatus::Active)
+        {
+            return Err(conflict("作业所有者失效"));
+        }
+        if let Some(old) = t.lab_jobs.values().find(|j| {
+            j.experiment.owner_principal_id == owner && j.experiment.submission_id == job.experiment.submission_id
+        }) {
+            return if old.experiment.spec_digest == job.experiment.spec_digest {
+                Ok(old.experiment.clone())
+            } else {
+                Err(conflict("提交键已绑定不同规格"))
+            };
+        }
+        let own: Vec<_> = t
+            .lab_jobs
+            .values()
+            .filter(|j| j.experiment.owner_principal_id == owner)
+            .collect();
+        if own.len() >= crate::lab_jobs::MAX_JOBS
+            || own.iter().filter(|j| j.active()).count() >= crate::lab_jobs::MAX_ACTIVE
+        {
+            return Err(conflict("Lab持久作业配额已满"));
+        }
+        let e = job.experiment.clone();
+        t.lab_jobs.insert(e.exp_id.clone(), job);
+        Ok(e)
+    }
+    pub fn lab_get(&self, owner: u64, id: String) -> StoreResult<Option<crate::lab_jobs::LabJob>> {
+        Ok(self
+            .lock()
+            .lab_jobs
+            .get(&id)
+            .filter(|j| j.experiment.owner_principal_id == owner)
+            .cloned())
+    }
+    pub fn lab_list(&self, owner: u64, limit: u32, offset: u32) -> StoreResult<Vec<crate::lab_jobs::Experiment>> {
+        Ok(self
+            .lock()
+            .lab_jobs
+            .values()
+            .rev()
+            .filter(|j| j.experiment.owner_principal_id == owner)
+            .skip(offset as usize)
+            .take(limit as usize)
+            .map(|j| j.experiment.clone())
+            .collect())
+    }
+    pub fn lab_claim(&self, node: String) -> StoreResult<Option<crate::lab_jobs::LabJob>> {
+        let mut t = self.lock();
+        let now = crate::ids::unix_now_s();
+        let id = t
+            .lab_jobs
+            .iter()
+            .find(|(_, j)| {
+                j.eligible(now)
+                    && t.principals
+                        .get(&j.experiment.owner_principal_id)
+                        .is_some_and(|p| p.status == PrincipalStatus::Active)
+            })
+            .map(|(k, _)| k.clone());
+        let Some(id) = id else { return Ok(None) };
+        let j = t.lab_jobs.get_mut(&id).unwrap();
+        if j.claim(node, now)? {
+            Ok(Some(j.clone()))
+        } else {
+            Ok(None)
+        }
+    }
+    pub fn lab_control(
+        &self,
+        owner: u64,
+        id: String,
+        op: crate::lab_jobs::OwnerAction,
+    ) -> StoreResult<crate::lab_jobs::Experiment> {
+        let mut t = self.lock();
+        let active = t
+            .principals
+            .get(&owner)
+            .is_some_and(|p| p.status == PrincipalStatus::Active);
+        let old = t
+            .lab_jobs
+            .get(&id)
+            .filter(|j| j.experiment.owner_principal_id == owner && active)
+            .ok_or_else(|| ApiError::not_found("实验不存在"))?;
+        if op.action == "retry"
+            && t.lab_jobs
+                .values()
+                .filter(|j| j.experiment.owner_principal_id == owner && j.active())
+                .count()
+                >= crate::lab_jobs::MAX_ACTIVE
+            && !old.operations.contains_key(&op.operation_id)
+        {
+            return Err(conflict("Lab活动作业配额已满"));
+        }
+        let mut job = old.clone();
+        job.owner_action(op, crate::ids::unix_now_s())?;
+        let exp = job.experiment.clone();
+        t.lab_jobs.insert(id, job);
+        Ok(exp)
+    }
+    pub fn lab_worker(
+        &self,
+        claim: crate::lab_jobs::Claim,
+        action: crate::lab_jobs::WorkerAction,
+    ) -> StoreResult<crate::lab_jobs::LabJob> {
+        let mut t = self.lock();
+        if !t
+            .principals
+            .get(&claim.owner)
+            .is_some_and(|p| p.status == PrincipalStatus::Active)
+        {
+            return Err(conflict("所有者已失效"));
+        }
+        let mut job = t
+            .lab_jobs
+            .get(&claim.id)
+            .cloned()
+            .ok_or_else(|| conflict("Lab租约不存在"))?;
+        job.worker_action(&claim, action, crate::ids::unix_now_s())?;
+        t.lab_jobs.insert(claim.id, job.clone());
+        Ok(job)
+    }
+
     pub fn put_private_agent(&self, row: super::PrivateAgentRow) -> StoreResult<()> {
         let mut t = self.lock();
         let key = (row.owner_id, row.package_id.clone(), row.version.clone());

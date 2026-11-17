@@ -322,6 +322,34 @@ macro_rules! dispatch {
 }
 
 impl Store {
+    pub async fn lab_submit(&self, job: crate::lab_jobs::LabJob) -> StoreResult<crate::lab_jobs::Experiment> {
+        dispatch!(self.lab_submit(job))
+    }
+    pub async fn lab_get(&self, owner: u64, id: String) -> StoreResult<Option<crate::lab_jobs::LabJob>> {
+        dispatch!(self.lab_get(owner, id))
+    }
+    pub async fn lab_list(&self, owner: u64, limit: u32, offset: u32) -> StoreResult<Vec<crate::lab_jobs::Experiment>> {
+        dispatch!(self.lab_list(owner, limit, offset))
+    }
+    pub async fn lab_claim(&self, node: String) -> StoreResult<Option<crate::lab_jobs::LabJob>> {
+        dispatch!(self.lab_claim(node))
+    }
+    pub async fn lab_control(
+        &self,
+        owner: u64,
+        id: String,
+        op: crate::lab_jobs::OwnerAction,
+    ) -> StoreResult<crate::lab_jobs::Experiment> {
+        dispatch!(self.lab_control(owner, id, op))
+    }
+    pub async fn lab_worker(
+        &self,
+        claim: crate::lab_jobs::Claim,
+        action: crate::lab_jobs::WorkerAction,
+    ) -> StoreResult<crate::lab_jobs::LabJob> {
+        dispatch!(self.lab_worker(claim, action))
+    }
+
     pub async fn put_private_agent(&self, row: PrivateAgentRow) -> StoreResult<()> {
         dispatch!(self.put_private_agent(row))
     }

@@ -24,6 +24,7 @@ pub mod error;
 pub mod glicko2;
 pub mod host;
 pub mod ids;
+pub mod lab_jobs;
 pub mod local;
 pub mod matchmaking;
 pub mod patch;
