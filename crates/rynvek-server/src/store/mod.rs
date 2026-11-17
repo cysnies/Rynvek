@@ -334,6 +334,11 @@ impl Store {
         dispatch!(self.list_commits(id))
     }
     /// 追加提交并推进世界的 `latest_*`；`expected_fencing_token` 不符时返回 `0x7005`
+    /// 精确修订与 fencing CAS 认领宿主；在途的旧 HTTP 候选将无法再发布。
+    pub async fn claim_world(&self, id: WireUuid, revision: u64, token: u64, holder: String) -> StoreResult<u64> {
+        dispatch!(self.claim_world(id, revision, token, holder))
+    }
+
     pub async fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
         dispatch!(self.append_commit(commit, expected_fencing_token))
     }

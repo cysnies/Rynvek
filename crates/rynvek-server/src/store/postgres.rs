@@ -393,6 +393,25 @@ impl PostgresStore {
             .collect()
     }
 
+    pub async fn claim_world(&self, id: WireUuid, revision: u64, token: u64, holder: String) -> StoreResult<u64> {
+        if token >= i64::MAX as u64 {
+            return Err(ApiError::new(
+                RynvekErrorCode::StructuralMutationConflict,
+                "fencing 已耗尽",
+            ));
+        }
+        let client = self.client.lock().await;
+        let updated = client.execute("UPDATE worlds SET fencing_token = fencing_token + 1, lease_holder_node = $4, updated_at = NOW() WHERE world_id = $1::text::uuid AND latest_revision = $2 AND fencing_token = $3",
+            &[&uuid_text(&id), &i(revision), &i(token), &holder]).await.map_err(db_err)?;
+        if updated != 1 {
+            return Err(ApiError::new(
+                RynvekErrorCode::StructuralMutationConflict,
+                "宿主认领基线已过期",
+            ));
+        }
+        Ok(token + 1)
+    }
+
     pub async fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
         if commit.parent_revision.and_then(|r| r.checked_add(1)) != Some(commit.world_revision) {
             return Err(ApiError::new(

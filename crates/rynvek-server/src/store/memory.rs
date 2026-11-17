@@ -165,6 +165,17 @@ impl MemoryStore {
             .collect())
     }
 
+    pub fn claim_world(&self, id: WireUuid, revision: u64, token: u64, holder: String) -> StoreResult<u64> {
+        let mut tables = self.lock();
+        let world = tables.worlds.get_mut(&id).ok_or_else(|| missing_fk("world_id"))?;
+        if world.latest_revision != revision || world.fencing_token != token || token >= i64::MAX as u64 {
+            return Err(conflict("宿主认领基线已过期"));
+        }
+        world.fencing_token = token + 1;
+        world.lease_holder_node = Some(holder);
+        Ok(token + 1)
+    }
+
     pub fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
         let mut t = self.lock();
         let world = t.worlds.get(&commit.world_id).ok_or_else(|| missing_fk("world_id"))?;
