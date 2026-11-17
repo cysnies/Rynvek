@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 /** 私有Agent包的协议编解码/签名回调、HTTP消费与显式单步委托。不在SDK/浏览器执行包源码。 */
+import { AgentRunClient } from "./agent-run.js";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { AGENT_TOOL_NAMES, type AgentToolCall, type AgentToolName } from "./index.js";
 const utf8=new TextEncoder();
@@ -50,16 +51,18 @@ export async function signPrivateAgentPackage(ownerId:string,input:AgentPackageI
 }
 export interface PrivateAgentVersion {owner_id:string;package_id:string;version:string;artifact_cid:string;publisher_key:string;signature:string;profile:PrivateAgentProfile;dependencies:PrivateAgentDependency[];verification:{trust_level:3;[key:string]:unknown};revoked:boolean;visibility:"Private"}
 export interface AgentDecision {package_id:string;version:string;artifact_cid:string;world_id:string;principal_id:string;faction:number;tick:number;output:{call:AgentToolCall|null;memory:Record<string,unknown>};gas_used:number;executed:false}
+export class PrivateHubHttpError extends Error {constructor(readonly status:number){super(`私有Hub请求被拒绝 ${status}；未确认执行`);}}
 export class PrivateAgentHubClient {
   readonly origin:string;private enabled=true;
   constructor(origin:string,readonly ownerId:string,private token:()=>string,private fetcher:typeof fetch=fetch) {
     owner(ownerId);const u=new URL(origin);if(!["http:","https:"].includes(u.protocol)||u.username||u.password||u.pathname!=="/"||u.search||u.hash)throw new Error("私有Hub只允许无凭据HTTP(S) origin");this.origin=u.origin;
   }
+  runs():AgentRunClient{return new AgentRunClient(this.ownerId,(path,method,body,signal)=>this.request(path,method,body,signal));}
   destroy():void{this.enabled=false;this.token=()=>"";}
   private async request(path:string,method="GET",body?:unknown,signal?:AbortSignal):Promise<Response> {
     const token=this.enabled?this.token():"";if(!token)throw new Error("私有Hub身份已断开");
-    const r=await this.fetcher(this.origin+path,{method,headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},cache:"no-store",redirect:"error",...(signal?{signal}:{}),...(body===undefined?{}:{body:JSON.stringify(body)})});
-    if(!r.ok)throw new Error(`私有Hub请求被拒绝 ${r.status}；未确认执行`);return r;
+    const r=await this.fetcher(this.origin+path,{method,headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},cache:"no-store",redirect:"error",credentials:"omit",...(signal?{signal}:{}),...(body===undefined?{}:{body:JSON.stringify(body)})});
+    if(!r.ok)throw new PrivateHubHttpError(r.status);return r;
   }
   private check(m:PrivateAgentVersion):PrivateAgentVersion {
     if(!m||m.owner_id!==this.ownerId||m.visibility!=="Private"||typeof m.revoked!=="boolean"||m.verification?.trust_level!==3)throw new Error("私有包归属/信任回执不一致");

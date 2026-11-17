@@ -129,3 +129,5 @@ export function validateToolBatch(batch: readonly AgentToolCall[]): void {
 }
 
 export * from "./private-agent.js";
+
+export * from "./agent-run.js";
