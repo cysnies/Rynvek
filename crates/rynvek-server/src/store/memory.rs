@@ -174,6 +174,12 @@ impl MemoryStore {
                 "fencing_token 已过期：世界租约已被其他节点接管",
             ));
         }
+        if commit.parent_revision != Some(world.latest_revision)
+            || world.latest_revision.checked_add(1) != Some(commit.world_revision)
+            || commit.tick < world.latest_tick
+        {
+            return Err(conflict("提交前驱或 Tick 已过期，拒绝覆盖权威世界"));
+        }
         if t.world_commits.contains_key(&(commit.world_id, commit.world_revision)) {
             return Err(conflict("world_revision 已存在"));
         }
