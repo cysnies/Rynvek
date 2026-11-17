@@ -5,6 +5,37 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第三十一批：C# SDK真实身份、私有世界与原工具链（从main 7830fbc继续）
+
+**主体持续开发，整体未完成。** API `2dcbfaf`、精确协议与schema `f850344`、真实消费 `e71c019`、跨语言端到端 `3dec289`；最终文档HEAD与一次普通push证据见同一项目Page/交接。无公共NuGet/Hub发行、外部部署、假对手或新工具；Arena `/9`、`CURRENT_9`、WAL `rynvek-tick/2`不变。
+
+### 可用入口与完整场景
+
+- `sdks/csharp/Rynvek.Client`（.NET10、纯BCL、IsPackable=false），用法及全部直接验证命令见`sdks/csharp/README.md`。本箱按Microsoft官方脚本正常安装SDK **10.0.404**至`/workspace/tooling/dotnet`，未改用户机器、未绕网络策略。
+- `RegisterAsync/LoginAsync`通过调用者外部Ed25519签名回调真实注册/挑战取会话；私钥不进SDK/包/日志，不从文件/环境隐式取钥。Bearer只在内存、HTTP头及WS Hello，不进URL，不公开token getter。TLS正常校验、禁止重定向/Cookie/自动重试，非loopback强制HTTPS。
+- `ListWorldsAsync/GetWorldAsync/CreatePrivatePveAsync/ConnectPrivatePveAsync` → 原WorldRun/正式JSON WS → 本人fog → 原控制租约/fencing → 命令移动、六工具查询与战略写入 → 原Actor/30Tick/ToolBroker/WAL/真实回执 → 交还与断开清理 → 同身份重登/同世界同match原位置。不使用practice或本地仿真，不自动造局/造人。
+- 补真实缺失的`GET /api/v1/worlds/{world_id}`，复用原WorldRead/load_world鉴权；他人私有/不存在均404，成功private,no-store/Vary Authorization，不返回私有快照/源码/CID。不是SDK声称调用不存在的接口。
+- Principal严格规范u64十进制字符串；Tick/seq/fence/seed/revision原生ulong、实体uint、资源/HP/Q32.32原值long；未知细分结果/事件保留JsonElement，2^96整数可转BigInteger，无double往返。嵌入唯一原`agent-tools.v1.json`，六构造器/严格字段枚举范围校验，无第七工具或advance旁路；命令当前明确IssueOrder/Surrender，其它不提供伪接口。
+- 单reader/串行sender/32在途/1MiB消息，发送前重验fence，匹配seq/回执类型/工具名。超时或取消后的结果可未知：清fog/lease、结束连接与在途任务，不自动重试/不宣称撤回已发命令。128项丢旧notice仅观察通知，不是持久/无损日志；权威取具体receipt和服务端WAL。Dispose解绑子连接并释放生命周期。
+
+### 实际必要验证与未验边界
+
+- `.NET10`实际build **0警告/0错误**；Smoke自检**3组**通过：精确u64/i64/Q32.32/2^96与鉴权字节、六schema构造/拒绝、HTTP凭据/重定向/销毁传输夹具。
+- `RYNVEK_DOTNET=/workspace/tooling/dotnet/dotnet cargo test -p rynvek-server --test csharp_sdk --offline -- --include-ignored --nocapture`：**2项通过**。第一项核对Rust权威鉴权域/六工具夹具；第二项真正启动编译后的C#进程，走本机真实HTTP/WS/Actor。最终生命周期改动后单独再次执行后者通过，不把重复运行计作新用例。
+- 真实场景验证两正式测试身份注册/挑战（Rust只持临时测试签名器，C#自己取会话）、`9007199254740993` seed不失真、本人fog/租约、真实单位位移、查询及间隔30Tick战略HoldPosition落入真实order、交还、断开清理、同主体重新登录恢复原match/位置、他人私有404与真实终局。测试由原Actor显式advance驱动；**不是生产实时钟/长稳验收**。
+- 未全workspace/Clippy/license/SBOM/soak/CI轮询，未WASM/Vite重编。未真实浏览器/GPU/音频设备/PG/多机/断电/24h、Windows/macOS；没公开NuGet。当前C#不是完整排位/多人/观战、二进制Link/WebTransport、私有包构建验签或全部Studio/Lab SDK；未把同Store测试冒称PG灾备。
+
+### t24u：Pi Agent Core官方核对与适配选择（参考，尚未引入）
+
+- 已从官方公开仓库/manifest/许可证/源码核对当前项目 [earendil-works/pi](https://github.com/earendil-works/pi)，包[`@earendil-works/pi-agent-core`](https://github.com/earendil-works/pi/blob/main/packages/agent/package.json)；本次核对main manifest为**1.5.2**（不是声称已安装/核实npm最新发布）。常见历史名称为`badlogic/pi-mono`/`@mariozechner/pi-agent-core`，勿混淆版本。仓库[LICENSE](https://github.com/earendil-works/pi/blob/main/LICENSE)及包声明均**MIT**，版权Mario Zechner；若后续复制必须保留许可/版权并审查固定版本及依赖。本阶段无复制、安装、执行Pi代码或添加依赖。
+- 实际机制来源：[Agent README](https://github.com/earendil-works/pi/blob/main/packages/agent/README.md)、[agent.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent.ts)、[agent-loop.ts](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts)。AgentMessage→transformContext→convertToLlm隔离应用上下文与provider输入；Agent先归约state再await事件监听，waitForIdle等运行清理，低层agentLoop EventStream只是观察，不把异步消费者当执行屏障。工具参数校验/beforeToolCall阻断/abort复查/execute/afterToolCall及start/update/end事件真实存在。
+- 默认工具**并行**：前置检查顺序、完成事件按完成顺序，toolResult写回按assistant源顺序；可选sequential。steer在当前assistant轮后处理，followUp在循环本应停止时处理；abort走AbortController，continue可基于user/toolResult转录续跑，但不等于持久exactly-once恢复。已核对Core的state/messages/队列在内存，**不据此声称整个Pi仓库没有独立持久设施**。
+- 适合下一Agent演进：在**权威Tick之外的可信控制面**借鉴循环/状态/事件/取消/steering，模型只看授权阵营fog投影，provider密钥不进包；六工具一律包原ToolBroker/租约/fence/APM，变更选**顺序执行+30Tick约束**，不用默认并行写。调用状态区分confirmed/rejected/unknown；不确定回执先与原WAL/状态对账才继续，abort不撤回已发工具。不得引入coding-agent文件/bash工具或任意npm插件，不把LLM非确定性塞进仿真或突破QuickJS沙箱。**这里只记录后续Adapter/依赖选择，未实施Pi复用，不推倒已成C#链。**
+
+### 下一主体继续（不是收尾）
+
+**下一优先音频真实事件消费、用户手势解锁/静音/断开生命周期与神经声化。** 不以placeholder或无声测试冒称硬件已验；保持现有迷雾/权限边界。随后在上述Pi参考边界内推进独立Agent/模型控制面与持久执行治理；一般规则/模板/TS/rpack/.rview/协作、Lab一般W3/持久作业、未覆盖生命成本仍欠。全主体齐后集中全面验收，整体不关闭、不无限只磨Arena。
+
 ## 第三十批：私有Agent包、受限运行与SDK真实消费链（从main 9ba04b8继续）
 
 **主体持续开发，整体未完成。** 主要实现锚点 `9abdc3f87733cc3d0a2e3fa645328a19d7ae1fd0`（SDK `bacdcc0`，私有后端 `ec6b1a3`，产品入口 `9abdc3f`）；后续集成前提说明及本进度记录也是普通细提交，最终完整HEAD见同一项目Page/交付回执。未公共Hub发行、外部部署、创建假对手或独立虚构Agent主体。Arena `/9`、`CURRENT_9` 与唯一WAL `rynvek-tick/2` 不变。
@@ -345,7 +376,8 @@
 | 已推进，仍有边界 | 第二十八批私有自创双人控制席位邀请/本人确认/冻结/原Actor开局重连与恢复/整局回收 | 固定两席，不热换人、不公开发布、不计排位；原fog与私有源码/CID隔离，PG实库/长稳未验 |
 | 已推进，仍有边界 | 第二十九批持久排位队列/完整配对预留、唯一席位、宿主租约与原CAS/WAL恢复、终局一次性对账 | 同Store双服务/真实WS通过；健康远端只发现并手动切换，不自动转发Bearer；PG实库多机/掉电未验 |
 | 已推进，仍有边界 | 第三十批owner-private签名Agent三文件包/精确依赖/受限QuickJS/原ToolBroker与SDK真实端到端 | Node真实私有发布下载与战略写入通过；非独立持久Agent/公共Hub发行，PG未实库 |
-| 下一主体优先 | C# SDK真实鉴权HTTP/WS/租约/工具消费，其后音频接原事件与用户手势/生命周期和神经声化 | 当前工具链实消费，不能只生成类型；音频需实际设备边界，不能占位事件或声称硬件验收 |
+| 已推进，仍有边界 | 第三十一批C#真实注册/鉴权、私有HTTP/WS/fog/租约/原命令与六工具消费、同局重连 | .NET10编译、自检3组与Rust2直接用例通过；真实C#进程/原Actor，非全域SDK或多机灾备 |
+| 下一主体优先 | 音频接原可见事件/用户手势/静音/断开生命周期与神经声化；其后Agent控制面可参考Pi Core | 音频需标明实际设备边界；Pi未引入，LLM仅在权威Tick外、六工具原权限与收据治理不变 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付私有Agent包/依赖/沙箱/原ToolBroker与SDK真实消费；下一推进C# SDK和音频主体，不宣称整个Arena、项目、全生态、W3一般规则/持久作业治理或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
+本阶段交付C# SDK精确协议及真实身份/私有世界/原命令工具消费；下一推进音频及后续Agent控制面，不宣称整个Arena、项目、全生态、W3一般规则/持久作业治理或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
