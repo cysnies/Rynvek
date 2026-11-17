@@ -9,7 +9,9 @@
 //! - 私有实验按采样导出全世界精确生命账，出生历史每Tick收集，不受采样间隔漏记。
 //! - 多个 run 用 `std::thread::scope` 并行执行，结果按 run 序号归并，与线程调度无关。
 
+pub mod parameters;
 pub mod policy;
+pub use parameters::{ParameterModel, ParameterOutput};
 
 #[cfg(feature = "arrow")]
 pub mod arrow_io;
@@ -38,6 +40,8 @@ pub enum LabMode {
     Pve,
     /// 双人对局（双方均由脚本策略控制）
     Duel,
+    /// 同一Engine的无RTS身体参数实体profile。
+    Parameters,
 }
 
 /// 实验变体（一组对照条件）
@@ -57,6 +61,8 @@ pub struct VariantSpec {
     /// 显式实验生态契约，仅允许PvE；不改变未指定的世界，也不补免费出生能量。
     #[serde(default)]
     pub ecology: Option<crate::world::ecology::EcologyContract>,
+    #[serde(default)]
+    pub model: Option<ParameterModel>,
 }
 
 impl VariantSpec {
@@ -68,6 +74,7 @@ impl VariantSpec {
             players: None,
             policy: PolicyKind::Economy,
             ecology: None,
+            model: None,
         }
     }
 
@@ -75,6 +82,7 @@ impl VariantSpec {
         self.players.unwrap_or(match self.mode {
             LabMode::Pve => 1,
             LabMode::Duel => 2,
+            LabMode::Parameters => 0,
         })
     }
 
@@ -83,6 +91,7 @@ impl VariantSpec {
         let mut config = match self.mode {
             LabMode::Pve => MatchConfig::pve(seed, self.player_count()),
             LabMode::Duel => MatchConfig::duel(seed),
+            LabMode::Parameters => MatchConfig::parameters(seed),
         };
         config.ecology = self.ecology.clone();
         config
@@ -136,6 +145,7 @@ impl ExperimentSpec {
             return Err(format!("变体数 × 种子数 = {runs}，超过上限 {MAX_RUNS}"));
         }
         let mut labels = std::collections::BTreeSet::new();
+        let mut parameter_rows = 0usize;
         for v in &variants {
             if v.label.is_empty() || v.label.chars().count() > 64 {
                 return Err("变体 label 必须为 1–64 字符".into());
@@ -152,14 +162,37 @@ impl ExperimentSpec {
             if v.policy == PolicyKind::Ecology && v.ecology.is_none() {
                 return Err("ecology策略必须提供显式生态契约".into());
             }
+            if v.mode == LabMode::Parameters {
+                if v.policy != PolicyKind::Idle || v.ecology.is_some() {
+                    return Err("参数实体profile只允许idle策略且没有生态账".into());
+                }
+                let model = v.model.as_ref().ok_or("parameters变体必须嵌入不可变model")?;
+                model.compile()?;
+                parameter_rows = parameter_rows.saturating_add(
+                    model
+                        .outputs
+                        .len()
+                        .saturating_mul(self.ticks.div_ceil(self.sample_every) as usize)
+                        .saturating_mul(self.seeds.len()),
+                );
+            } else if v.model.is_some() {
+                return Err("model只允许parameters profile".into());
+            }
             let p = v.player_count();
             let ok = match v.mode {
                 LabMode::Pve => (1..=2).contains(&p),
                 LabMode::Duel => p == 2,
+                LabMode::Parameters => p == 0,
             };
             if !ok {
                 return Err(format!("变体 {} 的 players={p} 与模式不符", v.label));
             }
+        }
+        if parameter_rows > parameters::MAX_PARAMETER_ROWS {
+            return Err(format!(
+                "参数采样行数{parameter_rows}超过上限{}",
+                parameters::MAX_PARAMETER_ROWS
+            ));
         }
         Ok(())
     }
@@ -203,6 +236,9 @@ pub struct RunRecord {
     /// 结束原因（未结束为 "running"）
     pub end_reason: String,
     pub final_state_root: [u8; 32],
+    pub model_digest: Option<String>,
+    /// 原Engine持久故障(module_id,error_code)，并非模型声称的结果。
+    pub parameter_fault: Option<String>,
     pub commands_accepted: u64,
     pub commands_rejected: u64,
     pub genomes_bred: u32,
@@ -216,19 +252,24 @@ pub struct RunRecord {
 pub struct MetricRow {
     pub run: u32,
     pub tick: u64,
-    pub faction: u8,
-    pub biomass_milli: i64,
-    pub flux_milli: i64,
-    pub neurogel_milli: i64,
-    pub biomass_harvested_total_milli: i64,
-    pub supply_used: u32,
-    pub supply_cap: u32,
-    pub units: u32,
-    pub buildings: u32,
-    pub score_milli: i64,
-    pub wild_units: u32,
+    pub faction: Option<u8>,
+    pub biomass_milli: Option<i64>,
+    pub flux_milli: Option<i64>,
+    pub neurogel_milli: Option<i64>,
+    pub biomass_harvested_total_milli: Option<i64>,
+    pub supply_used: Option<u32>,
+    pub supply_cap: Option<u32>,
+    pub units: Option<u32>,
+    pub buildings: Option<u32>,
+    pub score_milli: Option<i64>,
+    pub wild_units: Option<u32>,
     pub pve_wave: Option<u32>,
     pub state_root: [u8; 32],
+    pub parameter_entity: Option<String>,
+    pub parameter_component: Option<String>,
+    pub parameter_type: Option<String>,
+    /// I32原值、Q8_8原始定点位或Bool(0/1)，不经浮点。
+    pub parameter_value: Option<i32>,
 }
 
 /// 真实单位谱系节点；非自然出生的亲代未知，不能从slug/目录猜测。
@@ -390,6 +431,9 @@ pub fn run_one_interruptible(
         return None;
     }
     let mut world = ArenaWorld::new(plan.variant.match_config(plan.seed));
+    if let Some(model) = &plan.variant.model {
+        model.install(&mut world).expect("运行前必须校验完整不可变模型");
+    }
     let players: Vec<FactionId> = world.factions.iter().map(|f| f.id).collect();
     let mut accepted = 0u64;
     let mut rejected = 0u64;
@@ -417,16 +461,25 @@ pub fn run_one_interruptible(
             }
         }
         observe_lineage(&world, plan.run, &mut seen);
-        if world.tick % sample_every == 0 || world.is_over() || world.tick == ticks {
+        let parameter_fault = plan.variant.mode == LabMode::Parameters && world.parameter_state.fault.is_some();
+        if world.tick % sample_every == 0 || world.is_over() || world.tick == ticks || parameter_fault {
             let root = world.state_hash().0;
-            sample(&world, plan.run, &players, &mut metrics, root);
+            if let Some(model) = &plan.variant.model {
+                parameters::sample(&world, model, plan.run, &mut metrics, root);
+            } else {
+                sample(&world, plan.run, &players, &mut metrics, root);
+            }
             energy.push(sample_energy(&world, plan.run, root));
+        }
+        if parameter_fault {
+            break;
         }
     }
     let outcome = world.outcome.clone();
     let mode = match plan.variant.mode {
         LabMode::Pve => "pve",
         LabMode::Duel => "duel",
+        LabMode::Parameters => "parameters",
     };
     let policy = match plan.variant.policy {
         PolicyKind::Idle => "idle",
@@ -448,7 +501,22 @@ pub fn run_one_interruptible(
             policy: policy.into(),
             final_tick: world.tick,
             winner: outcome_parts(outcome.as_ref()).0,
-            end_reason: outcome_parts(outcome.as_ref()).1,
+            end_reason: if plan.variant.mode == LabMode::Parameters {
+                if world.parameter_state.fault.is_some() {
+                    "rule_fault"
+                } else {
+                    "tick_budget"
+                }
+                .into()
+            } else {
+                outcome_parts(outcome.as_ref()).1
+            },
+            model_digest: plan.variant.model.as_ref().map(ParameterModel::digest),
+            parameter_fault: world
+                .parameter_state
+                .fault
+                .as_ref()
+                .map(|(id, code)| format!("{id}:{code}")),
             final_state_root: world.state_hash().0,
             commands_accepted: accepted,
             commands_rejected: rejected,
@@ -543,19 +611,23 @@ fn sample(world: &ArenaWorld, run: u32, players: &[FactionId], out: &mut Vec<Met
         out.push(MetricRow {
             run,
             tick: world.tick,
-            faction: f.0,
-            biomass_milli: obs.ledger.balance.biomass,
-            flux_milli: obs.ledger.balance.flux,
-            neurogel_milli: obs.ledger.balance.neurogel,
-            biomass_harvested_total_milli: obs.ledger.biomass_harvested_total,
-            supply_used: obs.supply.0,
-            supply_cap: obs.supply.1,
-            units: world.units.values().filter(|u| u.faction == f).count() as u32,
-            buildings: world.buildings.values().filter(|b| b.faction == f).count() as u32,
-            score_milli: obs.score_milli,
-            wild_units,
+            faction: Some(f.0),
+            biomass_milli: Some(obs.ledger.balance.biomass),
+            flux_milli: Some(obs.ledger.balance.flux),
+            neurogel_milli: Some(obs.ledger.balance.neurogel),
+            biomass_harvested_total_milli: Some(obs.ledger.biomass_harvested_total),
+            supply_used: Some(obs.supply.0),
+            supply_cap: Some(obs.supply.1),
+            units: Some(world.units.values().filter(|u| u.faction == f).count() as u32),
+            buildings: Some(world.buildings.values().filter(|b| b.faction == f).count() as u32),
+            score_milli: Some(obs.score_milli),
+            wild_units: Some(wild_units),
             pve_wave: obs.pve_wave,
             state_root: root,
+            parameter_entity: None,
+            parameter_component: None,
+            parameter_type: None,
+            parameter_value: None,
         });
     }
 }
@@ -600,7 +672,8 @@ pub fn run_experiment(spec: &ExperimentSpec, on_run_done: &(dyn Fn(usize, usize)
 pub fn lab_mode_of(mode: MatchMode) -> LabMode {
     match mode {
         MatchMode::PveSurvival => LabMode::Pve,
-        _ => LabMode::Duel,
+        MatchMode::PvpRanked => LabMode::Duel,
+        MatchMode::ParameterEntities => LabMode::Parameters,
     }
 }
 

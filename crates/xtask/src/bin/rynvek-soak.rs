@@ -276,6 +276,7 @@ fn lab_cycle(ctx: &mut Ctx) -> Result<(), String> {
                 players: None,
                 policy: PolicyKind::Economy,
                 ecology: None,
+                model: None,
             },
         ],
     };

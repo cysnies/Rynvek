@@ -478,6 +478,16 @@ impl ArenaWorld {
             command_log: None,
         };
 
+        if world.config.mode == super::MatchMode::ParameterEntities
+            && (!world.units.is_empty()
+                || !world.buildings.is_empty()
+                || !world.factions.is_empty()
+                || world.pve.is_some()
+                || world.ecology.is_some()
+                || world.outcome.is_some())
+        {
+            return Err(RynvekErrorCode::DimensionMismatch);
+        }
         if !world.validate_ecology() {
             return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }

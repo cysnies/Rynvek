@@ -75,6 +75,8 @@ pub fn runs_schema() -> SchemaRef {
         field("waves_spawned", DataType::UInt32, false),
         field("natural_births", DataType::UInt32, false),
         field("max_generation", DataType::UInt32, false),
+        field("model_digest", DataType::Utf8, true),
+        field("parameter_fault", DataType::Utf8, true),
     ]))
 }
 
@@ -83,19 +85,23 @@ pub fn metrics_schema() -> SchemaRef {
     Arc::new(Schema::new(vec![
         field("run", DataType::UInt32, false),
         field("tick", DataType::UInt64, false),
-        field("faction", DataType::UInt8, false),
-        field("biomass_milli", DataType::Int64, false),
-        field("flux_milli", DataType::Int64, false),
-        field("neurogel_milli", DataType::Int64, false),
-        field("biomass_harvested_total_milli", DataType::Int64, false),
-        field("supply_used", DataType::UInt32, false),
-        field("supply_cap", DataType::UInt32, false),
-        field("units", DataType::UInt32, false),
-        field("buildings", DataType::UInt32, false),
-        field("score_milli", DataType::Int64, false),
-        field("wild_units", DataType::UInt32, false),
+        field("faction", DataType::UInt8, true),
+        field("biomass_milli", DataType::Int64, true),
+        field("flux_milli", DataType::Int64, true),
+        field("neurogel_milli", DataType::Int64, true),
+        field("biomass_harvested_total_milli", DataType::Int64, true),
+        field("supply_used", DataType::UInt32, true),
+        field("supply_cap", DataType::UInt32, true),
+        field("units", DataType::UInt32, true),
+        field("buildings", DataType::UInt32, true),
+        field("score_milli", DataType::Int64, true),
+        field("wild_units", DataType::UInt32, true),
         field("pve_wave", DataType::UInt32, true),
         field("state_root", DataType::FixedSizeBinary(32), false),
+        field("parameter_entity", DataType::Utf8, true),
+        field("parameter_component", DataType::Utf8, true),
+        field("parameter_type", DataType::Utf8, true),
+        field("parameter_value", DataType::Int32, true),
     ]))
 }
 
@@ -172,6 +178,10 @@ pub fn runs_batch(rows: &[RunRecord]) -> Result<RecordBatch, ArrowError> {
             arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.waves_spawned))),
             arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.natural_births))),
             arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.max_generation))),
+            arc(StringArray::from_iter(rows.iter().map(|r| r.model_digest.as_deref()))),
+            arc(StringArray::from_iter(
+                rows.iter().map(|r| r.parameter_fault.as_deref()),
+            )),
         ],
     )
 }
@@ -182,25 +192,35 @@ pub fn metrics_batch(rows: &[MetricRow]) -> Result<RecordBatch, ArrowError> {
         vec![
             arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.run))),
             arc(UInt64Array::from_iter_values(rows.iter().map(|r| r.tick))),
-            arc(UInt8Array::from_iter_values(rows.iter().map(|r| r.faction))),
-            arc(Int64Array::from_iter_values(rows.iter().map(|r| r.biomass_milli))),
-            arc(Int64Array::from_iter_values(rows.iter().map(|r| r.flux_milli))),
-            arc(Int64Array::from_iter_values(rows.iter().map(|r| r.neurogel_milli))),
-            arc(Int64Array::from_iter_values(
+            arc(UInt8Array::from_iter(rows.iter().map(|r| r.faction))),
+            arc(Int64Array::from_iter(rows.iter().map(|r| r.biomass_milli))),
+            arc(Int64Array::from_iter(rows.iter().map(|r| r.flux_milli))),
+            arc(Int64Array::from_iter(rows.iter().map(|r| r.neurogel_milli))),
+            arc(Int64Array::from_iter(
                 rows.iter().map(|r| r.biomass_harvested_total_milli),
             )),
-            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.supply_used))),
-            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.supply_cap))),
-            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.units))),
-            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.buildings))),
-            arc(Int64Array::from_iter_values(rows.iter().map(|r| r.score_milli))),
-            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.wild_units))),
+            arc(UInt32Array::from_iter(rows.iter().map(|r| r.supply_used))),
+            arc(UInt32Array::from_iter(rows.iter().map(|r| r.supply_cap))),
+            arc(UInt32Array::from_iter(rows.iter().map(|r| r.units))),
+            arc(UInt32Array::from_iter(rows.iter().map(|r| r.buildings))),
+            arc(Int64Array::from_iter(rows.iter().map(|r| r.score_milli))),
+            arc(UInt32Array::from_iter(rows.iter().map(|r| r.wild_units))),
             arc(UInt32Array::from_iter(rows.iter().map(|r| r.pve_wave))),
             if rows.is_empty() {
                 arc(FixedSizeBinaryArray::new_null(32, 0))
             } else {
                 roots(rows.iter().map(|r| &r.state_root))?
             },
+            arc(StringArray::from_iter(
+                rows.iter().map(|r| r.parameter_entity.as_deref()),
+            )),
+            arc(StringArray::from_iter(
+                rows.iter().map(|r| r.parameter_component.as_deref()),
+            )),
+            arc(StringArray::from_iter(rows.iter().map(|r| r.parameter_type.as_deref()))),
+            arc(arrow::array::Int32Array::from_iter(
+                rows.iter().map(|r| r.parameter_value),
+            )),
         ],
     )
 }
@@ -465,6 +485,7 @@ pub fn parquet_page(bytes: Vec<u8>, offset: usize, limit: usize) -> Result<Table
                             DataType::UInt8 => json!(val!(UInt8Array)),
                             DataType::UInt32 => json!(val!(UInt32Array)),
                             DataType::UInt64 => json!(val!(UInt64Array).to_string()),
+                            DataType::Int32 => json!(val!(arrow::array::Int32Array)),
                             DataType::Int64 => json!(val!(Int64Array).to_string()),
                             DataType::Decimal128(_, 0) => json!(val!(Decimal128Array).to_string()),
                             DataType::Boolean => json!(val!(BooleanArray)),

@@ -1,0 +1,55 @@
+{
+  "schema": "rynvek.lab-parameter-model.v1",
+  "templates": {
+    "model.counter": {
+      "schema": "rynvek.parameter-template.v1",
+      "components": {
+        "state.total": {
+          "ty": "I32",
+          "default": 0
+        },
+        "param.rate": {
+          "ty": "I32",
+          "default": 3
+        },
+        "state.bias": {
+          "ty": "Q8_8",
+          "default": -128
+        },
+        "state.flag": {
+          "ty": "Bool",
+          "default": 1
+        }
+      }
+    }
+  },
+  "instances": {
+    "counter.one": {
+      "template_id": "model.counter",
+      "parameters": {}
+    }
+  },
+  "rules": {
+    "counter": "{\"format\":\"rynvek.rule-graph.v1\",\"name\":\"独立参数实体积分器\",\"reads\":[{\"component\":\"state.total\",\"ty\":\"I32\"},{\"component\":\"param.rate\",\"ty\":\"I32\"}],\"writes\":[{\"component\":\"state.total\",\"ty\":\"I32\"}],\"nodes\":[{\"op\":\"LoadComponent\",\"component\":\"state.total\"},{\"op\":\"LoadComponent\",\"component\":\"param.rate\"},{\"op\":\"Add\",\"args\":[0,1]},{\"op\":\"EmitComponentWrite\",\"component\":\"state.total\",\"args\":[2]}]}"
+  },
+  "bindings": {
+    "counter.step": {
+      "module_id": "counter",
+      "template_id": "model.counter"
+    }
+  },
+  "outputs": [
+    {
+      "instance_id": "counter.one",
+      "component": "state.total"
+    },
+    {
+      "instance_id": "counter.one",
+      "component": "state.bias"
+    },
+    {
+      "instance_id": "counter.one",
+      "component": "state.flag"
+    }
+  ]
+}

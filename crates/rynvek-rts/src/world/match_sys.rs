@@ -186,6 +186,7 @@ impl ArenaWorld {
             .map(|f| f.id)
             .collect();
         match self.config.mode {
+            MatchMode::ParameterEntities => {}
             MatchMode::PveSurvival => {
                 let waves = self.pve.as_ref().map(|d| d.wave).unwrap_or(0);
                 if alive.is_empty() {

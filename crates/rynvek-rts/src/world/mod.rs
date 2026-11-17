@@ -17,11 +17,11 @@
 //! 所有集合以 `BTreeMap<EntitySerial, _>` 保存并按序号遍历；随机性只来自 Philox。
 
 pub mod authoring;
-pub mod parameter_rules;
 mod combat_sys;
 pub mod ecology;
 mod economy;
 mod match_sys;
+pub mod parameter_rules;
 mod persistence;
 mod reproduction;
 mod units_sys;
@@ -77,6 +77,9 @@ pub enum MatchMode {
     PvpRanked,
     #[serde(rename = "PvE_Survival")]
     PveSurvival,
+    /// 无RTS阵营/身体的有界参数实体实验；仍执行同一Phase07规则与规范状态根。
+    #[serde(rename = "Parameter_Entities")]
+    ParameterEntities,
 }
 
 /// 对局配置
@@ -128,6 +131,9 @@ impl TryFrom<MatchConfigWire> for MatchConfig {
 
 impl MatchConfig {
     pub fn validate_energy_contract(&self) -> Result<(), &'static str> {
+        if self.mode == MatchMode::ParameterEntities && self.players != 0 {
+            return Err("参数实体profile不得创建RTS阵营");
+        }
         if let Some(contract) = &self.ecology {
             if self.mode != MatchMode::PveSurvival {
                 return Err("未认证的能量规则不能进入PvP/排位");
@@ -135,6 +141,17 @@ impl MatchConfig {
             contract.validate()?;
         }
         Ok(())
+    }
+
+    pub const fn parameters(seed: u64) -> Self {
+        Self {
+            mode: MatchMode::ParameterEntities,
+            map_size: ArenaMapSize::Duel1v1,
+            map_seed: seed,
+            world_seed: seed,
+            players: 0,
+            ecology: None,
+        }
     }
 
     pub const fn duel(map_seed: u64) -> Self {
@@ -485,9 +502,16 @@ impl ArenaWorld {
 
     /// 用给定地图开局（测试与自定义房间）
     pub fn with_map(config: MatchConfig, map: ArenaMap) -> Self {
-        assert!((1..=2).contains(&config.players), "仅存在 2 个对称出生锚点");
         assert!(
-            config.mode == MatchMode::PveSurvival || config.players == 2,
+            if config.mode == MatchMode::ParameterEntities {
+                config.players == 0
+            } else {
+                (1..=2).contains(&config.players)
+            },
+            "参数profile为0阵营；RTS仅存在2个出生锚点"
+        );
+        assert!(
+            config.mode != MatchMode::PvpRanked || config.players == 2,
             "PvP_Ranked 需要 2 个阵营"
         );
         assert!(
@@ -1204,6 +1228,11 @@ impl ArenaWorld {
     /// 推进一个权威 Tick
     pub fn step(&mut self) {
         if self.outcome.is_some() {
+            return;
+        }
+        if self.config.mode == MatchMode::ParameterEntities {
+            self.step_authored_rules();
+            self.tick += 1;
             return;
         }
         self.step_economy();

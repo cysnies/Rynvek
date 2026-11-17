@@ -48,10 +48,12 @@ class Variant:
     """实验变体（一组对照条件）。"""
 
     label: str
-    mode: Literal["pve", "duel"] = "pve"
+    mode: Literal["pve", "duel", "parameters"] = "pve"
     players: int | None = None
     policy: Literal["idle", "economy", "ecology"] = "economy"
     ecology: EcologyContract | None = None
+    # Immutable bounded World/Rules JSON model, validated/compiled by the original native Engine.
+    model: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
