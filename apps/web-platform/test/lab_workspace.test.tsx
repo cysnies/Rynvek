@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 // @vitest-environment jsdom
+import {readFileSync} from "node:fs";
+import {makeParameterExperiment} from "../src/ParameterExperiment.js";
 import {afterEach,expect,it,vi} from "vitest";
 import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import {LabWorkspace} from "../src/LabWorkspace.js";
@@ -40,7 +42,7 @@ it("断开后迟到的旧身份分析响应不能重新挂回页面",async()=>{
   });
   render(<LabWorkspace fetcher={fetcher as typeof fetch} initialBaseUrl="http://test"/>);connect();
   fireEvent.change(screen.getByLabelText("实验ID"),{target:{value:job.exp_id}});fireEvent.click(screen.getByText("读取实验"));await screen.findByText(/私有快验作业 · completed/);
-  fireEvent.click(screen.getByText("加载真实谱系与能量分析"));await waitFor(()=>expect(pending.length).toBe(3));
+  fireEvent.click(screen.getByText("加载真实谱系与能量分析"));await waitFor(()=>expect(pending.length).toBe(4));
   fireEvent.click(screen.getByText("断开并清空结果"));for(const finish of pending)finish();
   await waitFor(()=>expect(screen.getByLabelText("权限令牌")).toBeTruthy());expect(screen.queryByLabelText("真实自然出生谱系图")).toBeNull();
 });
@@ -64,4 +66,34 @@ it("作业发现、取消/重试消费真实状态；提交不确定时原键原
  fireEvent.click(screen.getByText("显式重试此作业"));await screen.findByText(/私有快验作业 · queued/);
  fireEvent.click(screen.getByText("发现我的持久作业"));await screen.findByRole("button",{name:/私有快验作业 · queued/});
  fireEvent.click(screen.getByText("断开并清空结果"));expect(screen.queryByRole("button",{name:/私有快验作业 · queued/})).toBeNull();
+});
+
+it("参数源导入、真实扫描请求、空谱系的Run发现与CAS轨迹复用现有作业入口",async()=>{
+ const model=JSON.parse(readFileSync("../../examples/lab/parameter-counter.json","utf8"));
+ const parameterJob={...job,name:"参数持久实验",runs_done:2,runs_total:2};let sent:any;
+ const fetcher=vi.fn(async(input:string|URL|Request,init?:RequestInit)=>{
+  const u=new URL(String(input));if(u.pathname.endsWith("/authoring/lab-model"))return Response.json({world_id:"private-studio",revision:"3",model_digest:cid,model});
+  if(init?.method==="POST"){sent=JSON.parse(String(init.body));return Response.json(parameterJob,{status:202});}
+  const t=u.searchParams.get("table");if(t){const values=t==="runs"?[{run:0,variant:"slow",seed:"57",mode:"parameters",end_reason:"tick_budget",model_digest:cid,parameter_fault:null},{run:1,variant:"fast",seed:"57",mode:"parameters",end_reason:"tick_budget",model_digest:cid,parameter_fault:null}]:t==="metrics"?[{run:0,tick:"2",faction:null,score_milli:null,parameter_entity:"counter.one",parameter_component:"state.total",parameter_type:"I32",parameter_value:2},{run:0,tick:"4",faction:null,score_milli:null,parameter_entity:"counter.one",parameter_component:"state.total",parameter_type:"I32",parameter_value:4}]:t==="energy"?[{...energy,enabled:false,live_bodies:0,received_q:"0",stored_q:"0",external_received_q:"0"}]:[];
+    return Response.json({exp_id:job.exp_id,table:t,cid,page:{offset:0,total_rows:values.length,next_offset:null,columns:Object.keys(values[0]??{}),rows:values}});}
+  return Response.json(parameterJob);
+ });
+ render(<LabWorkspace fetcher={fetcher as typeof fetch} initialBaseUrl="http://test"/>);connect();
+ fireEvent.change(screen.getByLabelText("实验模型"),{target:{value:"parameters"}});
+ fireEvent.change(screen.getByLabelText("参数源世界ID"),{target:{value:"private-studio"}});fireEvent.click(screen.getByText("导入有权限的Studio参数模型"));
+ await screen.findByText(/已复制源 private-studio/);await waitFor(()=>expect((screen.getByText("提交真实实验") as HTMLButtonElement).disabled).toBe(false));
+ fireEvent.click(screen.getByText("提交真实实验"));await screen.findByText(/参数持久实验 · completed/);
+ expect(sent.variants.map((v:any)=>v.model.instances["counter.one"].parameters["param.rate"])).toEqual([1,3]);expect(sent.variants.every((v:any)=>v.mode==="parameters"&&v.players===0&&v.policy==="idle")).toBe(true);
+ fireEvent.click(screen.getByText("加载真实谱系与能量分析"));await screen.findByLabelText("真实参数实体轨迹");
+ expect((screen.getByLabelText("分析Run") as HTMLSelectElement).options).toHaveLength(2);
+ expect(screen.queryByLabelText("真实采样存量能量曲线")).toBeNull();expect(screen.queryByLabelText("真实自然出生谱系图")).toBeNull();
+ expect(screen.getByText(/没有原生身体与自然出生/)).toBeTruthy();
+ fireEvent.click(screen.getByText("断开并清空结果"));expect(screen.queryByLabelText("真实参数实体轨迹")).toBeNull();expect(screen.queryByDisplayValue(/rynvek.lab-parameter-model/)).toBeNull();
+});
+it("参数草案不把空值、浮点或state写入当作合法扫描",()=>{
+ const model=readFileSync("../../examples/lab/parameter-counter.json","utf8");
+ const d={name:"scan",seeds:"57",ticks:4,every:2,model,instance:"counter.one",component:"param.rate",values:"1,3"};
+ expect(makeParameterExperiment(d).variants).toHaveLength(2);
+ for(const values of ["1,","1.5","9007199254740993"])expect(()=>makeParameterExperiment({...d,values})).toThrow();
+ expect(()=>makeParameterExperiment({...d,component:"state.total"})).toThrow();
 });
