@@ -19,6 +19,8 @@ pub struct EnergyAccount {
     pub stored_q: u64,
     pub dissipated_q: u64,
     pub exported_q: u64,
+    /// 向其他个体的精确转移，不混入阵营资源导出或热耗。
+    pub transferred_q: u64,
     pub returned_q: u64,
     /// 已观测但未获供能的计算成本，仅诊断（饱和计数），不是负能量或未来债务。
     pub unfunded_q: u64,
@@ -74,6 +76,30 @@ impl EnergyAccount {
         paid
     }
 
+    /// 双账本预检后一次提交；余额、接收方量程或亲本预留不足均不改任一账户。
+    pub fn try_transfer_to(&mut self, recipient: &mut Self, q: u64, retain_q: u64) -> bool {
+        let Some(required) = q.checked_add(retain_q) else {
+            return false;
+        };
+        let Some(received) = recipient.received_q.checked_add(q) else {
+            return false;
+        };
+        let Some(stored) = recipient.stored_q.checked_add(q) else {
+            return false;
+        };
+        let Some(transferred) = self.transferred_q.checked_add(q) else {
+            return false;
+        };
+        if self.stored_q < required {
+            return false;
+        }
+        self.stored_q -= q;
+        self.transferred_q = transferred;
+        recipient.received_q = received;
+        recipient.stored_q = stored;
+        true
+    }
+
     pub fn export_milli(&mut self, room_milli: u64) -> u64 {
         self.export_milli_retaining(room_milli, 0)
     }
@@ -109,6 +135,7 @@ impl EnergyAccount {
                 + u128::from(self.dissipated_q)
                 + u128::from(self.exported_q)
                 + u128::from(self.returned_q)
+                + u128::from(self.transferred_q)
     }
 }
 
@@ -220,5 +247,39 @@ mod basal_tests {
                 assert!(a.is_conserved());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+    #[test]
+    fn offspring_transfer_checks_both_accounts_and_reserve_before_debit() {
+        for available in [0, 3999, 4000, 4001, u64::MAX] {
+            let mut parent = EnergyAccount {
+                received_q: available,
+                stored_q: available,
+                ..Default::default()
+            };
+            let mut child = EnergyAccount::default();
+            let before = parent.clone();
+            assert_eq!(parent.try_transfer_to(&mut child, 4000, 1), available >= 4001);
+            if available < 4001 {
+                assert_eq!(parent, before);
+                assert_eq!(child, EnergyAccount::default());
+            }
+            assert!(parent.is_conserved() && child.is_conserved());
+            assert_eq!(parent.received_q - parent.stored_q, child.received_q);
+        }
+        let mut parent = EnergyAccount::from_milli(1);
+        let mut child = EnergyAccount {
+            received_q: u64::MAX,
+            stored_q: u64::MAX,
+            ..Default::default()
+        };
+        let before = (parent.clone(), child.clone());
+        assert!(!parent.try_transfer_to(&mut child, 1, 0));
+        assert!(!parent.try_transfer_to(&mut child, 1, u64::MAX));
+        assert_eq!((parent, child), before);
     }
 }

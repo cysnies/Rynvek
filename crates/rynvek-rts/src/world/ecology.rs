@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! 显式Forager契约统一局部摄食、实际脉冲预算与首次有来源供能后的生存成本。
-//! 孵化槽出生从原Biomass池另行实扣；其他出生来源不猜测，摄食继续等额扣环境场。
+//! 孵化槽出生实扣Biomass，自然出生由亲本原池分配；摄食继续等额扣环境场。
 use super::ArenaWorld;
 use crate::{EntitySerial, FieldId, UnitKind};
-use rynvek_neural::metabolism::EnergyAccount;
+use rynvek_core::Blake3Hash;
+use rynvek_neural::metabolism::{ENERGY_Q_PER_MILLI, EnergyAccount};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const ECOL_TAG: [u8; 4] = *b"ECOL";
 
@@ -17,20 +18,24 @@ pub const ECOL_TAG: [u8; 4] = *b"ECOL";
 pub struct ForagerEcologyContract {
     pub basal_cost_micro_per_tick: u32,
     pub reserve_ticks: u32,
-    /// 仅孵化槽出生的玩家Forager；完成时从阵营Biomass另行实扣，不重算原建造价。
+    /// 玩家Forager的出生投入；孵化槽实扣Biomass，自然分裂由亲本原能量池支付。
     pub birth_energy_milli: u32,
 }
 
 impl ForagerEcologyContract {
     pub fn validate(self) -> Result<(), &'static str> {
         if self.birth_energy_milli == 0 {
-            return Err("孵化出生能量必须显式大于0，由真实生产池支付");
+            return Err("出生能量必须显式大于0，由生产池或亲本实际支付");
         }
         if self.basal_cost_micro_per_tick == 0 {
             return Err("实验基础代谢成本必须显式大于0");
         }
         self.reserve_q().ok_or("实验代谢预留超出精确能量表示范围")?;
         Ok(())
+    }
+
+    pub fn birth_q(self) -> u64 {
+        u64::from(self.birth_energy_milli) * ENERGY_Q_PER_MILLI
     }
 
     pub fn reserve_q(self) -> Option<u64> {
@@ -54,12 +59,26 @@ pub struct RemainsEnergy {
     pub account: EnergyAccount,
 }
 
+/// 不可变的出生事实；父母死亡后仍保留谱系与出生时的基因指纹，不以适应度选亲本。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MitosisBirth {
+    pub parent: EntitySerial,
+    pub born_tick: u64,
+    pub parent_generation: u32,
+    pub generation: u32,
+    pub parent_genome: Blake3Hash,
+    pub child_genome: Blake3Hash,
+    pub allocated_q: u64,
+}
+
 /// 私有权威组件，按实体序号保存；遗骸保留亚格量子/满场截断余量和历史收支。
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EcologyState {
     pub bodies: BTreeMap<EntitySerial, BodyEnergy>,
     pub remains: BTreeMap<EntitySerial, RemainsEnergy>,
+    pub births: BTreeMap<EntitySerial, MitosisBirth>,
 }
 
 impl ArenaWorld {
@@ -89,6 +108,16 @@ impl ArenaWorld {
                             && b.pending_spikes
                                 <= self.units[id].genome.n_hid * crate::brain::BRAIN_STEPS_PER_EPOCH as u32
                     })
+                    && self.validate_mitosis_accounts(e)
+                    && e.births.iter().all(|(child, birth)| {
+                        birth.parent < *child
+                            && child.0 < self.next_serial
+                            && birth.born_tick <= self.tick
+                            && birth.parent_generation.checked_add(1) == Some(birth.generation)
+                            && birth.allocated_q == self.config.ecology.expect("已检查").birth_q()
+                            && (e.bodies.contains_key(&birth.parent) || e.remains.contains_key(&birth.parent))
+                            && (e.bodies.contains_key(child) || e.remains.contains_key(child))
+                    })
                     && e.remains.iter().all(|(id, r)| {
                         !self.units.contains_key(id)
                             && id.0 < self.next_serial
@@ -108,6 +137,7 @@ impl ArenaWorld {
             return;
         }
         let ids: Vec<_> = self.units.keys().copied().collect();
+        let mut occupied: BTreeSet<_> = self.units.values().map(|u| u.tile()).collect();
         for id in ids {
             let unit = &self.units[&id];
             if unit.defense.hp_milli <= 0 {
@@ -152,19 +182,31 @@ impl ArenaWorld {
             if let Some(contract) = activated {
                 b.account.dissipate_micro(contract.basal_cost_micro_per_tick);
             }
-            let exhausted_before_export = activated.is_some() && b.account.stored_q == 0;
-            let exported = if forager && !exhausted_before_export {
-                b.account.export_milli_retaining(room, reserve_q)
+            let starved = activated.is_some() && b.account.stored_q == 0;
+            if starved {
+                self.units.get_mut(&id).expect("存活个体").defense.hp_milli = 0;
+                self.retire_dead_unit(id);
+                continue;
+            }
+            // 出生优先于资源盈余转出；只用既有出生投入和下一Epoch/代谢预留决定门槛。
+            let parent_reserve_q = reserve_q.max(survival.map_or(0, |c| c.birth_q()));
+            if budgeted {
+                self.try_mitosis(id, parent_reserve_q, &mut occupied);
+            }
+            // 亲子都保留既有出生投入；额外积累一份出生预算，不逐Tick把繁殖所需余量转走。
+            let retain_q = parent_reserve_q.saturating_add(survival.map_or(0, |c| c.birth_q()));
+            let b = self
+                .ecology
+                .as_mut()
+                .expect("已检查")
+                .bodies
+                .get_mut(&id)
+                .expect("仍存活");
+            let exported = if forager {
+                b.account.export_milli_retaining(room, retain_q)
             } else {
                 0
             };
-            // 显式零预留允许余量恰好全部转出；仍须在同一稳定边界退役，不能留零能活体。
-            let starved = activated.is_some() && b.account.stored_q == 0;
-            if starved {
-                // 在代谢边界通过同一死亡/遗骸路径退役，不能随后再攻击、治疗或重新采集。
-                self.units.get_mut(&id).expect("存活个体").defense.hp_milli = 0;
-                self.retire_dead_unit(id);
-            }
             if exported > 0 {
                 let ledger = &mut self.faction_mut(faction).expect("玩家阵营存在").ledger;
                 let accepted = ledger.deposit(crate::ResourceKind::Biomass, exported as i64);

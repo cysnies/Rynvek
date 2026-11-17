@@ -21,6 +21,7 @@ pub mod ecology;
 mod economy;
 mod match_sys;
 mod persistence;
+mod reproduction;
 mod units_sys;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -659,9 +660,21 @@ impl ArenaWorld {
         genome: Genome,
         position: Vec2,
     ) -> EntitySerial {
+        let brain = UnitBrain::from_genome(&genome).expect("种子与繁育基因组必须可表达");
+        self.spawn_unit_with_brain(faction, kind, genome, position, brain)
+    }
+
+    // 自然出生先验证候选脑和付款，再复用同一注册路径，避免扣款后的可恢复错误。
+    fn spawn_unit_with_brain(
+        &mut self,
+        faction: FactionId,
+        kind: UnitKind,
+        genome: Genome,
+        position: Vec2,
+        brain: UnitBrain,
+    ) -> EntitySerial {
         let spec = unit_spec(kind);
         let id = self.alloc_serial();
-        let brain = UnitBrain::from_genome(&genome).expect("种子与繁育基因组必须可表达");
         let armor_bonus = self
             .faction(faction)
             .map(|f| f.modifiers().unit_armor_bonus)
@@ -1276,7 +1289,7 @@ impl ArenaWorld {
         let config_root = {
             let mut h = Hasher::new();
             // 当前格式绑定整个配置，删除历史模式共用标签与二次身份来源。
-            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_4");
+            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_5");
             h.update(&serde_json::to_vec(&self.config).expect("配置仅含确定性枚举和整数"));
             h.update(&self.map.width.to_le_bytes());
             h.update(&self.map.height.to_le_bytes());

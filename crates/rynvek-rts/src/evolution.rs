@@ -57,6 +57,13 @@ impl EvolutionRng {
         }
     }
 
+    /// 自然复制沿用同一Philox算子，但与定向繁育使用不同phase，避免同Tick键碰撞。
+    pub fn for_mitosis(world_seed: u64, tick: u64, entity_serial: u64) -> Self {
+        let mut rng = Self::new(world_seed, tick, entity_serial);
+        rng.key.stream_and_phase = RandomKey::pack_stream_and_phase(EVOLUTION_RNG_STREAM, 1);
+        rng
+    }
+
     pub fn next_u32(&mut self) -> u32 {
         if self.used == 4 {
             self.buf = self.key.generate_u32x4();
