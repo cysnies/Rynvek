@@ -254,3 +254,14 @@ it("挂载后按观测提交真实命令，失败校验不发，回放禁用写�
 afterEach(() => {
   document.body.innerHTML = "";
 });
+
+it("排位生产按兵种选择缺省基因组，观察刷新不打断表单输入",async()=>{
+ const sent:RtsCommand[]=[];const root=document.createElement("section");document.body.append(root);
+ const panel=mountCommandPanel(root,{send:async cmd=>{sent.push(cmd);return {type:"queued"};}});
+ const obs=observation({genomes:["seed.forager.v1","seed.striker.v1"],buildings:[building({id:7,kind:"bld.spawning_vat"})]});
+ panel.update(buildCommandPanelView(obs,7,true));
+ const count=root.querySelector<HTMLInputElement>("[data-field='count']")!;count.focus();count.value="2";
+ panel.update(buildCommandPanelView({...obs,tick:obs.tick+1},7,true));expect(document.activeElement).toBe(count);expect(count.value).toBe("2");
+ (root.querySelector('[data-action="queue"][data-unit="unit.striker"]') as HTMLButtonElement).click();await Promise.resolve();await Promise.resolve();
+ expect(sent).toEqual([{type:"queue_unit",vat:7,unit:"unit.striker",genome_slug:"seed.striker.v1",count:2}]);
+});

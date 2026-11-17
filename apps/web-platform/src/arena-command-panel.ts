@@ -302,7 +302,7 @@ export interface CommandPanelHandle {
 }
 
 interface FormStash {
-  genome?: string | undefined;
+  genomes?: Partial<Record<UnitKind, string>> | undefined;
   count?: string | undefined;
   mutation?: string | undefined;
   breedUnit?: string | undefined;
@@ -329,12 +329,19 @@ export function mountCommandPanel(root: HTMLElement, hooks: CommandPanelHooks): 
     void submit(btn);
   });
 
+  root.addEventListener("focusout", () => queueMicrotask(() => {
+    if (!root.contains(document.activeElement)) render(true);
+  }));
+
   function status(text: string, ok: boolean): void {
     hooks.onStatus?.(text, ok);
   }
 
   function readStash(): FormStash {
-    const g = root.querySelector<HTMLSelectElement>("[data-field='genome']");
+    const genomes: Partial<Record<UnitKind, string>> = {};
+    for (const select of root.querySelectorAll<HTMLSelectElement>("[data-field='genome'][data-unit]")) {
+      genomes[select.dataset.unit as UnitKind] = select.value;
+    }
     const c = root.querySelector<HTMLInputElement>("[data-field='count']");
     const m = root.querySelector<HTMLInputElement>("[data-field='mutation']");
     const u = root.querySelector<HTMLSelectElement>("[data-field='breed-unit']");
@@ -347,7 +354,7 @@ export function mountCommandPanel(root: HTMLElement, hooks: CommandPanelHooks): 
       root.querySelector<HTMLInputElement>("[data-field='modulator-3']")?.value ?? "",
     ];
     return {
-      genome: g?.value,
+      genomes,
       count: c?.value,
       mutation: m?.value,
       breedUnit: u?.value,
@@ -412,7 +419,7 @@ export function mountCommandPanel(root: HTMLElement, hooks: CommandPanelHooks): 
       if (ack && typeof ack === "object" && "type" in ack && (ack as { type: unknown }).type) {
         status(`已提交：${String((ack as { type: unknown }).type)}`, true);
       } else {
-        status("命令已发出，等待权威回执", true);
+        status("命令未确认成功；请查看权威拒绝或连接状态", false);
       }
     } catch (err) {
       status(err instanceof Error ? err.message : String(err), false);
@@ -433,7 +440,7 @@ export function mountCommandPanel(root: HTMLElement, hooks: CommandPanelHooks): 
         status(`队列剩余空位 ${prod.remaining}，无法一次排入 ${count} 个`, false);
         return null;
       }
-      const genome = root.querySelector<HTMLSelectElement>("[data-field='genome']")?.value
+      const genome = root.querySelector<HTMLSelectElement>(`[data-field='genome'][data-unit='${unit}']`)?.value
         || prod.units.find((u) => u.kind === unit)?.defaultGenome
         || defaultGenome(unit, []);
       return { type: "queue_unit", vat: id, unit, genome_slug: genome, count };
@@ -521,9 +528,12 @@ export function mountCommandPanel(root: HTMLElement, hooks: CommandPanelHooks): 
   return {
     update(next: CommandPanelView): void {
       const same = next.selection?.id === lastBuildingId;
+      const editing = same && next.writable === view.writable && root.contains(document.activeElement)
+        && document.activeElement?.matches("input, select");
       view = next;
       lastBuildingId = next.selection?.id ?? null;
-      render(same);
+      // 高频观察不能抢走正在编辑/展开的表单焦点；提交仍使用上面更新后的权威视图。
+      if (!editing) render(same);
     },
   };
 }
@@ -542,18 +552,15 @@ function renderProduction(prod: NonNullable<CommandPanelView["production"]>, dis
       if (!u.affordable) hints.push("资源不足（提示）");
       if (prod.remaining <= 0) hints.push("队列已满");
       const off = disable || incomplete || prod.remaining <= 0;
+      const selectedGenome = stash.genomes?.[u.kind] ?? u.defaultGenome;
+      const options = u.genomes.map(g => `<option value="${escapeHtml(g)}" ${g === selectedGenome ? "selected" : ""}>${escapeHtml(g)}</option>`).join("");
       return `<tr>
-        <td>${escapeHtml(u.nameZh)}</td>
+        <td>${escapeHtml(u.nameZh)}<label>基因组 <select data-field="genome" data-unit="${escapeHtml(u.kind)}" aria-label="${escapeHtml(u.nameZh)}基因组" ${disable ? "disabled" : ""}>${options}</select></label></td>
         <td>${escapeHtml(formatCost(u.cost))}</td>
         <td>${hints.length ? escapeHtml(hints.join(" · ")) : "可排"}</td>
         <td><button type="button" data-action="queue" data-unit="${escapeHtml(u.kind)}" ${off ? "disabled" : ""}>排队生产</button></td>
       </tr>`;
     })
-    .join("");
-  const genomes = prod.units[0]?.genomes ?? [];
-  const selectedGenome = stash.genome && genomes.includes(stash.genome) ? stash.genome : prod.units[0]?.defaultGenome ?? "";
-  const genomeOpts = genomes
-    .map((g) => `<option value="${escapeHtml(g)}" ${g === selectedGenome ? "selected" : ""}>${escapeHtml(g)}</option>`)
     .join("");
   const incompleteHint = incomplete ? `<p class="cmd-warn">孵化槽尚未完工，无法排队。</p>` : "";
   return `<fieldset class="cmd-block" data-panel="production">
@@ -561,7 +568,6 @@ function renderProduction(prod: NonNullable<CommandPanelView["production"]>, dis
     <p>当前队列：${queueText}</p>
     ${incompleteHint}
     <div class="cmd-row">
-      <label>基因组 <select data-field="genome" ${disable ? "disabled" : ""}>${genomeOpts}</select></label>
       <label>数量 <input data-field="count" type="number" min="${QUEUE_COUNT_MIN}" max="${countMax}" value="${escapeHtml(count)}" ${disable ? "disabled" : ""}></label>
       <button type="button" data-action="cancel-queue" ${queueOff ? "disabled" : ""}>取消队尾（全额退款）</button>
     </div>
