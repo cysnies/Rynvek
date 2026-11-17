@@ -268,6 +268,16 @@ pub struct NewAudit {
 /// 后端错误统一转为 API 错误
 pub type StoreResult<T> = Result<T, ApiError>;
 
+/// 持久观战准入，不是控制席位，也不授予世界源码/归档访问权。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ObserverGrant {
+    pub world_id: WireUuid,
+    pub principal_id: u64,
+    pub faction: u8,
+    pub grant_id: WireUuid,
+    pub active: bool,
+}
+
 /// 存储后端（枚举分发，避免 `dyn` + async trait 的装箱开销与额外依赖）
 #[derive(Clone, Debug)]
 pub enum Store {
@@ -341,6 +351,16 @@ impl Store {
 
     pub async fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
         dispatch!(self.append_commit(commit, expected_fencing_token))
+    }
+
+    pub async fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<ObserverGrant>> {
+        dispatch!(self.observer_grants(world))
+    }
+    pub async fn set_observer_grant(&self, grant: ObserverGrant) -> StoreResult<()> {
+        dispatch!(self.set_observer_grant(grant))
+    }
+    pub async fn revoke_observer(&self, world: WireUuid, principal: u64, grant: WireUuid) -> StoreResult<bool> {
+        dispatch!(self.revoke_observer(world, principal, grant))
     }
 
     // ---- packages

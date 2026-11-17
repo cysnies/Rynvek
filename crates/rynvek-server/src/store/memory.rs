@@ -21,6 +21,7 @@ struct Tables {
     principals: BTreeMap<u64, PrincipalRow>,
     organizations: BTreeMap<u64, OrgRow>,
     worlds: BTreeMap<WireUuid, WorldRow>,
+    observers: BTreeMap<(WireUuid, u64), super::ObserverGrant>,
     world_commits: BTreeMap<(WireUuid, u64), CommitRow>,
     packages: BTreeMap<String, PackageRow>,
     package_versions: BTreeMap<(String, String), PackageVersionRow>,
@@ -48,6 +49,28 @@ fn missing_fk(what: &str) -> ApiError {
 }
 
 impl MemoryStore {
+    pub fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<super::ObserverGrant>> {
+        Ok(self.lock().observers.values().filter(|g| g.world_id == world && g.active).cloned().collect())
+    }
+    pub fn set_observer_grant(&self, grant: super::ObserverGrant) -> StoreResult<()> {
+        let mut t = self.lock();
+        if !t.worlds.contains_key(&grant.world_id) || !t.principals.contains_key(&grant.principal_id) {
+            return Err(missing_fk("观战世界或身份"));
+        }
+        if grant.active && !t.observers.get(&(grant.world_id, grant.principal_id)).is_some_and(|g|g.active)
+            && t.observers.values().filter(|g|g.world_id==grant.world_id && g.active).count()>=32 {
+            return Err(conflict("单世界最多32个有效观战准入"));
+        }
+        t.observers.insert((grant.world_id, grant.principal_id), grant);
+        Ok(())
+    }
+    pub fn revoke_observer(&self, world: WireUuid, principal: u64, grant: WireUuid) -> StoreResult<bool> {
+        let mut t = self.lock();
+        let Some(row) = t.observers.get_mut(&(world, principal)) else { return Ok(false) };
+        if row.grant_id != grant || !row.active { return Ok(false) }
+        row.active = false; // 保留原授权对象；操作事实另入审计，不删除历史。
+        Ok(true)
+    }
     pub fn new() -> Self {
         Self::default()
     }

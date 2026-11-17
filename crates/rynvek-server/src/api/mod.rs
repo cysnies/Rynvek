@@ -4,6 +4,7 @@
 //! 规范 11.3 HTTP REST / WebSocket 路由表（20 条，路径与方法逐字一致）+ 补充路由 SBOM 下载。
 
 pub mod arena;
+pub mod observers;
 pub mod auth;
 pub mod hub;
 pub mod lab;
@@ -54,6 +55,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/worlds/{world_id}/fork", post(worlds::fork))
         .route("/api/v1/worlds/{world_id}/patches", post(worlds::patches))
         .route("/api/v1/worlds/{world_id}/authoring", get(worlds::authoring))
+        .route("/api/v1/worlds/{world_id}/observers", get(observers::list).post(observers::grant))
+        .route("/api/v1/worlds/{world_id}/observers/{principal_id}", delete(observers::revoke))
+        .route("/api/v1/worlds/{world_id}/observation", get(observers::observe).delete(observers::leave))
         .route("/api/v1/worlds/{world_id}/arena", post(arena::run))
         .route(
             "/api/v1/worlds/{world_id}/authoring/compile-rule",

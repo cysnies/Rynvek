@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! PostgreSQL 17 后端：直接执行规范 11.1 的 DDL（`rynvek-storage/migrations/postgres/0001_initial_schema.sql`），
-//! 不新增、不修改任何表或列。
+//! 原规范DDL保留；应用扩展使用独立幂等迁移，不重写原规范附件。
 //!
 //! 类型映射：`BIGINT` ↔ `i64`（`u64` 标识按位重解释，规范内所有 ID 均 < 2^63）；`UUID` / `INET` / `JSONB`
 //! 以 `::text` 往返（避免为 `tokio-postgres` 打开额外的类型特性）；`TIMESTAMPTZ` 读出为 Unix 秒。
@@ -173,7 +173,7 @@ impl PostgresStore {
         })
     }
 
-    /// 若 `principals` 表不存在则执行规范 DDL（幂等）
+    /// 首装执行原规范DDL，再执行独立应用扩展的幂等迁移。
     pub async fn migrate(&self) -> StoreResult<bool> {
         let c = self.client.lock().await;
         let exists: bool = c
@@ -181,11 +181,30 @@ impl PostgresStore {
             .await
             .map_err(db_err)?
             .get(0);
-        if exists {
-            return Ok(false);
-        }
-        c.batch_execute(POSTGRES_SCHEMA_SQL).await.map_err(db_err)?;
-        Ok(true)
+        if !exists { c.batch_execute(POSTGRES_SCHEMA_SQL).await.map_err(db_err)?; }
+        c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0002_observer_grants.sql")).await.map_err(db_err)?;
+        Ok(!exists)
+    }
+
+    pub async fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<super::ObserverGrant>> {
+        let c = self.client.lock().await;
+        c.query("SELECT principal_id, faction, grant_id::text FROM world_observer_grants WHERE world_id=$1::text::uuid AND active ORDER BY principal_id", &[&uuid_text(&world)]).await.map_err(db_err)?
+            .into_iter().map(|r| Ok(super::ObserverGrant { world_id:world, principal_id:u(r.get(0)), faction:u8::try_from(r.get::<_,i16>(1)).map_err(|_|corrupt("观战阵营"))?, grant_id:parse_uuid(r.get(2))?, active:true })).collect()
+    }
+    pub async fn set_observer_grant(&self, grant: super::ObserverGrant) -> StoreResult<()> {
+        let mut c = self.client.lock().await;
+        let tx=c.transaction().await.map_err(db_err)?;
+        // 世界行锁让不同节点的并发准入也服从同一有效名额上限。
+        tx.query_one("SELECT world_id::text FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE", &[&uuid_text(&grant.world_id)]).await.map_err(db_err)?;
+        let count:i64=tx.query_one("SELECT count(*) FROM world_observer_grants WHERE world_id=$1::text::uuid AND active AND principal_id<>$2", &[&uuid_text(&grant.world_id), &i(grant.principal_id)]).await.map_err(db_err)?.get(0);
+        if grant.active && count>=32 { return Err(ApiError::bad_request("单世界最多32个有效观战准入")) }
+        tx.execute("INSERT INTO world_observer_grants (world_id,principal_id,faction,grant_id,active) VALUES ($1::text::uuid,$2,$3,$4::text::uuid,$5) ON CONFLICT (world_id,principal_id) DO UPDATE SET faction=EXCLUDED.faction,grant_id=EXCLUDED.grant_id,active=EXCLUDED.active", &[&uuid_text(&grant.world_id), &i(grant.principal_id), &i16::from(grant.faction), &uuid_text(&grant.grant_id), &grant.active]).await.map_err(db_err)?;
+        tx.commit().await.map_err(db_err)?;
+        Ok(())
+    }
+    pub async fn revoke_observer(&self, world: WireUuid, principal: u64, grant: WireUuid) -> StoreResult<bool> {
+        let c = self.client.lock().await;
+        Ok(c.execute("UPDATE world_observer_grants SET active=FALSE WHERE world_id=$1::text::uuid AND principal_id=$2 AND grant_id=$3::text::uuid AND active", &[&uuid_text(&world), &i(principal), &uuid_text(&grant)]).await.map_err(db_err)? == 1)
     }
 
     pub async fn insert_principal(&self, row: PrincipalRow) -> StoreResult<()> {

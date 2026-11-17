@@ -867,3 +867,60 @@ async fn ranked_entry_discovers_real_identity_cancels_and_reconnects_authorized_
     assert_eq!(server.state.matchmaker().len(), 0);
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn private_observer_admission_revoke_leave_and_node_recovery() {
+    use rynvek_server::{AppConfig, ServerConfig, host::TickDriver, store::Store, client};
+    let dir=tempfile::tempdir().unwrap();let store=Store::memory();
+    let config=AppConfig{public_base_url:String::new(),blob_dir:Some(dir.path().to_owned()),tick_driver:TickDriver::Manual,lobby_timeout:None,..Default::default()};
+    let start=|app|rynvek_server::start(ServerConfig{http_addr:"127.0.0.1:0".parse().unwrap(),webtransport_addr:None,app,store:store.clone(),signer:server_key()});
+    let server=start(config.clone()).await.unwrap();let base=server.base_url();
+    let owner=register(&base,"observer-owner","human",101).await;
+    let viewer=register(&base,"observer-viewer","human",102).await;
+    let outsider=register(&base,"observer-outsider","human",103).await;
+    let created=authored_post(&server,"/api/v1/worlds",&owner.token,json!({"title":"私有阵营观战","template":"arena_pve","visibility":"Private"})).await.json().unwrap();
+    let world=created["world_id"].as_str().unwrap();let id=world.parse().unwrap();
+    let arena_path=format!("/api/v1/worlds/{world}/arena");let grants_path=format!("/api/v1/worlds/{world}/observers");let observe_path=format!("/api/v1/worlds/{world}/observation");
+    let get=|server:&rynvek_server::RunningServer,path:&str,token:&str|{let url=format!("{}{path}",server.base_url());let token=token.to_owned();async move {client::get(&url,Some(&token)).await.unwrap()}};
+    assert_eq!(get(&server,&observe_path,&viewer.token).await.status,404);
+    let run=authored_post(&server,&arena_path,&owner.token,json!({})).await.json().unwrap();
+    let host=server.state.registry().by_world(&id).unwrap();let before=host.status();
+    assert_eq!(authored_post(&server,&grants_path,&outsider.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":0})).await.status,404);
+    assert_eq!(authored_post(&server,&grants_path,&owner.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":1})).await.status,403);
+    let granted=authored_post(&server,&grants_path,&owner.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":0})).await;
+    assert_eq!(granted.status,200,"{:?}",granted.json());let grant=granted.json().unwrap();
+    let first=get(&server,&format!("{observe_path}?faction=1"),&viewer.token).await;
+    assert_eq!(first.status,200);assert_eq!(first.header("cache-control"),Some("private, no-store"));assert_eq!(first.header("vary"),Some("Authorization"));
+    let frame=first.json().unwrap();assert_eq!(get(&server,&observe_path,&outsider.token).await.status,404);assert_eq!(frame["role"],"observer");assert_eq!(frame["faction"],0);assert_eq!(frame["messages"]["observation"]["observation"]["faction"],0);
+    assert_eq!(frame["messages"]["welcome"]["tools"],json!([]));
+    assert_eq!(host.status(),before,"观战不能入座、取得租约或自动开局");
+    for suffix in ["authoring","commits","observers"] {assert_eq!(get(&server,&format!("/api/v1/worlds/{world}/{suffix}"),&viewer.token).await.status,404);}
+    assert_eq!(authored_post(&server,&arena_path,&viewer.token,json!({})).await.status,404);
+    assert_eq!(get(&server,&format!("/api/v1/matches/{}/replay",run["match_id"].as_str().unwrap()),&viewer.token).await.status,404);
+    let mut bad=json_connect(&server,&run,&viewer.token,0).await;recv_type(&mut bad,"error").await;drop(bad);
+    assert_eq!(host.status().connections,0,"观战准入绝不转成WS控制席位");
+    let mut ws=json_connect(&server,&run,&owner.token,0).await;recv_type(&mut ws,"welcome").await;recv_type(&mut ws,"observation").await;
+    host.advance(3).await.unwrap();let row=server.state.store().get_world(id).await.unwrap().unwrap();
+    let runtime=rynvek_server::transactions::restore_committed(server.state.store(),server.state.inner.world_snapshots.as_ref(),&row).await.unwrap();
+    let projected=get(&server,&observe_path,&viewer.token).await.json().unwrap();
+    assert_eq!(projected["messages"]["observation"]["observation"],json!(runtime.world().observe(rynvek_rts::FactionId(0)).unwrap()),"必须是原fog投影，不是全世界快照");
+    let cid=server.state.store().list_commits(id).await.unwrap()[0].snapshot_cid.unwrap();
+    assert_eq!(get(&server,&format!("/api/v1/hub/blobs/{}",rynvek_server::ids::hex(&cid)),&viewer.token).await.status,404);
+    assert!(projected.get("state_root").is_none());assert!(projected.get("snapshot_cid").is_none());
+    // 下方通过新节点同磁盘CAS读取原Actor；不声称真实PG/断电验收。
+    let resumed=start(config).await.unwrap();
+    assert_eq!(get(&resumed,&observe_path,&viewer.token).await.status,409,"观战不能自行恢复宿主");
+    let persistent=get(&resumed,&grants_path,&owner.token).await.json().unwrap();assert_eq!(persistent["grants"][0],grant);
+    let recovered=authored_post(&resumed,&arena_path,&owner.token,json!({})).await.json().unwrap();assert_eq!(recovered["match_id"],run["match_id"]);assert_eq!(recovered["recovered"],true);
+    let second=get(&resumed,&observe_path,&viewer.token).await.json().unwrap();assert_eq!(second["grant_id"],grant["grant_id"]);assert_eq!(second["messages"]["welcome"]["tick"],3);
+    let revoke=format!("{}{grants_path}/{}",resumed.base_url(),viewer.principal_id);
+    assert_eq!(client::send_json("DELETE",&revoke,Some(&owner.token),&json!({"grant_id":grant["grant_id"]})).await.unwrap().status,200);
+    assert_eq!(get(&resumed,&observe_path,&viewer.token).await.status,404);
+    let newer=authored_post(&resumed,&grants_path,&owner.token,json!({"principal_id":viewer.principal_id.to_string(),"faction":0})).await.json().unwrap();assert_ne!(newer["grant_id"],grant["grant_id"]);
+    assert_eq!(client::send_json("DELETE",&revoke,Some(&owner.token),&json!({"grant_id":grant["grant_id"]})).await.unwrap().status,409,"旧版本撤销不得删掉新授权");
+    let leave=format!("{}{observe_path}",resumed.base_url());assert_eq!(client::send_json("DELETE",&leave,Some(&viewer.token),&json!({"grant_id":newer["grant_id"]})).await.unwrap().status,200);
+    assert_eq!(get(&resumed,&observe_path,&viewer.token).await.status,404);
+    assert!(resumed.state.store().observer_grants(id).await.unwrap().is_empty());
+    drop(runtime);drop(ws);host.abort("观战定向测试完成").await;resumed.state.registry().by_world(&id).unwrap().abort("观战恢复完成").await;
+    server.shutdown().await;resumed.shutdown().await;
+}

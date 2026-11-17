@@ -193,6 +193,8 @@ pub struct QueryReply {
 }
 
 enum HostMsg {
+    /// 仅内部已准入HTTP调用。无连接/命令/租约，沿同Actor一致边界读取fog投影。
+    Observe { faction: u8, reply: oneshot::Sender<Result<serde_json::Value, ApiError>> },
     Patch {
         patch: WorldPatch,
         reply: oneshot::Sender<Result<PatchApplied, ApiError>>,
@@ -240,6 +242,7 @@ pub struct MatchHandle {
 impl std::fmt::Debug for HostMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::Observe { .. } => "Observe",
             Self::Patch { .. } => "Patch",
             Self::Join { .. } => "Join",
             Self::Frame { .. } => "Frame",
@@ -256,6 +259,11 @@ fn ended() -> ApiError {
 }
 
 impl MatchHandle {
+    pub(crate) async fn observe_faction(&self, faction: u8) -> Result<serde_json::Value, ApiError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx.send(HostMsg::Observe { faction, reply }).await.map_err(|_| ended())?;
+        rx.await.map_err(|_| ended())?
+    }
     pub async fn apply_patch(&self, patch: WorldPatch) -> Result<PatchApplied, ApiError> {
         let (reply, rx) = oneshot::channel();
         self.tx
@@ -543,6 +551,7 @@ impl Host {
         rx.close();
         while let Some(m) = rx.recv().await {
             match m {
+                HostMsg::Observe { reply, .. } => { let _ = reply.send(Err(ended())); }
                 HostMsg::Patch { reply, .. } => {
                     let _ = reply.send(Err(ended()));
                 }
@@ -594,6 +603,14 @@ impl Host {
 
     async fn on_msg(&mut self, msg: HostMsg) {
         match msg {
+            HostMsg::Observe { faction, reply } => {
+                let world = &self.session.world;
+                let result = if let Some(observation) = world.observe(FactionId(faction)) { Ok(serde_json::json!({
+                    "welcome": ArenaServerMessage::Welcome { protocol:ARENA_PROTOCOL.into(), faction:u32::from(faction), mode:world.config.mode, tick:world.tick, map:map_info(world), tools:Vec::new() },
+                    "observation": ArenaServerMessage::Observation { observation:Box::new(observation), events:Vec::new() },
+                })) } else { Err(ApiError::not_found("阵营不存在")) };
+                let _ = reply.send(result);
+            }
             HostMsg::Patch { patch, reply } => self.enqueue_patch(patch, reply).await,
             HostMsg::Join {
                 principal_id,
