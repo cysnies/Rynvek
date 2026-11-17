@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { AudioDirector, AudioMixer, NeuralStateSonifier, type NeuralSoundLevels } from "@rynvek/audio";
+import { AudioDirector, AudioMixer, NeuralStateSonifier, parseSoundBank, type SoundBank, type NeuralSoundLevels } from "@rynvek/audio";
 import type { ArenaClient, FactionObservation, RtsEvent } from "@rynvek/client";
 
 export type ArenaAudioState = "off" | "enabling" | "running" | "muted" | "suspended" | "error" | "ended";
@@ -44,6 +44,8 @@ interface Graph { readonly ctx: AudioContext; readonly mixer: AudioMixer; readon
 /** AudioContext只在enableFromGesture的同步段创建/请求resume。无自动启用、缓存补播、外部音源或凭据。 */
 export class ArenaAudioSession {
   private source: ArenaClient | null = null;
+  private bank: SoundBank | null = null;
+  private bankLabel = "内置24配方";
   private unsubscribe: (() => void) | null = null;
   private graph: Graph | null = null;
   private previous: FactionObservation | null = null;
@@ -91,14 +93,14 @@ export class ArenaAudioSession {
     let ctx: AudioContext | null = null;
     try {
       ctx = this.createContext(); const mixer = new AudioMixer(ctx, {masterGain:this.volume});
-      const graph: Graph = {ctx,mixer,director:new AudioDirector(ctx,{mixer}),sonifier:null}; this.graph = graph;
+      const graph: Graph = {ctx,mixer,director:new AudioDirector(ctx,{mixer,...(this.bank?{manifest:this.bank.manifest,recipes:this.bank.recipes}:{})}),sonifier:null}; this.graph = graph;
       // 在实际按钮手势栈中调用resume，await之前无网络/计时器；浏览器策略仍最终决定。
       const resumed = ctx.state === "running" ? Promise.resolve() : ctx.resume();
       await resumed;
       if (own !== this.epoch || this.graph !== graph) { if (ctx.state !== "closed") void ctx.close().catch(() => {}); return; }
       if (ctx.state !== "running") throw new Error("未解锁");
       ctx.onstatechange = () => { if (this.graph === graph && ctx?.state !== "running") this.suspend("音频上下文已挂起；需再次手势启用。"); };
-      this.mode = "running"; this.message = "音频已启用；仅新到达的本人阵营事件/真实脑态。设备未听验。";
+      this.mode = "running"; this.message = `音频已启用 / ${this.bankLabel}；仅新本人阵营事件/真实脑态。设备未听验。`;
       this.armStale(); this.notify();
     } catch {
       if (own !== this.epoch) return;
@@ -106,6 +108,11 @@ export class ArenaAudioSession {
       this.mode = "error"; this.message = "音频不可用或手势解锁未获准；可再次点击，不绕策略。"; this.notify();
     }
   }
+  setSoundBank(manifest:unknown,recipes:unknown,label:string):void {
+    if(!this.source)throw new Error("先连接实际Arena阵营流");
+    const bank=parseSoundBank(manifest,recipes);this.stopGraph();this.bank=bank;this.bankLabel=label.slice(0,180);this.mode="off";this.message=`已验证并选择 ${this.bankLabel}；需再次手势启用，不补播。`;this.notify();
+  }
+  clearSoundBank():void {this.stopGraph();this.bank=null;this.bankLabel="内置24配方";this.mode="off";this.message="已恢复内置配方；需手势重新启用。";this.notify();}
   mute(): void { this.stopGraph(); this.mode = "muted"; this.message = "已全部静音并切断旧图；重新启用需手势，不补播。"; this.notify(); }
   suspend(message = "页面隐藏/失焦，已停止音频；返回后需再次点击启用。"): void { this.stopGraph(); this.mode = "suspended"; this.message = message; this.notify(); }
   setVolume(value: number): void { this.volume = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0; this.graph?.mixer.setMasterGain(this.volume); }
@@ -116,6 +123,7 @@ export class ArenaAudioSession {
   }
   detach(message = "未绑定实时席位；音频关闭。换世界/身份需重新启用。"): void {
     this.stopGraph(); this.unsubscribe?.(); this.unsubscribe = null; this.source = null; this.previous = null; this.receivedAt = -Infinity;
+    this.bank=null;this.bankLabel="内置24配方";
     this.mode = "off"; this.message = message; this.notify();
   }
   private armStale(): void {

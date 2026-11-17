@@ -57,3 +57,11 @@ it("迟到resume不能复活已换世界的图，创建失败不会阻塞权威�
  expect(audio.status.state).toBe("off");expect(old.state).toBe("closed");expect(old.nodesOfType<FakeGainNode>("gain").some(g=>g.disconnected)).toBe(true);audio.detach();
  const bad=new ArenaAudioSession(()=>{},()=>{throw new Error("No audio device");});bad.bind(b.client);b.receive(building);await bad.enableFromGesture();expect(bad.status.state).toBe("error");expect(b.client.observation?.tick).toBe(331);bad.detach();
 });
+it("应用真实私有配方不创图，替换切断旧图且换世界丢弃包，仍仅消费原已授权本人事件",async()=>{
+ const h=harness(),made:FakeAudioContext[]=[];const audio=new ArenaAudioSession(()=>{},()=>{const c=new FakeAudioContext();made.push(c);return c.asAudioContext();});audio.bind(h.client);h.receive(first);
+ const manifest={schema:"rynvek.audio-manifest.v1",events:{"building.completed":{status:"placeholder",bus:"sfx_world",gain:.17}}};
+ audio.setSoundBank(manifest,{"building.completed":{freqStart:733}},"owner.audio@1.0.0");expect(made).toHaveLength(0);
+ await audio.enableFromGesture();h.receive(building);expect(made[0]!.nodesOfType<FakeOscillatorNode>("oscillator")[0]!.frequency.events.some(e=>e.value===733)).toBe(true);
+ audio.setSoundBank(manifest,{"building.completed":{freqStart:744}},"owner.audio@1.0.1");expect(made[0]!.state).toBe("closed");expect(audio.status.state).toBe("off");expect(made).toHaveLength(1);
+ const next=harness();audio.bind(next.client);next.receive(first);await audio.enableFromGesture();next.receive(building);expect(made[1]!.nodesOfType<FakeOscillatorNode>("oscillator")[0]!.frequency.events[0]!.value).toBe(523);audio.detach();
+});
