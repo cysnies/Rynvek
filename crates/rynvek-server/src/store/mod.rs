@@ -290,6 +290,21 @@ pub struct CustomRoom {
     pub closed: bool,
 }
 
+/// 私有Agent不可变版本；与公共Hub和公共Blob索引隔离，owner为唯一读取/撤销者。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PrivateAgentRow {
+    pub owner_id: u64,
+    pub package_id: String,
+    pub version: String,
+    pub cid: [u8; 32],
+    pub signature: Vec<u8>,
+    pub publisher_key: [u8; 32],
+    pub profile: serde_json::Value,
+    pub dependencies: Vec<crate::agent_package::AgentDependency>,
+    pub verification: serde_json::Value,
+    pub revoked: bool,
+}
+
 /// 存储后端（枚举分发，避免 `dyn` + async trait 的装箱开销与额外依赖）
 #[derive(Clone, Debug)]
 pub enum Store {
@@ -307,6 +322,19 @@ macro_rules! dispatch {
 }
 
 impl Store {
+    pub async fn put_private_agent(&self, row: PrivateAgentRow) -> StoreResult<()> {
+        dispatch!(self.put_private_agent(row))
+    }
+    pub async fn private_agent(&self, owner: u64, id: String, version: String) -> StoreResult<Option<PrivateAgentRow>> {
+        dispatch!(self.private_agent(owner, id, version))
+    }
+    pub async fn private_agents(&self, owner: u64) -> StoreResult<Vec<PrivateAgentRow>> {
+        dispatch!(self.private_agents(owner))
+    }
+    pub async fn revoke_private_agent(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {
+        dispatch!(self.revoke_private_agent(owner, id, version))
+    }
+
     pub async fn settle_ranked(&self, row: MatchRow, fence: u64, parts: Vec<ParticipantRow>) -> StoreResult<()> {
         dispatch!(self.settle_ranked(row, fence, parts))
     }

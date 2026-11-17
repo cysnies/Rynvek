@@ -11,6 +11,7 @@ pub mod matches;
 pub mod meta;
 pub mod multiplayer;
 pub mod observers;
+pub mod private_agents;
 pub mod user;
 pub mod worlds;
 
@@ -46,6 +47,22 @@ pub const ROUTES: [(&str, &str, &str); 20] = [
 /// 构建路由
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/api/v1/private-hub/agents", get(private_agents::list))
+        .route(
+            "/api/v1/private-hub/agents/{id}/{version}",
+            get(private_agents::get)
+                .put(private_agents::publish)
+                .delete(private_agents::revoke)
+                .layer(axum::extract::DefaultBodyLimit::max(512 << 10)),
+        )
+        .route(
+            "/api/v1/private-hub/agents/{id}/{version}/artifact",
+            get(private_agents::artifact),
+        )
+        .route(
+            "/api/v1/private-hub/agents/{id}/{version}/evaluate",
+            post(private_agents::evaluate).layer(axum::extract::DefaultBodyLimit::max(32 << 10)),
+        )
         .route("/api/v1/local/practice", post(crate::local::practice))
         .route("/api/v1/meta/health", get(meta::health))
         .route("/api/v1/meta/source-offer", get(meta::source_offer))

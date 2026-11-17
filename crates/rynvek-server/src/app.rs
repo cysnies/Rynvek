@@ -158,6 +158,7 @@ pub struct AppInner {
     pub tokens: RwLock<TokenAuthority>,
     pub challenges: Mutex<AuthChallenges>,
     pub ranked_node: String,
+    pub agent_slots: Arc<tokio::sync::Semaphore>,
     /// 配对到宿主发布期间串行化查询/取消，避免报告虚假离队或重复建局。
     pub matchmaking_gate: tokio::sync::Mutex<()>,
     pub registry: Mutex<MatchRegistry>,
@@ -221,6 +222,7 @@ impl AppState {
                 tokens: RwLock::new(TokenAuthority::new(signer.clone())),
                 challenges: Mutex::new(AuthChallenges::new().map_err(ApiError::from)?),
                 ranked_node: new_uuid_v7().to_string(),
+                agent_slots: Arc::new(tokio::sync::Semaphore::new(2)),
                 matchmaking_gate: tokio::sync::Mutex::new(()),
                 registry: Mutex::new(MatchRegistry::default()),
                 experiments: Mutex::new(BTreeMap::new()),

@@ -18,6 +18,7 @@ use crate::error::ApiError;
 
 #[derive(Debug, Default)]
 struct Tables {
+    private_agents: BTreeMap<(u64, String, String), super::PrivateAgentRow>,
     ranked_deadlines: BTreeMap<WireUuid, u64>,
     ranked_tickets: Vec<crate::ranked::QueueTicket>,
     ranked_hosts: BTreeMap<WireUuid, crate::ranked::HostLease>,
@@ -53,6 +54,60 @@ fn missing_fk(what: &str) -> ApiError {
 }
 
 impl MemoryStore {
+    pub fn put_private_agent(&self, row: super::PrivateAgentRow) -> StoreResult<()> {
+        let mut t = self.lock();
+        let key = (row.owner_id, row.package_id.clone(), row.version.clone());
+        if !t
+            .principals
+            .get(&row.owner_id)
+            .is_some_and(|p| p.status == PrincipalStatus::Active && p.ed25519_pubkey == row.publisher_key)
+        {
+            return Err(conflict("发布者已失效"));
+        }
+        if t.private_agents.contains_key(&key) {
+            return Err(conflict("私有版本不可覆盖，包括已撤销版本"));
+        }
+        if t.private_agents.keys().filter(|(o, _, _)| *o == row.owner_id).count() >= 256 {
+            return Err(conflict("当前私有registry每主体最多256个不可变版本"));
+        }
+        for d in &row.dependencies {
+            if !t
+                .private_agents
+                .get(&(row.owner_id, d.id.clone(), d.version.clone()))
+                .is_some_and(|p| !p.revoked && crate::ids::hex(&p.cid) == d.blake3_256)
+            {
+                return Err(conflict("私有依赖已改变/撤销"));
+            }
+        }
+        t.private_agents.insert(key, row);
+        Ok(())
+    }
+    pub fn private_agent(
+        &self,
+        owner: u64,
+        id: String,
+        version: String,
+    ) -> StoreResult<Option<super::PrivateAgentRow>> {
+        Ok(self.lock().private_agents.get(&(owner, id, version)).cloned())
+    }
+    pub fn private_agents(&self, owner: u64) -> StoreResult<Vec<super::PrivateAgentRow>> {
+        Ok(self
+            .lock()
+            .private_agents
+            .values()
+            .filter(|p| p.owner_id == owner)
+            .cloned()
+            .collect())
+    }
+    pub fn revoke_private_agent(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {
+        let mut t = self.lock();
+        let Some(row) = t.private_agents.get_mut(&(owner, id, version)) else {
+            return Ok(false);
+        };
+        row.revoked = true;
+        Ok(true)
+    }
+
     pub fn settle_ranked(&self, row: MatchRow, fence: u64, mut parts: Vec<ParticipantRow>) -> StoreResult<()> {
         let mut t = self.lock();
         if !t.worlds.get(&row.world_id).is_some_and(|w| w.fencing_token == fence)

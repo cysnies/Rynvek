@@ -77,6 +77,9 @@ pub async fn search(State(app): State<AppState>, Query(q): Query<SearchQuery>) -
     let rows = app.store().search_packages(q.kind.as_deref(), q.q.as_deref()).await?;
     let mut out = Vec::new();
     for p in rows {
+        if p.package_kind == "agent" {
+            continue;
+        }
         let versions = app.store().package_versions(&p.package_id).await?;
         out.push(serde_json::json!({
             "package_id": p.package_id,
@@ -145,6 +148,11 @@ pub async fn publish(
         return Err(ApiError::bad_request("版本号必须是 SemVer 2.0（MAJOR.MINOR.PATCH）"));
     }
     let req: PublishRequest = super::parse_json(&body)?;
+    if req.package_kind == "agent" {
+        return Err(ApiError::bad_request(
+            "Agent只能显式发布到owner-private /private-hub/agents；禁止公开发行",
+        ));
+    }
     if !PACKAGE_KINDS.contains(&req.package_kind.as_str()) {
         return Err(ApiError::bad_request(format!(
             "package_kind 必须是 {PACKAGE_KINDS:?} 之一"
@@ -186,6 +194,13 @@ pub async fn publish(
         .map_err(|_| ApiError::bad_request("artifact_b64 不是合法 Base64"))?;
     if artifact.is_empty() || artifact.len() > MAX_ARTIFACT_BYTES {
         return Err(ApiError::bad_request("产物大小必须在 1 字节..=64 MiB"));
+    }
+    if let Ok(container) =
+        rynvek_world::package::read_package(&artifact, Some(rynvek_world::package::PackageKind::Rpack))
+    {
+        if container.file("agent.json").is_some() {
+            return Err(ApiError::bad_request("Agent profile禁止通过公共Hub伪装Rpack发布"));
+        }
     }
     let signature: [u8; 64] =
         parse_hex(&req.signature).ok_or_else(|| ApiError::bad_request("signature 必须是 64 字节十六进制"))?;

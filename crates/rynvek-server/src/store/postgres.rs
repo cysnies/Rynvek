@@ -199,6 +199,11 @@ impl PostgresStore {
         ))
         .await
         .map_err(db_err)?;
+        c.batch_execute(include_str!(
+            "../../../rynvek-storage/migrations/postgres/0005_private_agents.sql"
+        ))
+        .await
+        .map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -1027,3 +1032,6 @@ async fn insert_match_tx(
     }
     Ok(())
 }
+
+#[path = "postgres_agents.rs"]
+mod agents;

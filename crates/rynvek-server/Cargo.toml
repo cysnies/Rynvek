@@ -22,7 +22,7 @@ rynvek-engine = { workspace = true, features = ["plugins"] }
 rynvek-network.workspace = true
 rynvek-protocol.workspace = true
 rynvek-rts = { workspace = true, features = ["arrow"] }
-rynvek-rules = { workspace = true, features = ["wasmtime"] }
+rynvek-rules = { workspace = true, features = ["wasmtime", "quickjs"] }
 rynvek-security.workspace = true
 rynvek-storage.workspace = true
 rynvek-world.workspace = true

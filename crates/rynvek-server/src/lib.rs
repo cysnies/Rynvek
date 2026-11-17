@@ -15,6 +15,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod agent_package;
 pub mod api;
 pub mod app;
 pub mod browser;
