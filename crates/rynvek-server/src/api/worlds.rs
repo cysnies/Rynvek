@@ -85,6 +85,20 @@ pub(crate) async fn load_world(
     Ok(world)
 }
 
+/// 已鉴权的单世界元数据读取，复用原WorldRead授权，不返回私有快照/源码/CID。
+pub async fn get(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
+    let subject = app.require(&headers, CapabilityScope::WorldRead).await?;
+    let world = load_world(&app, &subject, &id, CapabilityScope::WorldRead).await?;
+    Ok((
+        [
+            (axum::http::header::CACHE_CONTROL, "private, no-store"),
+            (axum::http::header::VARY, "Authorization"),
+        ],
+        Json(world_json(&world)),
+    )
+        .into_response())
+}
+
 /// `04 GET /api/v1/worlds`（`world.list`）：自己拥有的 + 公开世界，按创建时间倒序分页
 pub async fn list(State(app): State<AppState>, headers: HeaderMap, Query(page): Query<Page>) -> ApiResult<Response> {
     let subject = app.require(&headers, CapabilityScope::WorldList).await?;
