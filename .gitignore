@@ -31,3 +31,6 @@ python/rynvek/*.pyd
 /apps/web-platform/web-dist/
 # 也忽略本机复用依赖的符号链接（目录尾斜杠规则不匹配符号链接）
 node_modules
+
+# 同版本 wasm-bindgen 从真实 Rust 构建生成，禁止提交二进制/旧胶水
+/apps/web-platform/src/generated/wasm/

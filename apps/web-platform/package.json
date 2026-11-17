@@ -15,11 +15,13 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && vite build --config vite.config.mjs",
+    "build": "node tools/build-wasm.mjs && tsc -p tsconfig.build.json && vite build --config vite.config.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "dev": "vite --config vite.config.mjs",
-    "build:web": "vite build --config vite.config.mjs"
+    "dev": "node tools/build-wasm.mjs && vite --config vite.config.mjs",
+    "build:web": "node tools/build-wasm.mjs && vite build --config vite.config.mjs",
+    "build:wasm": "node tools/build-wasm.mjs",
+    "test:wasm": "node --test tools/wasm-abi.test.mjs"
   },
   "dependencies": {
     "@rynvek/arena": "workspace:*",
@@ -27,7 +29,8 @@
     "@rynvek/lab": "workspace:*",
     "@rynvek/studio": "workspace:*",
     "@rynvek/ui": "workspace:*",
-    "@rynvek/client": "workspace:*"
+    "@rynvek/client": "workspace:*",
+    "@rynvek/engine": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

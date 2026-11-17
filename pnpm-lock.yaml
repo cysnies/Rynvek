@@ -42,6 +42,9 @@ importers:
       '@rynvek/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@rynvek/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@rynvek/lab':
         specifier: workspace:*
         version: link:../../packages/lab
