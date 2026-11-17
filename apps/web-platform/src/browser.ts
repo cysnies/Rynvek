@@ -38,7 +38,7 @@ const audio = new ArenaAudioSession(status => {
   el("audio-status").textContent = status.message;
   button("audio-enable").disabled = !status.ready || status.state === "enabling" || status.state === "running";
   button("audio-mute").disabled = status.state !== "running" && status.state !== "enabling";
-});
+},undefined,()=>{if(!arena)return null;const v=view(),s=viewScale(v);return {x:v.x,y:v.y,halfWidth:v.width/(2*s),halfHeight:v.height/(2*s)};});
 button("audio-enable").onclick = () => { void audio.enableFromGesture(); };
 button("audio-mute").onclick = () => audio.mute();
 el("audio-volume").addEventListener("input", () => audio.setVolume(Number((el("audio-volume") as HTMLInputElement).value) / 100));

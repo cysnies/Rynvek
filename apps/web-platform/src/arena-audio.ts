@@ -7,8 +7,24 @@ import type { ArenaClient, FactionObservation, RtsEvent } from "@rynvek/client";
 export type ArenaAudioState = "off" | "enabling" | "running" | "muted" | "suspended" | "error" | "ended";
 export const AUDIO_STALE_MS = 3000;
 export interface ArenaAudioStatus { readonly state: ArenaAudioState; readonly bound: boolean; readonly ready: boolean; readonly neural: boolean; readonly message: string }
-export interface AudioFramePlan { readonly events: readonly string[]; readonly neural: NeuralSoundLevels }
+export interface AudioPosition {readonly x:number;readonly y:number}
+export interface AudioCamera extends AudioPosition {readonly halfWidth:number;readonly halfHeight:number}
+export interface AudioCue {readonly id:string;readonly position:AudioPosition|null}
+export interface AudioFramePlan {readonly cues:readonly AudioCue[]; readonly neural: NeuralSoundLevels }
 
+/** 2D camera-relative stereo pan + distance attenuation, not HRTF/3D acoustics. */
+export function spatialAudio(position:AudioPosition,camera:AudioCamera|null):{pan:number;attenuation:number}|null {
+ if(!camera||![position.x,position.y,camera.x,camera.y,camera.halfWidth,camera.halfHeight].every(Number.isFinite)||camera.halfWidth<=0||camera.halfHeight<=0)return null;
+ const dx=(position.x-camera.x)/camera.halfWidth,dy=(position.y-camera.y)/camera.halfHeight;
+ return {pan:Math.max(-1,Math.min(1,dx)),attenuation:1/(1+dx*dx+dy*dy)};
+}
+function visiblePosition(obs:FactionObservation,id:number):AudioPosition|null {
+ const unit=obs.units.find(u=>u.id===id&&u.faction===obs.faction),building=obs.buildings.find(b=>b.id===id&&b.faction===obs.faction);
+ const p=unit?{x:Number(unit.position[0])/4294967296,y:Number(unit.position[1])/4294967296}:building?{x:building.origin[0],y:building.origin[1]}:null;
+ if(!p||![p.x,p.y].every(v=>Number.isFinite(v)&&v>=0)||!Number.isSafeInteger(obs.visibility_width)||obs.visibility_width<=0)return null;
+ const x=Math.floor(p.x/4),y=Math.floor(p.y/4);
+ return x<obs.visibility_width&&obs.visibility[y*obs.visibility_width+x]===1?p:null;
+}
 /** 只接原已授权阵营投影。即使误送敌方事件也再次拒绝；不读ghost/全世界遥测，不以消失推断死亡。 */
 export function planArenaAudio(obs: FactionObservation, events: readonly RtsEvent[], previous: FactionObservation | null): AudioFramePlan {
   const n = obs.neural;
@@ -17,12 +33,14 @@ export function planArenaAudio(obs: FactionObservation, events: readonly RtsEven
     obs.faction > 7 || n.continuous_abs_mean_q8 > 32768 || n.spiking_neurons > Math.floor(Number.MAX_SAFE_INTEGER / 64) || n.spikes_in_window > n.spiking_neurons * 64 ||
     (n.continuous_neurons === 0 && n.continuous_abs_mean_q8 !== 0)) throw new Error("当前阵营神经投影非法；不猜测缺失指标");
   const cues: string[] = [];
+  const spatialCues:AudioCue[]=[];
   const nexus = obs.buildings.find(b => b.faction === obs.faction && b.kind === "bld.nexus_core");
   const oldNexus = previous?.buildings.find(b => b.id === nexus?.id && b.faction === obs.faction);
   // 生命下降告警，不声称已识别炮火/伤害原因。
   if (nexus && oldNexus && nexus.hp_milli < oldNexus.hp_milli) cues.push("alert.nexus_under_attack");
   for (const event of events.slice(0, 256)) {
     if (!("faction" in event) || event.faction !== obs.faction) continue;
+    const before=cues.length;
     switch (event.type) {
       case "building_placed": cues.push("building.placed"); break;
       case "building_completed": cues.push("building.completed"); break;
@@ -33,8 +51,15 @@ export function planArenaAudio(obs: FactionObservation, events: readonly RtsEven
       case "research_completed": cues.push("ui.confirm"); break;
       case "genome_bred": cues.push("neural.mutation_epoch"); break;
     }
+    const id=cues.at(-1);
+    if(cues.length>before&&id){
+      const global=event.type==="research_completed"||event.type==="genome_bred";
+      const position="id" in event?visiblePosition(obs,event.id):null;
+      if(global||position)spatialCues.push({id,position});
+    }
   }
-  return { events: [...new Set(cues)].slice(0, 16), neural: {
+  if(cues.includes("alert.nexus_under_attack"))spatialCues.unshift({id:"alert.nexus_under_attack",position:null});
+  return {cues:spatialCues.filter((cue,i,all)=>all.findIndex(c=>c.id===cue.id)===i).slice(0,16), neural: {
     ringDensity: n.spiking_neurons ? n.spikes_in_window / (n.spiking_neurons * 64) : 0,
     continuousLevel: Math.min(1, n.continuous_abs_mean_q8 / 256),
   }};
@@ -57,7 +82,8 @@ export class ArenaAudioSession {
   private neural = false;
   private volume = .5;
   constructor(private readonly changed: (status: ArenaAudioStatus) => void,
-    private readonly createContext: () => AudioContext = () => new AudioContext({latencyHint:"interactive"})) {}
+    private readonly createContext: () => AudioContext = () => new AudioContext({latencyHint:"interactive"}),
+    private readonly readCamera:()=>AudioCamera|null=()=>null) {}
   get status(): ArenaAudioStatus { return {state:this.mode,bound:this.source !== null,ready:!!this.source && !!this.previous && !this.previous.outcome && Date.now() - this.receivedAt < AUDIO_STALE_MS,neural:this.neural,message:this.message}; }
   private notify(): void { this.changed(this.status); }
   bind(source: ArenaClient): void {
@@ -77,7 +103,10 @@ export class ArenaAudioSession {
         this.previous = obs; this.receivedAt = Date.now();
         const g = this.graph;
         if (!g || this.mode !== "running") { this.notify(); return; }
-        for (const cue of plan.events) g.director.play(cue, {intensity:.65});
+        for (const cue of plan.cues) {
+          const spatial=cue.position?spatialAudio(cue.position,this.readCamera()):{};
+          if(spatial)g.director.play(cue.id,{intensity:.65,...spatial});
+        }
         if (this.neural) {
           g.sonifier ??= new NeuralStateSonifier(g.ctx, g.mixer.bus("neural_sonify"));
           g.sonifier.update(plan.neural);
@@ -93,14 +122,16 @@ export class ArenaAudioSession {
     let ctx: AudioContext | null = null;
     try {
       ctx = this.createContext(); const mixer = new AudioMixer(ctx, {masterGain:this.volume});
-      const graph: Graph = {ctx,mixer,director:new AudioDirector(ctx,{mixer,...(this.bank?{manifest:this.bank.manifest,recipes:this.bank.recipes}:{})}),sonifier:null}; this.graph = graph;
+      const graph: Graph = {ctx,mixer,director:new AudioDirector(ctx,{mixer,...(this.bank?{manifest:this.bank.manifest,recipes:this.bank.recipes,loader:async(src:string)=>{const clip=this.bank?.samples[src];if(!clip)throw new Error("未验证的采样");const buffer=ctx!.createBuffer(1,clip.frames.length,clip.rate);buffer.getChannelData(0).set(clip.frames);return buffer;}}:{})}),sonifier:null}; this.graph = graph;
       // 在实际按钮手势栈中调用resume，await之前无网络/计时器；浏览器策略仍最终决定。
       const resumed = ctx.state === "running" ? Promise.resolve() : ctx.resume();
       await resumed;
+      if(own!==this.epoch||this.graph!==graph){if(ctx.state!=="closed")void ctx.close().catch(()=>{});return;}
+      if(this.bank&&(await graph.director.preload()).length)throw new Error("采样未就绪");
       if (own !== this.epoch || this.graph !== graph) { if (ctx.state !== "closed") void ctx.close().catch(() => {}); return; }
       if (ctx.state !== "running") throw new Error("未解锁");
       ctx.onstatechange = () => { if (this.graph === graph && ctx?.state !== "running") this.suspend("音频上下文已挂起；需再次手势启用。"); };
-      this.mode = "running"; this.message = `音频已启用 / ${this.bankLabel}；仅新本人阵营事件/真实脑态。设备未听验。`;
+      this.mode = "running"; this.message = `音频已启用 / ${this.bankLabel}；真实相机2D声像/距离衰减，仅当前可见本人音源/真实脑态；非HRTF，设备未听验。`;
       this.armStale(); this.notify();
     } catch {
       if (own !== this.epoch) return;
@@ -108,9 +139,9 @@ export class ArenaAudioSession {
       this.mode = "error"; this.message = "音频不可用或手势解锁未获准；可再次点击，不绕策略。"; this.notify();
     }
   }
-  setSoundBank(manifest:unknown,recipes:unknown,label:string):void {
+  setSoundBank(manifest:unknown,recipes:unknown,label:string,samples:unknown={}):void {
     if(!this.source)throw new Error("先连接实际Arena阵营流");
-    const bank=parseSoundBank(manifest,recipes);this.stopGraph();this.bank=bank;this.bankLabel=label.slice(0,180);this.mode="off";this.message=`已验证并选择 ${this.bankLabel}；需再次手势启用，不补播。`;this.notify();
+    const bank=parseSoundBank(manifest,recipes,samples);this.stopGraph();this.bank=bank;this.bankLabel=label.slice(0,180);this.mode="off";this.message=`已验证并选择 ${this.bankLabel}；需再次手势启用，不补播。`;this.notify();
   }
   clearSoundBank():void {this.stopGraph();this.bank=null;this.bankLabel="内置24配方";this.mode="off";this.message="已恢复内置配方；需手势重新启用。";this.notify();}
   mute(): void { this.stopGraph(); this.mode = "muted"; this.message = "已全部静音并切断旧图；重新启用需手势，不补播。"; this.notify(); }
