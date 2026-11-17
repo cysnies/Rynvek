@@ -195,6 +195,14 @@ pub struct QueryReply {
 }
 
 enum HostMsg {
+    AgentTool {
+        principal_id: u64,
+        key: String,
+        fencing_token: u64,
+        tool: String,
+        arguments: serde_json::Value,
+        reply: oneshot::Sender<Result<rynvek_agent::ToolResponse, ApiError>>,
+    },
     CloseCustom {
         reply: oneshot::Sender<()>,
     },
@@ -234,6 +242,12 @@ enum HostMsg {
     },
 }
 
+#[derive(Debug)]
+pub(crate) enum AgentToolError {
+    Rejected(ApiError),
+    Unknown,
+}
+
 /// 对局句柄（可克隆，供 HTTP 与流连接共享）
 #[derive(Clone, Debug)]
 pub struct MatchHandle {
@@ -251,6 +265,7 @@ pub struct MatchHandle {
 impl std::fmt::Debug for HostMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::AgentTool { .. } => "AgentTool",
             Self::CloseCustom { .. } => "CloseCustom",
             Self::Observe { .. } => "Observe",
             Self::Patch { .. } => "Patch",
@@ -269,6 +284,31 @@ fn ended() -> ApiError {
 }
 
 impl MatchHandle {
+    /// 仅受控HTTP运行调用；仍走原CommandGate/排程/ToolBroker，持久Tick提交后才给真实回执。
+    pub(crate) async fn agent_tool(
+        &self,
+        principal_id: u64,
+        key: String,
+        fencing_token: u64,
+        tool: String,
+        arguments: serde_json::Value,
+    ) -> Result<rynvek_agent::ToolResponse, AgentToolError> {
+        let (reply, rx) = oneshot::channel();
+        self.tx
+            .send(HostMsg::AgentTool {
+                principal_id,
+                key,
+                fencing_token,
+                tool,
+                arguments,
+                reply,
+            })
+            .await
+            .map_err(|_| AgentToolError::Rejected(ended()))?;
+        rx.await
+            .map_err(|_| AgentToolError::Unknown)?
+            .map_err(AgentToolError::Rejected)
+    }
     pub(crate) async fn close_custom(&self) -> Result<(), ApiError> {
         let (reply, rx) = oneshot::channel();
         if self.tx.send(HostMsg::CloseCustom { reply }).await.is_err() {
@@ -421,6 +461,7 @@ pub fn spawn_runtime(
         genesis,
         records: Vec::new(),
         seen_commands: BTreeSet::new(),
+        agent_replies: BTreeMap::new(),
         state: MatchState::Created,
         joined: BTreeSet::new(),
         status_tx,
@@ -473,6 +514,7 @@ struct Host {
     genesis: RuntimeCheckpoint,
     records: Vec<TickRecord>,
     seen_commands: BTreeSet<(u64, String)>,
+    agent_replies: BTreeMap<(u64, String), oneshot::Sender<Result<rynvek_agent::ToolResponse, ApiError>>>,
     state: MatchState,
     joined: BTreeSet<u64>,
     status_tx: watch::Sender<HostStatus>,
@@ -719,6 +761,9 @@ impl Host {
         }
         if !self.custom_authorized().await {
             match msg {
+                HostMsg::AgentTool { reply, .. } => {
+                    let _ = reply.send(Err(ended()));
+                }
                 HostMsg::Observe { reply, .. } => {
                     let _ = reply.send(Err(ended()));
                 }
@@ -736,6 +781,57 @@ impl Host {
             return;
         }
         match msg {
+            HostMsg::AgentTool {
+                principal_id,
+                key,
+                fencing_token,
+                tool,
+                arguments,
+                reply,
+            } => {
+                let conn = self
+                    .conns
+                    .iter()
+                    .find(|(_, c)| c.principal_id == principal_id)
+                    .map(|(id, _)| *id);
+                if self.state != MatchState::Running
+                    || self.spec.config.mode != rynvek_rts::world::MatchMode::PveSurvival
+                    || conn.is_none()
+                {
+                    let _ = reply.send(Err(conflict("受控Agent需要当前本人PvE连接与有效控制租约")));
+                    return;
+                }
+                let command_key = match key.parse() {
+                    Ok(k) => k,
+                    Err(_) => {
+                        let _ = reply.send(Err(conflict("运行命令键非法")));
+                        return;
+                    }
+                };
+                if self.agent_replies.contains_key(&(principal_id, key.clone())) {
+                    let _ = reply.send(Err(conflict("此调用仍在等待真实回执")));
+                    return;
+                }
+                let tick = self.session.world.tick;
+                let env = CommandEnvelope {
+                    idempotency_key: command_key,
+                    principal_id,
+                    issued_at_tick: tick,
+                    target_tick: tick.saturating_add(1),
+                    payload: ArenaClientMessage::ToolCall {
+                        seq: 0,
+                        fencing_token,
+                        tool,
+                        arguments,
+                    },
+                };
+                self.agent_replies.insert((principal_id, key), reply);
+                self.on_command(
+                    conn.unwrap(),
+                    principal_id,
+                    &serde_json::to_vec(&env).expect("工具信封可编码"),
+                );
+            }
             HostMsg::CloseCustom { .. } => unreachable!(),
             HostMsg::Observe { faction, reply } => {
                 let world = &self.session.world;
@@ -1000,6 +1096,12 @@ impl Host {
 
     fn reject(&mut self, conn: u64, principal_id: u64, key: Option<String>, code: RynvekErrorCode, message: String) {
         self.monitor.on_rejected(principal_id, self.session.world.tick);
+        if let Some(reply) = key
+            .as_ref()
+            .and_then(|key| self.agent_replies.remove(&(principal_id, key.clone())))
+        {
+            let _ = reply.send(Err(ApiError::new(code, message.clone())));
+        }
         self.reply(
             conn,
             key,
@@ -1116,6 +1218,17 @@ impl Host {
 
     fn deliver(&mut self, p: Pending, envelopes: Vec<rynvek_engine::arena::Envelope>, tick: u64) {
         for mut env in envelopes {
+            if let ArenaServerMessage::ToolResult { response, .. } = &env.message {
+                if let Some(reply) = self.agent_replies.remove(&(p.principal_id, p.key.clone())) {
+                    let _ = reply.send(Ok(response.clone()));
+                }
+            }
+            if let ArenaServerMessage::Error { error } = &env.message {
+                if let Some(reply) = self.agent_replies.remove(&(p.principal_id, p.key.clone())) {
+                    let _ = reply.send(Err(ApiError::bad_request(format!("原Actor拒绝：{}", error.message))));
+                }
+            }
+
             if let ArenaServerMessage::Ack { tick: applied, .. } = &mut env.message {
                 *applied = tick;
             }

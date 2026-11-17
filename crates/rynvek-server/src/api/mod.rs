@@ -3,6 +3,7 @@
 
 //! 规范 11.3 HTTP REST / WebSocket 路由表（20 条，路径与方法逐字一致）+ 补充路由 SBOM 下载。
 
+pub mod agent_runs;
 pub mod arena;
 pub mod auth;
 pub mod hub;
@@ -115,6 +116,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/hub/packages", get(hub::search))
         .route("/api/v1/hub/packages/{id}/{ver}", put(hub::publish))
         .route("/api/v1/hub/blobs/{blake3_hex}", get(hub::blob))
+        .route("/api/v1/agent-runs", get(agent_runs::list).post(agent_runs::create))
+        .route("/api/v1/agent-runs/{id}", get(agent_runs::get))
+        .route("/api/v1/agent-runs/{id}/control", post(agent_runs::control))
+        .route("/api/v1/agent-runs/{id}/context", get(agent_runs::context))
+        .route("/api/v1/agent-runs/{id}/step", post(agent_runs::step))
         .route("/api/v1/lab/experiments", post(lab::submit).get(lab::list))
         .route("/api/v1/lab/experiments/{exp_id}/control", post(lab::control))
         .route("/api/v1/lab/experiments/{exp_id}", get(lab::status))

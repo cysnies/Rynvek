@@ -322,6 +322,24 @@ macro_rules! dispatch {
 }
 
 impl Store {
+    pub async fn agent_run_create(&self, row: crate::agent_runs::AgentRun) -> StoreResult<crate::agent_runs::AgentRun> {
+        dispatch!(self.agent_run_create(row))
+    }
+    pub async fn agent_run_get(&self, owner: u64, id: String) -> StoreResult<Option<crate::agent_runs::AgentRun>> {
+        dispatch!(self.agent_run_get(owner, id))
+    }
+    pub async fn agent_run_list(&self, owner: u64) -> StoreResult<Vec<crate::agent_runs::AgentRun>> {
+        dispatch!(self.agent_run_list(owner))
+    }
+    pub async fn agent_run_change(
+        &self,
+        owner: u64,
+        id: String,
+        change: crate::agent_runs::Change,
+    ) -> StoreResult<(crate::agent_runs::AgentRun, bool)> {
+        dispatch!(self.agent_run_change(owner, id, change))
+    }
+
     pub async fn lab_submit(&self, job: crate::lab_jobs::LabJob) -> StoreResult<crate::lab_jobs::Experiment> {
         dispatch!(self.lab_submit(job))
     }

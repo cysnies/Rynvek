@@ -209,6 +209,11 @@ impl PostgresStore {
         ))
         .await
         .map_err(db_err)?;
+        c.batch_execute(include_str!(
+            "../../../rynvek-storage/migrations/postgres/0007_agent_runs.sql"
+        ))
+        .await
+        .map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -1043,3 +1048,6 @@ mod agents;
 
 #[path = "postgres_lab.rs"]
 mod lab;
+
+#[path = "postgres_agent_runs.rs"]
+mod agent_runs;

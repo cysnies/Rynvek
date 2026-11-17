@@ -18,6 +18,7 @@ use crate::error::ApiError;
 
 #[derive(Debug, Default)]
 struct Tables {
+    agent_runs: BTreeMap<String, crate::agent_runs::AgentRun>,
     lab_jobs: BTreeMap<String, crate::lab_jobs::LabJob>,
     private_agents: BTreeMap<(u64, String, String), super::PrivateAgentRow>,
     ranked_deadlines: BTreeMap<WireUuid, u64>,
@@ -55,6 +56,82 @@ fn missing_fk(what: &str) -> ApiError {
 }
 
 impl MemoryStore {
+    pub fn agent_run_create(&self, row: crate::agent_runs::AgentRun) -> StoreResult<crate::agent_runs::AgentRun> {
+        let mut t = self.lock();
+        let owner = row.owner_id.parse::<u64>().map_err(|_| conflict("非法运行owner"))?;
+        if !t
+            .principals
+            .get(&owner)
+            .is_some_and(|p| p.status == PrincipalStatus::Active)
+        {
+            return Err(conflict("owner失效"));
+        }
+        let own: Vec<_> = t.agent_runs.values().filter(|r| r.owner_id == row.owner_id).collect();
+        if let Some(old) = own.iter().find(|r| r.submission_id == row.submission_id) {
+            return if old.spec_digest == row.spec_digest {
+                Ok((*old).clone())
+            } else {
+                Err(conflict("提交键已绑定其它运行规格"))
+            };
+        }
+        if own.len() >= 64 || own.iter().any(|r| r.world_id == row.world_id && r.active()) {
+            return Err(conflict("运行配额已满或此世界已有未关闭运行"));
+        }
+        t.agent_runs.insert(row.run_id.clone(), row.clone());
+        Ok(row)
+    }
+    pub fn agent_run_get(&self, owner: u64, id: String) -> StoreResult<Option<crate::agent_runs::AgentRun>> {
+        Ok(self
+            .lock()
+            .agent_runs
+            .get(&id)
+            .filter(|r| r.owner_id == owner.to_string())
+            .cloned())
+    }
+    pub fn agent_run_list(&self, owner: u64) -> StoreResult<Vec<crate::agent_runs::AgentRun>> {
+        Ok(self
+            .lock()
+            .agent_runs
+            .values()
+            .rev()
+            .filter(|r| r.owner_id == owner.to_string())
+            .cloned()
+            .collect())
+    }
+    pub fn agent_run_change(
+        &self,
+        owner: u64,
+        id: String,
+        change: crate::agent_runs::Change,
+    ) -> StoreResult<(crate::agent_runs::AgentRun, bool)> {
+        let mut t = self.lock();
+        if !t
+            .principals
+            .get(&owner)
+            .is_some_and(|p| p.status == PrincipalStatus::Active)
+        {
+            return Err(conflict("owner失效"));
+        }
+        let mut row = t
+            .agent_runs
+            .get(&id)
+            .filter(|r| r.owner_id == owner.to_string())
+            .cloned()
+            .ok_or_else(|| ApiError::not_found("运行不存在"))?;
+        let old = row.revision;
+        row.apply(change, crate::ids::unix_now_s())?;
+        if row.active()
+            && t.agent_runs
+                .values()
+                .any(|r| r.run_id != id && r.owner_id == row.owner_id && r.world_id == row.world_id && r.active())
+        {
+            return Err(conflict("此世界已有其它未关闭运行"));
+        }
+        let changed = old != row.revision;
+        t.agent_runs.insert(id, row.clone());
+        Ok((row, changed))
+    }
+
     pub fn lab_submit(&self, job: crate::lab_jobs::LabJob) -> StoreResult<crate::lab_jobs::Experiment> {
         let mut t = self.lock();
         let owner = job.experiment.owner_principal_id;
