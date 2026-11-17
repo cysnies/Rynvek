@@ -61,7 +61,7 @@ fn soak_command(root: &Path, duration: Duration, report: &Path) -> std::process:
         .arg("--duration-secs")
         .arg(duration.as_secs().to_string())
         .arg("--report")
-        .arg(&report)
+        .arg(report)
         .arg("--root")
         .arg(root);
     c
@@ -83,6 +83,7 @@ mod tests {
         );
         assert_eq!(cmd.get_current_dir(), Some(root.as_path()));
         let args: Vec<_> = cmd.get_args().collect();
+        assert_eq!(args[0], "run", "必须真实运行浸泡程序而不是仅构建");
         assert!(args.windows(2).any(|w| w == ["--profile", "opt-dev"]));
         assert!(args.windows(2).any(|w| w == ["--bin", "rynvek-soak"]));
         assert!(args.windows(2).any(|w| w == ["--duration-secs", "90"]));

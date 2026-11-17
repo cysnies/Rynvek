@@ -44,3 +44,5 @@
 2026-11-17 16:24 中国标准时间只读恢复快照：本地已有 a2cef5c、3fcb96b、e15cb53 三个本批功能/测试提交；远端仍为 c4da2da，尚未推送。工作树只有本批 `crates/xtask/src/soak.rs` 红测/提取改动；未重置或删除任何代码/数据。此前最终功能 HEAD 的完整门禁已通过 fmt、严格 Clippy、工作区测试、黄金向量、插件、许可证、TS、Python，最后在 Soak 启动失败：硬编码 root/target 忽略共享 CARGO_TARGET_DIR。新增行为红测确认误寻执行体；改为 Cargo 原生 run 同一 opt-dev 执行体，保留全部不变量与 90 秒时长。
 
 最新 CI 44039247935（c4da2da）单次快照为 completed/failure，更新于 2026-11-17 15:49:32 中国标准时间；失败日志表明 pnpm -r typecheck 退出 2，原 --silent 吞掉具体诊断。独立、无旧 dist 的 HEAD 导出离线安装后，真实复现 agent-sdk 导入 @rynvek/core 的 TS2307：工作区 exports 指向未生成的 dist。本批按包依赖 DAG 前置构建真实产物，原 typecheck/test/build 全部保留，并移除静默参数，避免再把旧产物的假绿当验收。不继续增加生态功能。
+
+冷检出前端复验按与 CI 相同的前置条件进行：包依赖按 DAG 生成 dist；WASM 复用此前 e15cb53 已真实构建、源文件与本次门禁修复一致的产物，并在冷检出再次执行 5 项实际 ABI 检查，不用手写声明或伪造二进制。仅做包前置构建而未准备 WASM 的独立检查曾正确在缺生成文件时失败，不将该失败藏成通过。Soak runner 重构后的严格 Clippy 也实际报出多余借用，按诊断修复；未增加 allow 或降低 -D warnings。
