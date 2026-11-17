@@ -110,7 +110,7 @@ export class AuthoringDocument {
   private readonly patches = new Map<string, WorldPatch>();
   private readonly params = new Map<string, Write<string>[]>();
   private readonly tiles = new Map<number, Write<number>[]>();
-  private readonly rules = new Map<string, Write<RuleModuleSource>[]>();
+  private readonly rules = new Map<string, Write<RuleModuleSource | undefined>[]>();
   private readonly removals = new Map<string, Write<true>[]>();
 
   public constructor(base: AuthoringBaseline) {
@@ -197,6 +197,9 @@ export class AuthoringDocument {
       } else if ("UpdateRuleModule" in op) {
         const { module_id, rule_graph_json, compiled_rir_blake3 } = op.UpdateRuleModule;
         record(this.history(this.rules, module_id), { stamp, value: { rule_graph_json, compiled_rir_blake3 } }, { kind: "rule", moduleId: module_id });
+      } else if ("RemoveRuleModule" in op) {
+        const { module_id } = op.RemoveRuleModule;
+        record(this.history(this.rules, module_id), { stamp, value: undefined }, { kind: "rule", moduleId: module_id });
       } else {
         const { template_id } = op.RemoveEntityTemplate;
         if(template_id.startsWith("genome/"))record(this.history(this.catalogue,template_id.slice(7)),{stamp,value:undefined},{kind:"template",templateId:template_id});
@@ -234,7 +237,8 @@ export class AuthoringDocument {
   }
 
   public ruleModule(id: string): RuleModuleSource | undefined {
-    return this.rules.get(id)?.at(-1)?.value ?? this.baseRules.get(id);
+    const writes = this.rules.get(id);
+    return writes?.length ? writes.at(-1)?.value : this.baseRules.get(id);
   }
 
   /** 模板只能删除不能新建：存在于基线且没有删除记录 */
@@ -258,7 +262,7 @@ export class AuthoringDocument {
       .map((k): [string, string | undefined] => [k, this.param(k)])
       .filter((e): e is [string, string] => e[1] !== undefined);
     const genomes = keys(this.baseGenomes.keys(), this.catalogue.keys()).map((k): [string, string | undefined] => [k, this.genome(k)]).filter((e):e is [string,string]=>e[1]!==undefined);
-    const rules = keys(this.baseRules.keys(), this.rules.keys()).map((k): [string, RuleModuleSource] => [k, this.ruleModule(k) as RuleModuleSource]);
+    const rules = keys(this.baseRules.keys(), this.rules.keys()).map((k): [string, RuleModuleSource | undefined] => [k, this.ruleModule(k)]).filter((e): e is [string, RuleModuleSource] => e[1] !== undefined);
     const templates = [...new Set([...this.baseTemplates,...keys(this.baseGenomes.keys(),this.catalogue.keys()).map(k=>`genome/${k}`)])].filter((t) => this.hasTemplate(t)).sort();
     return JSON.stringify({
       width: this.width,
@@ -308,6 +312,16 @@ export class AuthoringDocument {
       else if(prev!==undefined)ops.push({UpsertSeedGenome:{genome_slug:slug,genome_bytes_b64:prev}});
       else if(this.genome(slug)!==undefined)ops.push({RemoveEntityTemplate:{template_id:`genome/${slug}`}});
     };
+    const seenRules = new Set<string>();
+    const invertRule = (moduleId: string) => {
+      if (seenRules.has(moduleId)) return;
+      seenRules.add(moduleId);
+      const r = previous(this.rules.get(moduleId));
+      const prev = r?.hadPrevious ? r.prev : this.baseRules.get(moduleId);
+      if (r === null) skipped.push({ register: { kind: "rule", moduleId }, reason: "superseded" });
+      else if (prev !== undefined) ops.push({ UpdateRuleModule: { module_id: moduleId, ...prev } });
+      else if (this.ruleModule(moduleId) !== undefined) ops.push({ RemoveRuleModule: { module_id: moduleId } });
+    };
     const seenParams = new Set<string>();
     const tileRows = new Map<number, Map<number, number>>(); // y → (x → 先前地形)
     for (const op of patch.operations) {
@@ -336,12 +350,9 @@ export class AuthoringDocument {
       } else if ("UpsertSeedGenome" in op) {
         invertCatalogue(op.UpsertSeedGenome.genome_slug);
       } else if ("UpdateRuleModule" in op) {
-        const moduleId = op.UpdateRuleModule.module_id;
-        const r = previous(this.rules.get(moduleId));
-        const prev = r?.prev ?? this.baseRules.get(moduleId);
-        if (r === null) skipped.push({ register: { kind: "rule", moduleId }, reason: "superseded" });
-        else if (prev === undefined) skipped.push({ register: { kind: "rule", moduleId }, reason: "not_invertible" });
-        else ops.push({ UpdateRuleModule: { module_id: moduleId, ...prev } });
+        invertRule(op.UpdateRuleModule.module_id);
+      } else if ("RemoveRuleModule" in op) {
+        invertRule(op.RemoveRuleModule.module_id);
       } else {
         if(op.RemoveEntityTemplate.template_id.startsWith("genome/")){invertCatalogue(op.RemoveEntityTemplate.template_id.slice(7));continue;}
         // 非基因目录模板没有恢复操作。

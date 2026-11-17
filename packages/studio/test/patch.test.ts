@@ -90,6 +90,8 @@ describe("WorldPatch当前Rust镜像与规范10.2骨架", () => {
     expect(bad((p) => (p.operations[3].UpdateRuleModule.compiled_rir_blake3 = [1]))).toMatch(/32 字节/);
     expect(bad((p) => (p.operations[4] = { RemoveEntityTemplate: { template_id: "x" }, SetWorldParam: {} }))).toMatch(/单键/);
     expect(bad((p) => (p.operations[4] = { SpawnUnit: {} }))).toMatch(/未知操作/);
+    expect(bad((p) => (p.operations[5].RemoveRuleModule.module_id = ""))).toMatch(/module_id/);
+    expect(bad((p) => (p.operations[5].RemoveRuleModule.ts_source = "legacy"))).toMatch(/未知字段/);
   });
 
   it("HLC 全序与 Rust derive(Ord) 一致：wall → counter → author", () => {

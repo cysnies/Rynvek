@@ -55,6 +55,7 @@ export function requiredClassOf(op: WorldPatchOp): LiveEditSafetyClass {
     // 基因组决定神经拓扑发育；规则模块热重载（.rir）——规范明确为 Epoch 边界
     case "UpsertSeedGenome":
     case "UpdateRuleModule":
+    case "RemoveRuleModule":
       return LiveEditSafetyClass.EpochBoundarySafe;
   }
 }

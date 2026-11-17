@@ -59,9 +59,10 @@ export type WorldPatchOp =
         readonly compiled_rir_blake3: readonly number[];
       };
     }
-  | { readonly RemoveEntityTemplate: { readonly template_id: string } };
+  | { readonly RemoveEntityTemplate: { readonly template_id: string } }
+  | { readonly RemoveRuleModule: { readonly module_id: string } };
 
-export type WorldPatchOpKind = "SetWorldParam" | "PaintTerrainRect" | "UpsertSeedGenome" | "UpdateRuleModule" | "RemoveEntityTemplate";
+export type WorldPatchOpKind = "SetWorldParam" | "PaintTerrainRect" | "UpsertSeedGenome" | "UpdateRuleModule" | "RemoveEntityTemplate" | "RemoveRuleModule";
 
 export const WORLD_PATCH_OP_KINDS: readonly WorldPatchOpKind[] = [
   "SetWorldParam",
@@ -69,6 +70,7 @@ export const WORLD_PATCH_OP_KINDS: readonly WorldPatchOpKind[] = [
   "UpsertSeedGenome",
   "UpdateRuleModule",
   "RemoveEntityTemplate",
+  "RemoveRuleModule",
 ];
 
 export interface WorldPatch {
@@ -216,6 +218,12 @@ export function parseWorldPatchOp(v: unknown, where = "op"): WorldPatchOp {
           compiled_rir_blake3: bytes(body["compiled_rir_blake3"], 32, `${w}.compiled_rir_blake3`),
         },
       };
+    }
+    case "RemoveRuleModule": {
+      exactKeys(body, ["module_id"], w);
+      const module_id = string(body["module_id"], `${w}.module_id`);
+      if (!module_id.length) invalid(`${w}.module_id 不能为空`);
+      return { RemoveRuleModule: { module_id } };
     }
     case "RemoveEntityTemplate": {
       exactKeys(body, ["template_id"], w);
