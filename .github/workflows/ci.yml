@@ -37,6 +37,27 @@ jobs:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown, wasm32-wasip2
 
+      # 44034688781已通过Rust测试/黄金向量/插件夹具，实际因缺cargo-deny失败。
+      # 固定工具版本并预取锁定依赖；保留后续离线安装与完整门禁，不跳过任何检查。
+      - name: Prepare full gate prerequisites
+        run: |
+          npm install --global pnpm@10.21.0
+          pnpm --version
+          pnpm fetch --frozen-lockfile
+          PYTOOLS="$RUNNER_TEMP/rynvek-python-tools"
+          python3 -m venv "$PYTOOLS"
+          "$PYTOOLS/bin/python" -m pip install uv==0.13.8
+          "$PYTOOLS/bin/uv" --version
+          echo "$PYTOOLS/bin" >> "$GITHUB_PATH"
+          TOOLS="$RUNNER_TEMP/rynvek-license-tools"
+          mkdir -p "$TOOLS"
+          curl --fail --location --max-time 90 --max-filesize 8000000 --output "$TOOLS/cli.tar.gz" https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $TOOLS/cli.tar.gz" | sha256sum --check
+          tar -xzf "$TOOLS/cli.tar.gz" -C "$TOOLS" --strip-components=1
+          "$TOOLS/cargo-deny" --version
+          echo "$TOOLS" >> "$GITHUB_PATH"
+          cargo fetch --locked
+
       # 先生成真实同版本 Worker ABI，后续 typecheck/build 不靠提交旧二进制过门禁。
       - name: Build browser WASM and verify generated ABI
         run: |
