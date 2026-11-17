@@ -5,6 +5,40 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第三十四批：Pi参考受控Agent Adapter与独立持久执行治理（从main 634258a继续）
+
+**主体持续开发，整体未完成。** 已接原私有Agent包/六工具/原Arena Actor，不是空适配层：真实fog → 白名单provider上下文 → 原无I/O QuickJS包或明确本地测试provider → 候选 → 持久派发意图/预算预留 → 原CommandGate/ToolBroker/Tick/WAL → 真工具结果/事件 → 取消和新控制进程续跑。中文细提交、完整最终HEAD及一次PRIVATE普通push证据见同一Page/交接。无公共发行/部署，无第三方模型/密钥/费用/私有数据外发。
+
+### 实际入口 / SDK / API
+
+- 原`/arena`连接本人现有Private单人PvE，显式取得控制租约 →「私有Agent包」选精确版本 → 新「独立持久运行 / Pi参考受控循环」。核对显示包/CID/声明工具和预算并勾授权后创建；可发现、读真实事件、执行一轮/明确启动预算内循环、暂停/取消、回收过期控制器、unknown对账、本人确认当前宿主/控制fence后续跑、关闭。刷新/断开不删除服务端记录，不自动造身份/开世界/接管席位。
+- `hub.runs()`的`AgentRunClient`创建/发现/读取/context/control/step；`ControlledAgentAdapter`驱动顺序循环。默认`PrivatePackageProvider`调原服务端QuickJS；可注入`DecisionProvider`，本批真实测试用明确`ScriptedTestProvider`，它只给候选，工具回执仍由原Actor产生。没有配置真实LLM，不称生产自主智能。可注入函数是可信宿主代码，不把任意JS或远端provider谎称沙箱。
+- 新`/api/v1/agent-runs` POST/GET、`/{id}` GET、`/{id}/context` GET、`/{id}/control` POST、`/{id}/step` POST；WorldRead/WorldConnect/MatchPlay+owner/Private单人PvE，未知/他人404。创建必需submission_id、锁包/CID、批准工具子集、预算、本人control_fence及consent=private-pve-tools/1。无第七工具。原个人data-export包含同一运行记录，原会话单步入口保留其明确边界，不做旧格式fallback。
+
+### Pi实际借鉴 vs 代码复用
+
+- 再次实际打开官方[earendil-works/pi](https://github.com/earendil-works/pi)的[README](https://github.com/earendil-works/pi/blob/main/packages/agent/README.md)、[manifest](https://github.com/earendil-works/pi/blob/main/packages/agent/package.json)、[LICENSE](https://github.com/earendil-works/pi/blob/main/LICENSE)：main manifest `@earendil-works/pi-agent-core` 1.5.2，MIT，Copyright (c) 2025 Mario Zechner，依赖pi-ai/pi-schema 1.5.2。不是声称已安装或核实npm最新。
+- 本批**借鉴设计、原创实现，不直接依赖/复制/安装/执行Pi代码**。适配当前Rust事务/私有包与六工具没有必要为此引整套pi-ai/UI/coding-agent/bash/文件工具。现有许可不改；以后若直接用MIT代码须审查固定版本/传递依赖并保留版权和完整MIT通知。没有声称Pi SDK或API兼容。
+- 实际实现了上下文分层/候选与执行分离/顺序循环/真结果回灌/可取消续跑/有序事件。provider白名单只有授权fog/批准schema、包/世界、预算/计数、memory/有界真实结果投影、最近16个事件seq/kind，**不传owner/控制fence/controller/操作表/凭据**。完整工具结果留私有事件；provider超过8KiB时明确truncated原tool/tick/error摘要，不造result。回调是观察性而非权限/持久化屏障，屏障在Store/WAL；不冒称完整Pi steering/follow-up/token stream已实现。
+
+### 持久治理 / 取消与恢复
+
+- 原Store Memory锁/PG事务及Principal active检查，新独立`0007_agent_runs.sql`；没有复制Lab worker或泛化新框架。每owner最多64记录，每owner/world一个未关闭运行；同owner/submission同规格同ID，异规格409。30秒控制器租约/fence、revision CAS、有界96操作回执不驱逐；只有Store首次接受的候选才真正派发，并发/迟到重放也不再执行。
+- 轮次/工具次数各1–32，墙钟10–900秒；派发前预留，Broker实际拒绝也消耗尝试，不因取消/续跑重置。SDK真实Tick间隔等待，不伪造Tick；最后仍由原Broker控制等级/租约/fence/schema/30Tick/600APM裁决，不以模型输出直接写仿真或发外部消息。
+- `tool_dispatch_intent`先事务落盘，再经原Actor CommandGate和Tick队列执行；原WAL提交后才给真回执。所有结果只由服务端原Actor写入，不接受客户端“已执行”声明。取消/暂停撤后续控制，已派发可能完成且保留真结果；不能撤回已执行工具。provider取消/超时不再派发候选，但不承诺杀死任意恶意宿主JS或撤销已发网络请求。
+- 进程/响应丢失后不确定调用保留pending；过期recover→unknown，禁止盲重发，真实状态/WAL/事件对账后显式ack_unknown只是放弃自动判定、不是重试/撤回。mutation有原命令键可查WAL，查询/拒绝不保证有world命令记录；世界提交与结果事务的崩溃缝隙保守unknown，不造exactly-once保证。
+- 新控制进程从Store发现记忆/真结果/预算。本人重连原世界取得当前控制租约后，resume显式确认当前host_fence/control_fence，保留原工具/包锁/预算并记新绑定；包撤销阻止新求值/续跑，不妨碍取消/关闭/查历史。不是恢复半条token流、独立注册Agent/排位或无人值守服务端provider。
+
+### 必要直接验证 / 未验
+
+8个不同直接用例通过，重跑不累计：状态机3、真HTTP/WS/两次独立Node控制进程/原Actor1、SDK中断不合作测试provider不派发1、原私有包面板JSDOM3。真实回环验证默认QuickJS包provider实际消费上次真结果、无I/O、查询和战略HoldPosition实际作用己方单位/ack；明确本地测试provider也走真工具，取消后第一个Node退出，第二个Node发现原记录/记忆/计数、取新控制fence显式续跑；重复候选不重派。必要server编译、agent-sdk tsc build、web tsc --noEmit及diff --check；详命令/消费示例见[原私有包说明](PRIVATE_AGENT_PACKAGES.md)。
+
+**不是**真实LLM、真实浏览器、服务端进程重启/硬杀或PG灾备测试。服务端元数据在本机同一MemoryStore，真正跨服务端OS进程需原PG、私有持久CAS和稳定鉴权；PG迁移/查询仅Rust编译，未接实库。PG多连接多机/故障切换/断电/长稳、GPU/音频听验未验；无全workspace/Clippy/license/SBOM/soak/CI轮询，无WASM/Vite重编，不绕网络/浏览器策略，不删原始资料/历史/无关缓存。
+
+### 下一主体继续
+
+切到**音频制品真实容器/校验/私有发现下载与实际消费**，在原程序化音频基础闭合一个可用资产段，不生成歌/不拿静态manifest充完成。其后一般Studio模板/规则/TS/rpack/.rview/协作、一般W3与未覆盖生命成本按依赖继续；真实LLM/独立Agent注册赛道仅在明确新授权与实际依赖具备时推进，别无限磨Adapter。主体齐后集中全面验收，整体任务继续。
+
 ## 第三十三批：Lab持久实验作业治理（从main 53b7e0e继续）
 
 **主体持续开发，整体未完成。** 本批用原Store事务与私有CAS替换Lab进程内事实源：真实规格 → 幂等持久提交/发现 → 有界worker租约/fencing → 原RTS逐Tick实验 → run检查点 → 四张真实Parquet一次发布 → 原`/lab`和TS SDK消费。没有新影子仿真器，不公开Hub/NuGet、不外部部署。实际代码提交/最终HEAD与PRIVATE一次普通push证据见同一Page和交接。
@@ -449,7 +483,8 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 | 已推进，仍有边界 | 第三十一批C#真实注册/鉴权、私有HTTP/WS/fog/租约/原命令与六工具消费、同局重连 | .NET10编译、自检3组与Rust2直接用例通过；真实C#进程/原Actor，非全域SDK或多机灾备 |
 | 已推进，仍有边界 | 第三十二批原Arena真实阵营事件、手势/静音/断线换世界生命周期与仅己方真实脑态声化 | 必要编译与9个直接用例；节点/状态验证非硬件听验，无Hub音色资产链、观战/回放音频 |
 | 已推进，仍有边界 | 第三十三批Lab持久提交/发现、租约fencing、取消/重试幂等、run检查点恢复、私有四表原子发布与原工作台/TS SDK | 本机HTTP/Node与同Store重建通过，非PG实库灾备/硬杀恢复；未完成run从种子重算，单作业汇总仍在内存 |
-| 下一主体优先 | Pi参考的受控Agent Adapter/独立Agent执行治理；随后音频制品链、一般模板/规则与生命成本 | 六工具权限/预算与持久回执，不把外部LLM非确定性塞权威Tick；Pi代码未引入/执行 |
+| 已推进，仍有边界 | 第三十四批Pi参考受控Adapter、独立持久运行/事件/预算、真工具收据、双控制进程取消续跑 | 设计借鉴非Pi代码复用；同源私有包/明确本地测试provider，不冒称LLM/独立注册Agent或PG灾备 |
+| 下一主体优先 | 音频制品真实容器/校验/私有消费；再一般模板/规则/协作与生命成本 | 原真实音频入口消费合法制品，不以空manifest或演示充主体完成 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付Lab持久作业治理、run检查点/私有四表原子发布及真实SDK/工作台消费；下一转Pi参考的受控Agent控制面，再按依赖补音频制品链/一般规则，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
+本阶段交付Pi参考受控Agent Adapter和独立持久执行治理、真实工具事件/预算/取消续跑及原入口；下一转音频制品链，再按依赖补一般规则/模板/协作/生命成本，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
