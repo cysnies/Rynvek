@@ -734,7 +734,13 @@ impl ArenaWorld {
 
     // ------------------------------------------------------------------ 命令
 
-    /// 开启命令录制（之后每条成功的命令都追加到日志）
+    /// 候选继承尚未下发的事件和已接受命令；它们不属于快照领域状态。
+    pub(crate) fn inherit_observers(&mut self, previous: &Self) {
+        self.events.clone_from(&previous.events);
+        self.command_log.clone_from(&previous.command_log);
+    }
+
+    /// 开启命令录制（之后每条成功的命令都追加到日志）。
     pub fn enable_command_log(&mut self) {
         self.command_log.get_or_insert_with(Vec::new);
     }

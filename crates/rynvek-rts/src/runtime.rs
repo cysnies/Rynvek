@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Arena 权威事务：引擎和服务端复用相同状态、Tick、规范根及完整检查点。
-//! 当前是检查点优先的正确性路径，不代替实时对局宿主或承诺热路径性能。
+//! 当前是检查点优先的正确性路径；Actor 负责输入与持久化，尚未认证热路径性能。
 
-use crate::commands::RtsCommand;
+use crate::commands::{CommandAck, RtsCommand};
 use crate::{ArenaWorld, FactionId};
 use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use rynvek_journal::CommitManifest;
@@ -16,6 +16,7 @@ pub struct ArenaRuntime {
     world_id: [u8; 16],
     revision: u64,
     parent_root: [u8; 32],
+    staged_tick: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -33,12 +34,17 @@ impl ArenaRuntime {
             world_id,
             revision: 0,
             parent_root: [0; 32],
+            staged_tick: None,
         }
     }
 
     pub fn world(&self) -> &ArenaWorld {
         &self.world
     }
+    pub fn world_id(&self) -> [u8; 16] {
+        self.world_id
+    }
+
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -77,6 +83,7 @@ impl ArenaRuntime {
             world_id,
             revision,
             parent_root: commit.parent_commit_hash,
+            staged_tick: None,
         })
     }
 
@@ -93,6 +100,8 @@ impl ArenaRuntime {
         let previous_root = self.state_root();
         let checkpoint = self.checkpoint()?;
         let mut candidate = Self::restore(self.world_id, self.revision, previous_root, &checkpoint.bytes)?;
+        candidate.world.inherit_observers(&self.world);
+        candidate.staged_tick = self.staged_tick;
         while candidate.world.tick < tick.saturating_sub(1) {
             Self::advance_once(&mut candidate.world)?;
         }
@@ -104,11 +113,13 @@ impl ArenaRuntime {
         if candidate.world.tick < tick {
             Self::advance_once(&mut candidate.world)?;
         }
-        candidate.revision = self
-            .revision
-            .checked_add(1)
-            .ok_or(RynvekErrorCode::SimulationInvariantViolated)?;
-        candidate.parent_root = previous_root;
+        if self.staged_tick.is_none() {
+            candidate.revision = self
+                .revision
+                .checked_add(1)
+                .ok_or(RynvekErrorCode::SimulationInvariantViolated)?;
+            candidate.parent_root = previous_root;
+        }
         *self = candidate;
         Ok(result)
     }
@@ -132,13 +143,57 @@ impl ArenaRuntime {
         self.transact_at(tick, |_| Ok(()))
     }
 
-    pub fn command(&mut self, faction: FactionId, command: &RtsCommand) -> Result<(), RynvekErrorCode> {
+    pub fn apply_command(&mut self, faction: FactionId, command: &RtsCommand) -> Result<CommandAck, RynvekErrorCode> {
         self.transact_at(self.world.tick, |world| {
-            world
-                .apply_command(faction, command)
-                .map(|_| ())
-                .map_err(|error| error.code())
+            world.apply_command(faction, command).map_err(|error| error.code())
         })
+    }
+
+    pub fn command(&mut self, faction: FactionId, command: &RtsCommand) -> Result<(), RynvekErrorCode> {
+        self.apply_command(faction, command).map(|_| ())
+    }
+
+    /// 创建下一 Tick 的隔离候选；宿主必须落盘成功后才替换权威副本与确认输入。
+    pub fn candidate_tick(&self) -> Result<Self, RynvekErrorCode> {
+        if self.staged_tick.is_some() || self.world.outcome.is_some() {
+            return Err(RynvekErrorCode::SimulationInvariantViolated);
+        }
+        let checkpoint = self.checkpoint()?;
+        let mut candidate = Self::restore(self.world_id, self.revision, checkpoint.state_root, &checkpoint.bytes)?;
+        candidate.world.inherit_observers(&self.world);
+        candidate.revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(RynvekErrorCode::SimulationInvariantViolated)?;
+        candidate.parent_root = checkpoint.state_root;
+        candidate.staged_tick = Some(
+            self.world
+                .tick
+                .checked_add(1)
+                .ok_or(RynvekErrorCode::SimulationInvariantViolated)?,
+        );
+        Ok(candidate)
+    }
+
+    /// 封口整 Tick：输入按队列顺序在 Phase 01 前应用，至多推进一次，只提交一个修订。
+    pub fn finish_tick(&mut self) -> Result<(), RynvekErrorCode> {
+        let target = self.staged_tick.ok_or(RynvekErrorCode::SimulationInvariantViolated)?;
+        if self.world.tick.checked_add(1) != Some(target) {
+            return Err(RynvekErrorCode::SimulationInvariantViolated);
+        }
+        // 投降可在输入边界终局；不能为了推进时钟而丢弃已接受的终局命令。
+        if self.world.outcome.is_none() {
+            Self::advance_once(&mut self.world)?;
+        }
+        self.staged_tick = None;
+        Ok(())
+    }
+
+    pub fn enable_command_log(&mut self) {
+        self.world.enable_command_log();
+    }
+    pub fn drain_events(&mut self) -> Vec<crate::RtsEvent> {
+        self.world.drain_events()
     }
 
     /// 分叉显式重新绑定身份与修订，不能直接重用旧世界文件头。
@@ -150,10 +205,26 @@ impl ArenaRuntime {
     }
 }
 
+impl std::ops::Deref for ArenaRuntime {
+    type Target = ArenaWorld;
+    fn deref(&self) -> &Self::Target {
+        &self.world
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::MatchConfig;
+
+    #[test]
+    fn transactions_preserve_accepted_log_for_replay() {
+        let mut world = ArenaWorld::new(MatchConfig::duel(42));
+        world.enable_command_log();
+        let mut runtime = ArenaRuntime::new([9; 16], world);
+        runtime.command(FactionId(0), &RtsCommand::Surrender).unwrap();
+        assert_eq!(runtime.world().command_log().len(), 1);
+    }
 
     #[test]
     fn failed_transaction_restores_tick_root_revision_and_terrain() {
