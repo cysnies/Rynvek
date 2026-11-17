@@ -1,0 +1,13 @@
+<!-- SPDX-FileCopyrightText: 2026 The Rynvek Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors><IsPackable>false</IsPackable>
+    <PackageLicenseExpression>Apache-2.0 WITH LLVM-exception</PackageLicenseExpression>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../../protocols/schemas/agent-tools.v1.json" LogicalName="Rynvek.AgentTools.v1.json" />
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute"><_Parameter1>Rynvek.Client.Smoke</_Parameter1></AssemblyAttribute>
+  </ItemGroup>
+</Project>

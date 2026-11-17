@@ -34,3 +34,7 @@ node_modules
 
 # 同版本 wasm-bindgen 从真实 Rust 构建生成，禁止提交二进制/旧胶水
 /apps/web-platform/src/generated/wasm/
+
+# .NET SDK构建产物（不忽略源码/原始材料）
+/sdks/csharp/**/bin/
+/sdks/csharp/**/obj/
