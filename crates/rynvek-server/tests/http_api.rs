@@ -795,9 +795,9 @@ async fn ecology_lab_exports_private_real_lineage_energy_and_structured_status()
     "submission_id":rynvek_server::ids::new_uuid_v7().to_string(),
     "variants":[{"label":"自然复制","policy":"ecology","ecology":{"roles":{"unit.forager":{
       "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
-    ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50},"unit.striker":{
+    ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50},"unit.striker":{
         "basal_cost_micro_per_tick":100,"reserve_ticks":4,"birth_energy_milli":1000,
-        "movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":false,"replication_mutation_rate_permille":50
+        "movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":false,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50
       }}}}]});
     let response = send(
         &base,
@@ -868,7 +868,7 @@ async fn studio_authoring_real_params_genome_rule_template_commit_and_private_re
     let owner = register(&base, "studio-owner", "human", 71).await;
     let other = register(&base, "studio-other", "human", 72).await;
     let t = Some(owner.token.as_str());
-    let role = json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":true,"replication_mutation_rate_permille":50});
+    let role = json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":true,"attack_cost_micro_per_shot":100,"repair_cost_micro_per_milli":1,"secretion_cost_micro_per_field_raw":1,"birth_synthesis_milli":10,"activity_reserve_milli":10,"replication_mutation_rate_permille":50});
     let created = send(
         &base,
         "POST",
@@ -912,6 +912,7 @@ async fn studio_authoring_real_params_genome_rule_template_commit_and_private_re
     let mut updated = role.clone();
     updated["replication_mutation_rate_permille"] = json!(0);
     updated["birth_energy_milli"] = json!(1200);
+    updated["repair_cost_micro_per_milli"] = json!(7);
     let patch = json!({"patch_id":vec![22;16],"base_authoring_revision":0,"hlc":{"wall_time_ms":1,"logical_counter":0,"author_node_id":1},"safety_class":"EpochBoundarySafe","operations":[
         {"SetWorldParam":{"key_path":"ecology.roles.unit.forager","new_value_json":updated.to_string()}},
         {"UpsertSeedGenome":{"genome_slug":"studio.custom","genome_bytes_b64":base64::engine::general_purpose::STANDARD.encode(serde_json::to_vec(&genome).unwrap())}},

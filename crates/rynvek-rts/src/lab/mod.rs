@@ -307,6 +307,10 @@ pub struct EnergyRow {
     pub transferred_q: u128,
     pub external_received_q: u128,
     pub state_root: [u8; 32],
+    pub attack_q: u128,
+    pub repair_q: u128,
+    pub secretion_q: u128,
+    pub synthesis_q: u128,
 }
 
 /// 一个实验的全部结果
@@ -586,6 +590,17 @@ fn sample_energy(world: &ArenaWorld, run: u32, root: [u8; 32]) -> EnergyRow {
         row.remains = e.remains.len() as u32;
         row.natural_births = e.births.len() as u32;
         row.max_generation = e.births.values().map(|b| b.generation).max().unwrap_or(0);
+        for h in e
+            .bodies
+            .values()
+            .map(|b| &b.activity)
+            .chain(e.remains.values().map(|r| &r.activity))
+        {
+            row.attack_q += u128::from(h.attack_q);
+            row.repair_q += u128::from(h.repair_q);
+            row.secretion_q += u128::from(h.secretion_q);
+            row.synthesis_q += u128::from(h.synthesis_q);
+        }
         for a in e
             .bodies
             .values()

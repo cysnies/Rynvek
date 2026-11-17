@@ -21,6 +21,12 @@ pub struct RoleEnergyContract {
     pub birth_energy_milli: u32,
     pub movement_cost_micro_per_tile: u32,
     pub synapse_maintenance_micro_per_tick: u32,
+    /// 以下均为显式实验价格，不是原规范冻结值；0是明确关闭该费用。
+    pub attack_cost_micro_per_shot: u32,
+    pub repair_cost_micro_per_milli: u32,
+    pub secretion_cost_micro_per_field_raw: u32,
+    pub birth_synthesis_milli: u32,
+    pub activity_reserve_milli: u32,
     pub natural_reproduction: bool,
     pub replication_mutation_rate_permille: u32,
 }
@@ -37,6 +43,12 @@ impl RoleEnergyContract {
     }
     pub fn birth_q(self) -> u64 {
         u64::from(self.birth_energy_milli) * ENERGY_Q_PER_MILLI
+    }
+    pub fn synthesis_q(self) -> u64 {
+        u64::from(self.birth_synthesis_milli) * ENERGY_Q_PER_MILLI
+    }
+    pub fn activity_reserve_q(self) -> u64 {
+        u64::from(self.activity_reserve_milli) * ENERGY_Q_PER_MILLI
     }
     pub fn reserve_q(self) -> Option<u64> {
         u64::from(self.basal_cost_micro_per_tick)
@@ -67,9 +79,44 @@ impl EcologyContract {
     }
 }
 
+/// 已发生动作的热耗子账，不额外增加/扣减能量；死后随遗骸保存。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivityHeat {
+    pub attack_q: u64,
+    pub repair_q: u64,
+    pub secretion_q: u64,
+    pub synthesis_q: u64,
+}
+impl ActivityHeat {
+    pub fn total_q(&self) -> u128 {
+        u128::from(self.attack_q)
+            + u128::from(self.repair_q)
+            + u128::from(self.secretion_q)
+            + u128::from(self.synthesis_q)
+    }
+    fn record(&mut self, kind: ActivityKind, q: u64) {
+        let value = match kind {
+            ActivityKind::Attack => &mut self.attack_q,
+            ActivityKind::Repair => &mut self.repair_q,
+            ActivityKind::Secretion => &mut self.secretion_q,
+            ActivityKind::Synthesis => &mut self.synthesis_q,
+        };
+        *value = value.checked_add(q).expect("子账不超过守恒账户的总热耗");
+    }
+}
+#[derive(Clone, Copy)]
+pub(super) enum ActivityKind {
+    Attack,
+    Repair,
+    Secretion,
+    Synthesis,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BodyEnergy {
+    pub activity: ActivityHeat,
     pub account: EnergyAccount,
     pub pending_spikes: u32,
     /// 移动计费Q32小数余量随原权威根/快照保存，不能靠小步逃费。
@@ -79,6 +126,7 @@ pub struct BodyEnergy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemainsEnergy {
+    pub activity: ActivityHeat,
     pub cell: (u32, u32),
     pub account: EnergyAccount,
 }
@@ -127,6 +175,72 @@ impl ArenaWorld {
         let u = &self.units[&id];
         self.role_energy(u.kind, u.faction).is_some()
     }
+    pub(super) fn can_perform_activity(&self, id: EntitySerial) -> bool {
+        self.units.get(&id).is_some_and(|u| u.defense.hp_milli > 0)
+            && !self.ecology.as_ref().and_then(|e| e.bodies.get(&id)).is_some_and(|b| {
+                self.has_neural_energy_budget(id) && b.account.received_q > 0 && b.account.stored_q == 0
+            })
+    }
+    pub(super) fn activity_price_q(&self, id: EntitySerial, kind: ActivityKind) -> u64 {
+        let u = &self.units[&id];
+        self.role_energy(u.kind, u.faction).map_or(0, |r| match kind {
+            ActivityKind::Attack => u64::from(r.attack_cost_micro_per_shot) * 4,
+            ActivityKind::Repair => u64::from(r.repair_cost_micro_per_milli) * 4,
+            ActivityKind::Secretion => u64::from(r.secretion_cost_micro_per_field_raw) * 4,
+            ActivityKind::Synthesis => r.synthesis_q(),
+        })
+    }
+    /// 整个原子动作/最小输出量子必须可支付。不舍弃余额，不按请求量而按真实输出计价。
+    pub(super) fn affordable_activity(&self, id: EntitySerial, requested: u64, price_q: u64) -> u64 {
+        if !self.can_perform_activity(id) {
+            return 0;
+        }
+        if price_q == 0 {
+            return requested;
+        }
+        requested.min(
+            self.ecology.as_ref().expect("收费角色已建账").bodies[&id]
+                .account
+                .stored_q
+                / price_q,
+        )
+    }
+    pub(super) fn charge_activity(&mut self, id: EntitySerial, kind: ActivityKind, q: u64) -> bool {
+        if q == 0 {
+            return true;
+        }
+        let b = self
+            .ecology
+            .as_mut()
+            .expect("收费角色已建账")
+            .bodies
+            .get_mut(&id)
+            .expect("真实身体");
+        if !b.account.try_dissipate_q(q) {
+            return false;
+        }
+        b.activity.record(kind, q);
+        true
+    }
+    /// 后半Tick动作恰好耗尽，也必须走唯一死亡路径，不能留下可恢复的零能量幽灵。
+    pub(super) fn retire_activity_exhausted(&mut self) {
+        let ids: Vec<_> = self
+            .units
+            .keys()
+            .copied()
+            .filter(|id| {
+                self.has_neural_energy_budget(*id)
+                    && self.ecology.as_ref().is_some_and(|e| {
+                        let a = &e.bodies[id].account;
+                        a.received_q > 0 && a.stored_q == 0
+                    })
+            })
+            .collect();
+        for id in ids {
+            self.units.get_mut(&id).expect("存在").defense.hp_milli = 0;
+            self.retire_dead_unit(id);
+        }
+    }
     fn maintenance_q(&self, id: EntitySerial, role: RoleEnergyContract) -> u64 {
         let g = &self.units[&id].genome;
         let edges = g
@@ -171,9 +285,13 @@ impl ArenaWorld {
                 * (crate::units::unit_spec(u.kind).speed_milli_per_s as u64).div_ceil(30_000);
             let reserve = reserve
                 .saturating_add(self.neural_reserve_q(id))
+                .saturating_add(role.activity_reserve_q())
                 .saturating_add(movement_upper.saturating_mul(u64::from(role.reserve_ticks).max(1)));
             let target = if role.natural_reproduction {
-                reserve.max(role.birth_q()).saturating_add(role.birth_q())
+                reserve
+                    .max(role.birth_q())
+                    .saturating_add(role.birth_q())
+                    .saturating_add(role.synthesis_q())
             } else {
                 reserve.max(role.birth_q())
             };
@@ -214,7 +332,7 @@ impl ArenaWorld {
                 self.config.mode == super::MatchMode::PveSurvival
                     && e.bodies.keys().eq(self.units.keys())
                     && e.bodies.iter().all(|(id, b)| {
-                        b.account.is_conserved()
+                        b.account.is_conserved() && b.activity.total_q() <= u128::from(b.account.dissipated_q)
                             && b.account.returned_q == 0
                             // 稳定权威边界必须已退役耗尽的激活个体，不能存成活体等待新食物复活。
                             && (!self.has_neural_energy_budget(*id)
@@ -242,6 +360,7 @@ impl ArenaWorld {
                         !self.units.contains_key(id)
                             && id.0 < self.next_serial
                             && r.account.is_conserved()
+                            && r.activity.total_q() <= u128::from(r.account.dissipated_q)
                             && r.cell.0 < self.map.width
                             && r.cell.1 < self.map.height
                     })
@@ -273,7 +392,8 @@ impl ArenaWorld {
             let maintenance_q = survival.map_or(0, |r| self.maintenance_q(id, r));
             let reserve_q = self
                 .neural_reserve_q(id)
-                .saturating_add(survival.map_or(0, |r| maintenance_q.saturating_mul(u64::from(r.reserve_ticks))));
+                .saturating_add(survival.map_or(0, |r| maintenance_q.saturating_mul(u64::from(r.reserve_ticks))))
+                .saturating_add(survival.map_or(0, |r| r.activity_reserve_q()));
             let room = self
                 .faction(faction)
                 .map_or(0, |f| (f.ledger.capacity.biomass - f.ledger.balance.biomass).max(0))
@@ -307,7 +427,11 @@ impl ArenaWorld {
                 self.try_mitosis(id, parent_reserve_q, &mut occupied);
             }
             // 亲子都保留既有出生投入；额外积累一份出生预算，不逐Tick把繁殖所需余量转走。
-            let retain_q = parent_reserve_q.saturating_add(birth_q);
+            let retain_q = parent_reserve_q.saturating_add(birth_q).saturating_add(
+                survival
+                    .filter(|r| r.natural_reproduction)
+                    .map_or(0, |r| r.synthesis_q()),
+            );
             let b = self
                 .ecology
                 .as_mut()
@@ -360,6 +484,11 @@ mod role_energy_tests {
             movement_cost_micro_per_tile: 11,
             synapse_maintenance_micro_per_tick: 1,
             natural_reproduction: false,
+            attack_cost_micro_per_shot: 0,
+            repair_cost_micro_per_milli: 0,
+            secretion_cost_micro_per_field_raw: 0,
+            birth_synthesis_milli: 0,
+            activity_reserve_milli: 0,
             replication_mutation_rate_permille: 50,
         }
     }

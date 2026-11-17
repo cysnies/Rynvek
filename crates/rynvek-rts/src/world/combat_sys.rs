@@ -17,6 +17,7 @@
 //! - **护盾再生**：每秒最大护盾 2% × (1 + 防御读出)；
 //! - **死亡**：单位残骸按 75%（研发超导代谢后 90%）生物质造价化为死亡格营养。
 
+use super::ecology::ActivityKind;
 use rynvek_core::{Q32_32, RandomKey};
 
 use crate::buildings::{NEXUS_WEAPON, TURRET_WEAPON};
@@ -80,9 +81,12 @@ impl ArenaWorld {
         let aura = unit_spec(UnitKind::Weaver).support_aura.expect("Weaver 光环");
         let r = Q32_32::from_milli(aura.radius_milli);
         let r2 = r.mul(r);
-        self.units
-            .values()
-            .any(|w| w.faction == faction && w.kind == UnitKind::Weaver && w.position.distance_sq(p) <= r2)
+        self.units.values().any(|w| {
+            w.faction == faction
+                && w.kind == UnitKind::Weaver
+                && self.can_perform_activity(w.id)
+                && w.position.distance_sq(p) <= r2
+        })
     }
 
     fn is_veteran(&self, id: EntitySerial) -> bool {
@@ -116,7 +120,7 @@ impl ArenaWorld {
         let mut out = Vec::new();
         for u in self.units.values() {
             let Some(w) = unit_spec(u.kind).weapon else { continue };
-            if u.weapon_cooldown > 0 || u.actions[action::ATTACK] < -128 {
+            if !self.can_perform_activity(u.id) || u.weapon_cooldown > 0 || u.actions[action::ATTACK] < -128 {
                 continue;
             }
             out.push(Shooter {
@@ -133,7 +137,7 @@ impl ArenaWorld {
                 BuildingKind::PulseTurret => TURRET_WEAPON,
                 _ => continue,
             };
-            if !b.complete || !b.powered || b.weapon_cooldown > 0 {
+            if b.defense.hp_milli <= 0 || !b.complete || !b.powered || b.weapon_cooldown > 0 {
                 continue;
             }
             out.push(Shooter {
@@ -158,7 +162,7 @@ impl ArenaWorld {
         let grid = self.build_contact_grid();
         for s in self.shooters() {
             // 射手可能已在本 Tick 早些时候阵亡
-            if !(self.units.contains_key(&s.id) || self.buildings.contains_key(&s.id)) {
+            if !(self.can_perform_activity(s.id) || self.buildings.get(&s.id).is_some_and(|b| b.defense.hp_milli > 0)) {
                 continue;
             }
             let range = Q32_32::from_milli(s.weapon.range_milli);
@@ -173,6 +177,9 @@ impl ArenaWorld {
                 let Some(u) = self.units.get(&c.id) else {
                     return;
                 };
+                if u.defense.hp_milli <= 0 {
+                    return;
+                }
                 let (point, extra) = (u.position, u.radius());
                 let reach = range.saturating_add(extra);
                 let d2 = s.position.distance_sq(point);
@@ -195,6 +202,9 @@ impl ArenaWorld {
                 let Some(b) = self.buildings.get(&c.id) else {
                     continue;
                 };
+                if b.defense.hp_milli <= 0 {
+                    continue;
+                }
                 let point = b.nearest_point(s.position);
                 let d2 = s.position.distance_sq(point);
                 if d2 > range.mul(range) {
@@ -210,6 +220,15 @@ impl ArenaWorld {
             }
 
             let Some((_, target, point, _)) = best else { continue };
+            // 同一权威调用内预检身体费用，再扣弹药；两者均可支付才发射。
+            let attack_q = if s.is_building {
+                0
+            } else {
+                self.activity_price_q(s.id, ActivityKind::Attack)
+            };
+            if !s.is_building && self.affordable_activity(s.id, 1, attack_q) == 0 {
+                continue;
+            }
             // 防御塔弹药
             if s.weapon.flux_per_shot_milli > 0 {
                 let paid = self
@@ -219,6 +238,7 @@ impl ArenaWorld {
                     continue;
                 }
             }
+            assert!(self.charge_activity(s.id, ActivityKind::Attack, attack_q));
             // 射速
             let mut bonus = 0i64;
             if !s.is_building {
@@ -264,12 +284,22 @@ impl ArenaWorld {
                 self.resolve_hit(&s, v);
             }
             if s.weapon.hazard_deposit_milli > 0 {
-                if let Some((tx, ty)) = point.tile() {
-                    self.fields.add(
-                        FieldId::Hazard,
-                        tx,
-                        ty,
-                        (s.weapon.hazard_deposit_milli * 256 / 1000) as i32,
+                if let Some((tx, ty)) = point
+                    .tile()
+                    .filter(|(x, y)| *x < self.map.width && *y < self.map.height)
+                {
+                    // 只为实际可容纳的整数Q8.8分泌付费；饱和不收费，缺钱降量且保留余款。
+                    let limit =
+                        i32::from(crate::fields::ARENA_FIELD_CHANNELS[FieldId::Hazard.channel().index()].max_val_q8);
+                    let room =
+                        (limit - i32::from(self.fields.get(FieldId::Hazard, tx as i64, ty as i64))).max(0) as u64;
+                    let requested = (s.weapon.hazard_deposit_milli * 256 / 1000).max(0) as u64;
+                    let price = self.activity_price_q(s.id, ActivityKind::Secretion);
+                    let accepted = self.affordable_activity(s.id, requested.min(room), price);
+                    assert!(self.charge_activity(s.id, ActivityKind::Secretion, accepted * price));
+                    assert_eq!(
+                        self.fields.add(FieldId::Hazard, tx, ty, accepted as i32),
+                        accepted as i32
                     );
                 }
             }
@@ -277,6 +307,11 @@ impl ArenaWorld {
     }
 
     fn resolve_hit(&mut self, s: &Shooter, target: EntitySerial) {
+        if self.units.get(&target).is_some_and(|u| u.defense.hp_milli <= 0)
+            || self.buildings.get(&target).is_some_and(|b| b.defense.hp_milli <= 0)
+        {
+            return;
+        }
         // 闪避（只对单位目标）
         if let Some(t) = self.units.get(&target) {
             let mut dodge = 0i64;
@@ -323,47 +358,70 @@ impl ArenaWorld {
     pub(super) fn step_environment(&mut self) {
         let tick = self.tick;
         let ids: Vec<EntitySerial> = self.units.keys().copied().collect();
-        // Weaver 治疗光环
-        let weavers: Vec<(FactionId, Vec2)> = self
-            .units
-            .values()
-            .filter(|u| u.kind == UnitKind::Weaver)
-            .map(|u| (u.faction, u.position))
-            .collect();
-        let aura = unit_spec(UnitKind::Weaver).support_aura.expect("光环");
-        let ar = Q32_32::from_milli(aura.radius_milli);
-        let heal = per_tick_share(aura.heal_milli_per_s, tick);
-        for id in ids {
+        // 先结算所有环境伤害，死亡/耗尽的Weaver不能在同一环境阶段继续治疗。
+        for &id in &ids {
             let (tx, ty) = self.units[&id].tile();
             let tile = self.map.tile(tx.min(self.map.width - 1), ty.min(self.map.height - 1));
             let hazard = self.fields.get(FieldId::Hazard, tx as i64, ty as i64);
-            let energy = self.fields.get(FieldId::Energy, tx as i64, ty as i64);
             let u = self.units.get_mut(&id).expect("存在");
-            let spec = unit_spec(u.kind);
-            let corrosion_resistant = spec.weapon.is_some_and(|w| w.damage_type == DamageType::Corrosive);
-            if !corrosion_resistant {
+            let resistant = unit_spec(u.kind)
+                .weapon
+                .is_some_and(|w| w.damage_type == DamageType::Corrosive);
+            if !resistant {
                 apply_true_damage(&mut u.defense, hazard_damage_milli_per_tick(hazard));
             }
             if tile == TerrainTileKind::AcidicFissure {
                 apply_true_damage(&mut u.defense, FISSURE_BURN_MILLI_PER_TICK);
             }
-            if u.max_shield_milli > 0 && u.defense.hp_milli > 0 {
+        }
+        let weavers: Vec<_> = self
+            .units
+            .values()
+            .filter(|u| u.kind == UnitKind::Weaver)
+            .map(|u| u.id)
+            .collect();
+        let aura = unit_spec(UnitKind::Weaver).support_aura.expect("光环");
+        let ar = Q32_32::from_milli(aura.radius_milli);
+        let heal = per_tick_share(aura.heal_milli_per_s, tick);
+        for id in ids {
+            if !self.can_perform_activity(id) {
+                continue;
+            }
+            let u = &self.units[&id];
+            let (tx, ty) = u.tile();
+            let energy = self.fields.get(FieldId::Energy, tx as i64, ty as i64);
+            if u.max_shield_milli > 0 {
                 let defense = u.actions[action::DEFENSE].clamp(0, 256) as i64;
                 let mut rate = u.max_shield_milli * SHIELD_REGEN_PERCENT_PER_S / 100 * (256 + defense) / 256;
                 if energy >= 20 * 256 {
                     rate = rate * 125 / 100;
                 }
-                u.defense.shield_milli = (u.defense.shield_milli + per_tick_share(rate, tick)).min(u.max_shield_milli);
+                let requested =
+                    per_tick_share(rate, tick).min((u.max_shield_milli - u.defense.shield_milli).max(0)) as u64;
+                let price = self.activity_price_q(id, ActivityKind::Repair);
+                let actual = self.affordable_activity(id, requested, price);
+                assert!(self.charge_activity(id, ActivityKind::Repair, actual * price));
+                self.units.get_mut(&id).expect("存在").defense.shield_milli += actual as i64;
             }
-            if u.defense.hp_milli > 0 && u.kind != UnitKind::Weaver {
-                let p = u.position;
-                let f = u.faction;
-                if weavers
-                    .iter()
-                    .any(|(wf, wp)| *wf == f && wp.distance_sq(p) <= ar.mul(ar))
-                {
-                    u.defense.hp_milli = (u.defense.hp_milli + heal).min(u.max_hp_milli);
+            if !self.can_perform_activity(id) || self.units[&id].kind == UnitKind::Weaver {
+                continue;
+            }
+            let u = &self.units[&id];
+            let (faction, position) = (u.faction, u.position);
+            let mut remaining = heal.min((u.max_hp_milli - u.defense.hp_milli).max(0)) as u64;
+            for &donor in &weavers {
+                if remaining == 0 {
+                    break;
                 }
+                let w = &self.units[&donor];
+                if w.faction != faction || w.position.distance_sq(position) > ar.mul(ar) {
+                    continue;
+                }
+                let price = self.activity_price_q(donor, ActivityKind::Repair);
+                let actual = self.affordable_activity(donor, remaining, price);
+                assert!(self.charge_activity(donor, ActivityKind::Repair, actual * price));
+                self.units.get_mut(&id).expect("真实受体").defense.hp_milli += actual as i64;
+                remaining -= actual;
             }
         }
         // 突然死亡：主脑每秒流失 20 HP
@@ -386,7 +444,8 @@ impl ArenaWorld {
             .map(|f| f.modifiers().corpse_recycle_percent)
             .unwrap_or(75);
         if let Some(ecology) = &mut self.ecology {
-            let mut account = ecology.bodies.remove(&id).expect("死亡前存在个体账本").account;
+            let body = ecology.bodies.remove(&id).expect("死亡前存在个体账本");
+            let mut account = body.account;
             account.prepare_remains(recycle as u32);
             let (x, y) = u.tile();
             ecology.remains.insert(
@@ -394,6 +453,7 @@ impl ArenaWorld {
                 super::ecology::RemainsEnergy {
                     cell: (x.min(self.map.width - 1), y.min(self.map.height - 1)),
                     account,
+                    activity: body.activity,
                 },
             );
         }

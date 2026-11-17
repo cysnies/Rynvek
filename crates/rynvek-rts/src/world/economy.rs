@@ -163,9 +163,10 @@ impl ArenaWorld {
             return;
         }
         let (faction, rect, unit) = (b.faction, b.rect(), b.queue.front().expect("非空").unit);
-        let birth_milli = self
-            .role_energy(unit, faction)
-            .map_or(0, |c| i64::from(c.birth_energy_milli));
+        let contract = self.role_energy(unit, faction);
+        let synthesis_milli = contract.map_or(0, |c| i64::from(c.birth_synthesis_milli));
+        let birth_milli = contract.map_or(0, |c| i64::from(c.birth_energy_milli));
+        let input_milli = birth_milli + synthesis_milli;
         // 出生前唯一付款点：不预扣第二份托管状态，不依靠造价或免费移动制造启动能量。
         // 不足时队首停在最后一Tick，保留原生产造价及取消退款语义，不扣能量也不弹队。
         if birth_milli > 0
@@ -173,7 +174,7 @@ impl ArenaWorld {
                 .faction_mut(faction)
                 .expect("玩家阵营")
                 .ledger
-                .try_consume(ResourceKind::Biomass, birth_milli)
+                .try_consume(ResourceKind::Biomass, input_milli)
         {
             return;
         }
@@ -194,7 +195,12 @@ impl ArenaWorld {
                 .bodies
                 .get_mut(&child)
                 .expect("出生同步建账")
-                .account = rynvek_neural::metabolism::EnergyAccount::from_milli(birth_milli);
+                .account = rynvek_neural::metabolism::EnergyAccount::from_milli(input_milli);
+            assert!(self.charge_activity(
+                child,
+                super::ecology::ActivityKind::Synthesis,
+                synthesis_milli as u64 * rynvek_neural::metabolism::ENERGY_Q_PER_MILLI
+            ));
         }
     }
 

@@ -141,6 +141,10 @@ pub fn energy_schema() -> SchemaRef {
         field("transferred_q", DataType::Decimal128(38, 0), false),
         field("external_received_q", DataType::Decimal128(38, 0), false),
         field("state_root", DataType::FixedSizeBinary(32), false),
+        field("attack_q", DataType::Decimal128(38, 0), false),
+        field("repair_q", DataType::Decimal128(38, 0), false),
+        field("secretion_q", DataType::Decimal128(38, 0), false),
+        field("synthesis_q", DataType::Decimal128(38, 0), false),
     ]))
 }
 
@@ -309,6 +313,26 @@ pub fn energy_batch(rows: &[EnergyRow]) -> Result<RecordBatch, ArrowError> {
             } else {
                 roots(rows.iter().map(|r| &r.state_root))?
             },
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.attack_q).expect("热耗子账精确汇总")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.repair_q).expect("热耗子账精确汇总")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.secretion_q).expect("热耗子账精确汇总")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.synthesis_q).expect("热耗子账精确汇总")),
+            )
+            .with_precision_and_scale(38, 0)?),
         ],
     )
 }

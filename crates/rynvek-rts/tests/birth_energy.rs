@@ -20,6 +20,11 @@ fn ready_world(vats: usize) -> (ArenaWorld, Vec<EntitySerial>) {
             movement_cost_micro_per_tile: 0,
             synapse_maintenance_micro_per_tick: 0,
             natural_reproduction: true,
+            attack_cost_micro_per_shot: 0,
+            repair_cost_micro_per_milli: 0,
+            secretion_cost_micro_per_field_raw: 0,
+            birth_synthesis_milli: 0,
+            activity_reserve_milli: 0,
             replication_mutation_rate_permille: 50,
         },
     ));
@@ -250,4 +255,34 @@ fn unfunded_ready_job_cancels_without_charging_or_refunding_unpaid_birth_energy(
         w.faction(PLAYER).unwrap().ledger.balance.biomass,
         rynvek_rts::units::unit_spec(UnitKind::Forager).cost.biomass
     );
+}
+
+#[test]
+fn synthesis_fee_is_atomic_with_vat_birth_and_is_not_stored_as_free_energy() {
+    let (mut w, vats) = ready_world(1);
+    w.config
+        .ecology
+        .as_mut()
+        .unwrap()
+        .roles
+        .get_mut(&UnitKind::Forager)
+        .unwrap()
+        .birth_synthesis_milli = 10;
+    let count = w.units.len();
+    w.faction_mut(PLAYER).unwrap().ledger.balance.biomass = 1009;
+    w.step();
+    assert_eq!(w.units.len(), count);
+    assert_eq!(w.faction(PLAYER).unwrap().ledger.balance.biomass, 1009);
+    assert_eq!(w.buildings[&vats[0]].queue.len(), 1);
+    let old: Vec<_> = w.units.keys().copied().collect();
+    w.faction_mut(PLAYER).unwrap().ledger.balance.biomass = 1010;
+    w.step();
+    let born = *w.units.keys().find(|id| !old.contains(id)).unwrap();
+    let b = &w.ecology.as_ref().unwrap().bodies[&born];
+    assert_eq!(b.account.received_q, 4_040_000);
+    assert_eq!(b.activity.synthesis_q, 40_000);
+    assert!(b.account.stored_q <= 4_000_000);
+    assert!(b.account.is_conserved());
+    assert!(w.buildings[&vats[0]].queue.is_empty());
+    assert_eq!(w.faction(PLAYER).unwrap().ledger.balance.biomass, 0);
 }

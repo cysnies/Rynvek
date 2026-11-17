@@ -18,9 +18,11 @@ use std::collections::BTreeSet;
 impl ArenaWorld {
     /// 出生历史与双向转账必须一一闭合；私有快照不能丢谱系却仍保留亲本转出。
     pub(super) fn validate_mitosis_accounts(&self, ecology: &EcologyState) -> bool {
+        let mut synthesis = std::collections::BTreeMap::<EntitySerial, u128>::new();
         let mut allocations = std::collections::BTreeMap::<EntitySerial, u128>::new();
         for (child, birth) in &ecology.births {
             *allocations.entry(birth.parent).or_default() += u128::from(birth.allocated_q);
+            *synthesis.entry(birth.parent).or_default() += u128::from(birth.birth_contract.synthesis_q());
             let account = ecology
                 .bodies
                 .get(child)
@@ -63,6 +65,15 @@ impl ArenaWorld {
                 return false;
             }
         }
+        if !ecology
+            .bodies
+            .iter()
+            .map(|(id, b)| (id, &b.activity))
+            .chain(ecology.remains.iter().map(|(id, r)| (id, &r.activity)))
+            .all(|(id, h)| u128::from(h.synthesis_q) >= synthesis.get(id).copied().unwrap_or(0))
+        {
+            return false;
+        }
         ecology
             .bodies
             .iter()
@@ -75,7 +86,10 @@ impl ArenaWorld {
             .role_energy(self.units[&parent].kind, self.units[&parent].faction)
             .expect("调用者已核定角色契约");
         let allocated_q = contract.birth_q();
-        let Some(required_q) = allocated_q.checked_add(retain_q) else {
+        let Some(required_q) = allocated_q
+            .checked_add(retain_q)
+            .and_then(|n| n.checked_add(contract.synthesis_q()))
+        else {
             return;
         };
         let unit = &self.units[&parent];
@@ -134,10 +148,11 @@ impl ArenaWorld {
             .get_mut(&parent)
             .expect("活体账户")
             .account
-            .try_transfer_to(&mut account, allocated_q, retain_q)
+            .try_transfer_to(&mut account, allocated_q, retain_q + contract.synthesis_q())
         {
             return;
         }
+        assert!(self.charge_activity(parent, super::ecology::ActivityKind::Synthesis, contract.synthesis_q()));
         // 自此无可恢复失败点；序号和候选脑均预检。HP/护盾同样拆分，不免费复制满血军队。
         let child = self.spawn_unit_with_brain(faction, kind, genome, Vec2::tile_center(x as u32, y as u32), brain);
         let unit = self.units.get_mut(&parent).expect("仍存活");

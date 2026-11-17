@@ -15,6 +15,11 @@ fn config() -> MatchConfig {
             movement_cost_micro_per_tile: 0,
             synapse_maintenance_micro_per_tick: 0,
             natural_reproduction: true,
+            attack_cost_micro_per_shot: 0,
+            repair_cost_micro_per_milli: 0,
+            secretion_cost_micro_per_field_raw: 0,
+            birth_synthesis_milli: 0,
+            activity_reserve_milli: 0,
             replication_mutation_rate_permille: 50,
         },
     ));

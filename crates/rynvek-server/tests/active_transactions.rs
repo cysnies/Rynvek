@@ -76,7 +76,7 @@ impl Fixture {
             .await
             .unwrap();
         let spec = MatchSpec {
-                custom: false,
+            custom: false,
             match_id,
             world_id,
             league: League::Human,
@@ -544,7 +544,9 @@ async fn studio_action_rule_enters_real_actor_epoch_and_committed_restore() {
     assert!(restored.world().units.values().all(|u| u.actions[0] == 128));
     let mut deletion = patch(30, f.host.status().revision, 101);
     deletion.safety_class = rynvek_world::LiveEditSafetyClass::EpochBoundarySafe;
-    deletion.operations = vec![WorldPatchOp::RemoveRuleModule { module_id: "control".into() }];
+    deletion.operations = vec![WorldPatchOp::RemoveRuleModule {
+        module_id: "control".into(),
+    }];
     let pending = f.post(&deletion);
     f.queued(1).await;
     f.host.advance(3).await.unwrap();
@@ -594,6 +596,11 @@ fn ecology_authoring_change_replays_same_wal_without_relaxing_normal_config_free
         movement_cost_micro_per_tile: 100,
         synapse_maintenance_micro_per_tick: 1,
         natural_reproduction: true,
+        attack_cost_micro_per_shot: 0,
+        repair_cost_micro_per_milli: 0,
+        secretion_cost_micro_per_field_raw: 0,
+        birth_synthesis_milli: 0,
+        activity_reserve_milli: 0,
         replication_mutation_rate_permille: 50,
     };
     config.ecology = Some(EcologyContract::single(rynvek_rts::UnitKind::Forager, role));

@@ -16,7 +16,7 @@ pub const LEASE_S: u64 = 30;
 pub const MAX_ACTIVE: usize = 8;
 pub const MAX_JOBS: usize = 512;
 pub const MAX_ATTEMPTS: u32 = 5;
-pub const KERNEL_PROFILE: &str = "rynvek-lab-kernel/3";
+pub const KERNEL_PROFILE: &str = "rynvek-lab-kernel/4";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Experiment {
     pub exp_id: String,
