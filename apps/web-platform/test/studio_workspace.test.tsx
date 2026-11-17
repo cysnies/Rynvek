@@ -10,7 +10,7 @@ const basis={world_id:"w",revision:7,tick:4,state_root:"ab".repeat(32),rule_faul
 async function connect(){render(<StudioApp/>);fireEvent.change(screen.getByLabelText("Studio服务地址"),{target:{value:"http://srv"}});fireEvent.change(screen.getByLabelText("世界ID"),{target:{value:"w"}});fireEvent.change(screen.getByLabelText("Studio令牌"),{target:{value:"private"}});fireEvent.click(screen.getByText("连接权威世界"));await screen.findByText(/revision 7/)}
 it("真实HTTP会话挂载停靠编辑，回执前不展示乐观地形/修订，断开清除私有结果",async()=>{
  let resolve!:(r:Response)=>void;const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>init?.method==="POST"?new Promise<Response>(r=>{resolve=r}):Response.json(basis));vi.stubGlobal("fetch",fetcher);
- await connect();fireEvent.change(screen.getByLabelText("tile_kind"),{target:{value:"4"}});fireEvent.click(screen.getByText("提交地形"));
+ await connect();expect(screen.getByLabelText("在Arena运行当前世界").getAttribute("href")).toBe("/arena?world=w&api_origin=http%3A%2F%2Fsrv");fireEvent.change(screen.getByLabelText("tile_kind"),{target:{value:"4"}});fireEvent.click(screen.getByText("提交地形"));
  await waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(2));expect(screen.getByText(/revision 7/)).toBeTruthy();expect(document.querySelector('svg[aria-label="权威地形"] rect')).toBeNull();
  await act(async()=>resolve(Response.json({status:"applied",world_id:"w",world_revision:8,effective_tick:5,state_root:"cd".repeat(32),patch_cid:"ef".repeat(32),report:{tiles_modified:1}})));
  await screen.findByText(/revision 8/);expect(document.querySelector('svg[aria-label="权威地形"] rect')).toBeTruthy();
