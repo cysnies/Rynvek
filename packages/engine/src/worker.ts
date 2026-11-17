@@ -106,12 +106,22 @@ export function runEngineWorker(
   };
 
   scope.addEventListener("message", (ev) => {
-    const data = ev.data as { type?: unknown; canvas?: unknown } | null | undefined;
+    const data = ev.data as { type?: unknown; canvas?: unknown; arenaFaction?: unknown; gpuMode?: unknown } | null | undefined;
     queue = queue.then(async () => {
       if (stopped) return;
       if (data && data.type === "ENGINE_INIT") {
         const { canvas, ...rest } = data;
-        emit(scope, await engine.init(canvas, JSON.stringify(rest)));
+        const result = await engine.init(canvas, JSON.stringify(rest));
+        if (rest.arenaFaction !== undefined && engine.phase() !== "shut-down") {
+          // 旧 WASM 会忽略未知的 arenaFaction；必须在发布就绪和调度任何帧之前确认实际能力。
+          const { events, rejected } = parseEngineEvents(typeof result === "string" ? JSON.parse(result) : result);
+          const ready = events.filter((event) => event.type === "ENGINE_READY");
+          if (engine.phase() !== "ready" || rejected.length > 0 || ready.length !== 1 || ready[0]!.arenaFaction !== rest.arenaFaction
+              || (rest.gpuMode === "required" && ready[0]!.backend !== "webgpu")) {
+            throw new Error("WASM 未确认匹配的阵营只读显示能力或所需 WebGPU 后端；拒绝启动渲染");
+          }
+        }
+        emit(scope, result);
         checkStopped();
         if (!stopped && !looping && engine.phase() === "ready") {
           looping = true;

@@ -15,7 +15,7 @@
     { "type": "SHUTDOWN" }
   ],
   "events": [
-    { "type": "ENGINE_READY", "backend": "webgpu", "profile": "TierC", "adapter": "llvmpipe (Gl)", "generation": 0 },
+    { "type": "ENGINE_READY", "backend": "webgpu", "profile": "TierC", "adapter": "llvmpipe (Gl)", "generation": 0, "arenaFaction": 0 },
     { "type": "ENGINE_READY", "backend": "cpu-reference", "profile": null, "adapter": null, "generation": 0 },
     { "type": "TICK_COMMITTED", "tick": 42, "stateRoot": "aa00000000000000000000000000000000000000000000000000000000000001" },
     { "type": "FRAME_RENDERED", "tick": 42 },

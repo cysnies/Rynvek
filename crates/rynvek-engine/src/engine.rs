@@ -269,6 +269,7 @@ impl Engine {
             profile,
             adapter,
             generation,
+            arena_faction: self.config.arena_faction,
         });
     }
 

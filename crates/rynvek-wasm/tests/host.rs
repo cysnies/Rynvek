@@ -283,3 +283,21 @@ fn remote_arena_worker_never_advances_a_parallel_simulation() {
             .any(|ev| matches!(ev, EngineEvent::EngineError { .. }))
     );
 }
+
+#[test]
+fn remote_ready_confirms_the_configured_read_only_faction() {
+    for faction in [0, 255] {
+        let mut host = WorkerHost::new();
+        let init = WorkerHost::parse_message(&format!(
+            r#"{{"type":"ENGINE_INIT","width":256,"height":256,"gpuMode":"disabled","arenaFaction":{faction}}}"#,
+        ))
+        .unwrap();
+        host.init_native(&init).unwrap();
+        let events = serde_json::to_value(host.drain_events()).unwrap();
+        assert_eq!(events[0]["type"], "ENGINE_READY");
+        assert_eq!(events[0]["arenaFaction"], faction, "必须回显实际初始化的只读阵营能力");
+        host.handle_json(r#"{"type":"START","tickRate":30}"#);
+        assert!(!error_codes(&host.drain_events()).is_empty());
+        assert_eq!(host.engine().unwrap().last_tick(), 0);
+    }
+}

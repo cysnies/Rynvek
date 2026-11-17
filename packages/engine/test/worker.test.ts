@@ -11,6 +11,7 @@ class FakeWasmWorker implements WasmEngineWorkerLike {
   initCanvas: unknown = undefined;
   state = "awaiting-init";
   tick = 0;
+  readyEvents: unknown[] = [READY_GPU];
   private release: (() => void) | null = null;
 
   init(canvas: unknown, json: string): Promise<unknown> {
@@ -20,7 +21,7 @@ class FakeWasmWorker implements WasmEngineWorkerLike {
     return new Promise((resolve) => {
       this.release = () => {
         this.state = "ready";
-        resolve(JSON.stringify([READY_GPU]));
+        resolve(JSON.stringify(this.readyEvents));
       };
     });
   }
@@ -154,4 +155,78 @@ it("WASM 帧异常只报告一次并停止重调度", async () => {
   expect(scope.raf).toHaveLength(0);
   loop.frame(32);
   expect(scope.out).toEqual([[READY_GPU], [{ type: "ENGINE_ERROR", code: 0x3003, message: "Worker 调用失败：帧失败反例" }]]);
+});
+
+
+it.each([
+  ["旧 WASM 未回显", [READY_GPU]],
+  ["错误阵营", [{ ...READY_GPU, arenaFaction: 1 }]],
+  ["空阵营", [{ ...READY_GPU, arenaFaction: null }]],
+  ["字符串阵营", [{ ...READY_GPU, arenaFaction: "0" }]],
+  ["负阵营", [{ ...READY_GPU, arenaFaction: -1 }]],
+  ["越界阵营", [{ ...READY_GPU, arenaFaction: 256 }]],
+  ["小数阵营", [{ ...READY_GPU, arenaFaction: 0.5 }]],
+  ["CPU 冒充显示成功", [{ ...READY_GPU, arenaFaction: 0, backend: "cpu-reference" }]],
+  ["没有就绪事件", []],
+  ["重复就绪事件", [{ ...READY_GPU, arenaFaction: 0 }, { ...READY_GPU, arenaFaction: 0 }]],
+])("竞技场能力握手失败必须先于就绪、帧与观察转发：%s", async (_label, events) => {
+  const scope = new FakeScope();
+  const wasm = new FakeWasmWorker();
+  wasm.readyEvents = events;
+  const loop = runEngineWorker(scope, wasm);
+  scope.send({ type: "ENGINE_INIT", canvas: new FakeOffscreen(5), width: 4, height: 4,
+    gpuMode: "required", arenaFaction: 0 });
+  scope.send({ type: "ARENA_OBSERVATION", worldId: "0".repeat(32), observation: {} });
+  await flush(); wasm.finishInit(); await flush();
+  expect(loop.stopped).toBe(true);
+  expect(scope.raf).toHaveLength(0);
+  expect(scope.out).toEqual([[{ type: "ENGINE_ERROR", code: 0x3003,
+    message: expect.stringContaining("阵营只读显示能力") }]]);
+  scope.runFrame(16); loop.frame(32);
+  expect(wasm.calls.filter((call) => call.startsWith("post:") || call.startsWith("frame:"))).toEqual([]);
+});
+
+it.each([0, 255])("成功回显阵营 %s 后才发布就绪、转发观察和调度帧", async (arenaFaction) => {
+  const scope = new FakeScope();
+  const wasm = new FakeWasmWorker();
+  const ready = { ...READY_GPU, arenaFaction };
+  wasm.readyEvents = [ready];
+  const loop = runEngineWorker(scope, wasm);
+  scope.send({ type: "ENGINE_INIT", canvas: new FakeOffscreen(6), width: 4, height: 4,
+    gpuMode: "required", arenaFaction });
+  scope.send({ type: "ARENA_OBSERVATION", worldId: "0".repeat(32), observation: { faction: arenaFaction } });
+  await flush(); wasm.finishInit(); await flush();
+  expect(loop.stopped).toBe(false);
+  expect(scope.out).toEqual([[ready]]);
+  expect(scope.raf).toHaveLength(1);
+  expect(wasm.calls.at(-1)).toContain('post:{"type":"ARENA_OBSERVATION"');
+});
+
+it("竞技场设备初始化真实失败时保留原错误，不用握手错误覆盖它", async () => {
+  const scope = new FakeScope();
+  const wasm = new FakeWasmWorker();
+  const error = { type: "ENGINE_ERROR", code: 0x6001, message: "没有可用 GPU" };
+  wasm.init = async () => { wasm.state = "shut-down"; return JSON.stringify([error]); };
+  const loop = runEngineWorker(scope, wasm);
+  scope.send({ type: "ENGINE_INIT", canvas: new FakeOffscreen(7), width: 4, height: 4,
+    gpuMode: "required", arenaFaction: 0 });
+  await flush();
+  expect(loop.stopped).toBe(true);
+  expect(scope.out).toEqual([[error]]);
+  expect(scope.raf).toHaveLength(0);
+});
+
+
+it("初始化未完成的 WASM 即使伪发正确能力也不能发布就绪", async () => {
+  const scope = new FakeScope();
+  const wasm = new FakeWasmWorker();
+  wasm.init = async () => JSON.stringify([{ ...READY_GPU, arenaFaction: 0 }]);
+  const loop = runEngineWorker(scope, wasm);
+  scope.send({ type: "ENGINE_INIT", canvas: new FakeOffscreen(8), width: 4, height: 4,
+    gpuMode: "required", arenaFaction: 0 });
+  await flush();
+  expect(loop.stopped).toBe(true);
+  expect(scope.raf).toHaveLength(0);
+  expect(scope.out).toEqual([[{ type: "ENGINE_ERROR", code: 0x3003,
+    message: expect.stringContaining("阵营只读显示能力") }]]);
 });

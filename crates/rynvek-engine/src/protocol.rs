@@ -120,6 +120,9 @@ pub enum EngineEvent {
         profile: Option<String>,
         adapter: Option<String>,
         generation: u32,
+        /// 实际启用的远程只读阵营；省略表示本地仿真或旧版本，不证明竞技场显示能力。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arena_faction: Option<u8>,
     },
     TickCommitted {
         tick: u64,
@@ -239,6 +242,7 @@ mod tests {
             profile: None,
             adapter: None,
             generation: 0,
+            arena_faction: None,
         };
         assert_eq!(
             ready.to_json(),

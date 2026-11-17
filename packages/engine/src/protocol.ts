@@ -100,6 +100,8 @@ export type EngineEvent =
       profile: string | null;
       adapter: string | null;
       generation: number;
+      /** 实际启用的只读竞技场阵营；旧版本/本地仿真不回显。 */
+      arenaFaction?: number;
     }
   | { type: "TICK_COMMITTED"; tick: number; stateRoot: string }
   | { type: "FRAME_RENDERED"; tick: number }
@@ -114,11 +116,11 @@ export type EngineEvent =
 export type EngineEventType = EngineEvent["type"];
 export type EngineEventOf<T extends EngineEventType> = Extract<EngineEvent, { type: T }>;
 
-type FieldKind = "u32" | "number" | "string" | "nullable-string" | "nullable-u32" | "backend" | "hex64";
+type FieldKind = "optional-u8" | "u32" | "number" | "string" | "nullable-string" | "nullable-u32" | "backend" | "hex64";
 
 /** 每种事件的字段模式（运行时校验 Worker 消息） */
 const EVENT_SCHEMA: { readonly [K in EngineEventType]: Readonly<Record<string, FieldKind>> } = {
-  ENGINE_READY: { backend: "backend", profile: "nullable-string", adapter: "nullable-string", generation: "u32" },
+  ENGINE_READY: { backend: "backend", profile: "nullable-string", adapter: "nullable-string", generation: "u32", arenaFaction: "optional-u8" },
   TICK_COMMITTED: { tick: "number", stateRoot: "hex64" },
   FRAME_RENDERED: { tick: "number" },
   PICK_RESULT: { requestId: "u32", denseIndex: "nullable-u32" },
@@ -136,6 +138,8 @@ const isU32 = (v: unknown): v is number => typeof v === "number" && Number.isInt
 
 function checkField(kind: FieldKind, v: unknown): boolean {
   switch (kind) {
+    case "optional-u8":
+      return v === undefined || (isU32(v) && v <= 255);
     case "u32":
       return isU32(v);
     case "number":
