@@ -51,6 +51,7 @@ export interface RunRow {
   readonly genomes_bred: number;
   readonly waves_spawned: number;
   readonly natural_births: number;
+  /** 自然出生因果链最大代数，不混入虫潮生成代数。 */
   readonly max_generation: number;
 }
 

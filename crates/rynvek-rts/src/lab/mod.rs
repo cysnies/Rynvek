@@ -436,7 +436,11 @@ pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResul
             genomes_bred: bred,
             waves_spawned: waves,
             natural_births: world.ecology.as_ref().map_or(0, |e| e.births.len() as u32),
-            max_generation: lineage.iter().map(|r| r.generation).max().unwrap_or(0),
+            max_generation: world
+                .ecology
+                .as_ref()
+                .and_then(|e| e.births.values().map(|b| b.generation).max())
+                .unwrap_or(0),
         }],
         metrics,
         lineage,

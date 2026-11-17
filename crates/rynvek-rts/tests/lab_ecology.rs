@@ -29,6 +29,10 @@ fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
         "必须观察到至少连续两次自然代际，不拿虫潮代数冒充"
     );
     assert_eq!(result.runs[0].natural_births, births.len() as u32);
+    assert_eq!(
+        result.runs[0].max_generation,
+        births.iter().map(|b| b.generation).max().unwrap()
+    );
     for child in births {
         let parent = result.lineage.iter().find(|p| Some(p.entity) == child.parent).unwrap();
         assert_eq!(child.generation, parent.generation + 1);
