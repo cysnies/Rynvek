@@ -5,6 +5,29 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第三十六批：一般参数实体模板与权威规则绑定（从main 4320917继续）
+
+**主体继续，整体未完成。** 新增非基因、非既有角色的参数实体：创建/编辑模板、实例和规则绑定 → 原Epoch补丁/CRDT → 原Engine Phase07执行 → config_root定义/entity_root动态态 → 原COMP/WAL恢复 → 原Studio与TS SDK消费。范围是独立的有界数值模型，不是RTS物理身体、任意ECS/TS/rpack或Conway/Lenia世界完成。详细契约与可复现命令见[PARAMETER_ENTITY_RULES.md](PARAMETER_ENTITY_RULES.md)。
+
+### 真实入口与模型
+
+- `/studio` → 正式WorldEdit身份连接本人世界 →「RuleGraph动作规则」→「载入一般参数实体规则草稿」；编译并提交模块`counter`，再在「一般参数实体registry」创建模板`model.counter`、实例`counter.one`和绑定`counter.step`。可将这些操作通过SDK合为一个原子补丁；UI分步需先创建引用目标。原「读取权威参数实体状态」实际请求服务，不用本地预览伪装运行。
+- 参数模板声明I32/Q8_8/Bool的`state.*`与只读`param.*`；积分器读取`param.rate`并累加`state.total`。修改rate保留真实状态/单调实体序号；撤销定义不回滚仿真时间。删除/重建明确新生命周期，不复制脑、身体、HP或隐含能量。
+- 原SetWorldParam的`rules.templates.*`/`rules.instances.*`/`rules.bindings.*`，JSON null是幂等墓碑；原RemoveEntityTemplate的`parameter/{id}`也操作同一CRDT参数寄存器，须Epoch，缺失原生删除仍拒绝。复用原HLC/LWW/选择性undo，不覆盖别人的胜出写。
+- 原编译器/沙箱/RIR摘要复验：参数profile不接原六动作/HP/能量/场/邻居；不可混用两profile。最多16模板/128实例/16组件/16绑定，registry值32KiB、规则总源1MiB；新profile共享500000 gas/Tick并预检实例总成本。所有绑定读同一Tick快照，写暂存后整组发布；失败无部分参数写，真实故障入动态根。不同绑定重复写同模板同组件拒绝。
+- 引用/类型/资源投影整包预检，失败不涂地或部分改状态。活实例换模板或有状态时变更组件形状/类型拒绝；参数/default编辑不隐式重置活state。权威状态沿原WorldEdit私有基线，不进入对手fog/公共Hub或音频。
+
+### 当前格式与诚实边界
+
+- 唯一当前Arena格式 **rynvek-arena/10、CURRENT_10**；动态ParameterState为必需COMP，定义留config_root，动态值/序号/故障入entity_root。原Arena/9数据与Git历史保留，但新内核明确拒绝自动打开/迁移，旧快照/WAL不能假称新内核可无缝继续。
+- Lab内核契约同步升 **rynvek-lab-kernel/2**，避免旧检查点混算；未实现旧checkpoint迁移或旧作业自动续算。一般参数模型导入Lab变体/统计四表尚未接，不能因版本升级称Lab已消费该模型。
+- 实际快验10个不同用例通过（world2、真正认证HTTP/Node SDK/WS/Actor/原WAL逐条回放1、CRDT2、原Studio JSDOM5），重跑不重复累计。server必要编译、Studio SDK tsc build、web tsc --noEmit及diff检查通过；真实服务最终于2026-11-18 03:14:01中国标准时间完成。详见上述文档。实际服务为回环HTTP/WS/原Actor及MemoryStore/原私有CAS/WAL，不是PG实库、多机、服务端硬杀或掉电灾备。UI为JSDOM传输夹具，真实浏览器、GPU/WASM通用规则、硬件/长稳未验。默认根改变后的历史golden/全workspace验收未运行，不能声称整套通过。
+- 无全workspace/Clippy/license/SBOM/soak/CI轮询，无外部依赖安装、公开发行/部署或网络浏览器绕过。Pi仍为MIT设计借鉴，未引入外部代码/模型。
+
+### 下一主体继续
+
+优先接真实多人Studio协作/版本冲突与重新同步、一般参数模型进入Lab/W3消费，随后继续一般规则世界/TS-rpack/.rview及攻击/修复/分泌/生长合成等完整生命成本。正式音频采样/分轨/空间化、独立Agent赛道/真实LLM仍欠；不无限扩模板小框架，不把本批当全项目完成。主体全齐后集中全面验收。
+
 ## 第三十五批：私有程序化音效制品与真实Arena消费（从main 8bfad5a继续）
 
 **主体继续，整体未完成。** 已闭合可用的**程序化音色/包络/混音制品**段，而非只存manifest：SDK构建/签名RYPK → 原Store私有registry/有界扫描/精确依赖/私有CAS → 私有发现/验签下载/解析 → 原Arena真实己方事件 → 下载的配方参数实际进入原Director/mixer/synth。没有生成音乐或第三方音色，无公共发行/外部部署；本profile明确不接`.ogg`/压缩媒体/任意网络音源，正式采样/分轨/空间化仍欠，不能把该完整程序化段泛称全部音频资产完工。
@@ -513,7 +536,9 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 | 已推进，仍有边界 | 第三十二批原Arena真实阵营事件、手势/静音/断线换世界生命周期与仅己方真实脑态声化 | 必要编译与9个直接用例；节点/状态验证非硬件听验，无Hub音色资产链、观战/回放音频 |
 | 已推进，仍有边界 | 第三十三批Lab持久提交/发现、租约fencing、取消/重试幂等、run检查点恢复、私有四表原子发布与原工作台/TS SDK | 本机HTTP/Node与同Store重建通过，非PG实库灾备/硬杀恢复；未完成run从种子重算，单作业汇总仍在内存 |
 | 已推进，仍有边界 | 第三十四批Pi参考受控Adapter、独立持久运行/事件/预算、真工具收据、双控制进程取消续跑 | 设计借鉴非Pi代码复用；同源私有包/明确本地测试provider，不冒称LLM/独立注册Agent或PG灾备 |
-| 下一主体优先 | 一般规则/参数模板真实Studio→权威应用→Lab；再协作/一般W3与完整生命成本 | 不做装饰预设；正式音频采样/空间化等仍保留欠项，不因程序化制品闭合宣称全音频完成 |
+| 已推进，仍有边界 | 第三十五批私有程序化音效制品真实Arena消费 | 正式采样/分轨/空间化、设备听验仍欠 |
+| 已推进，仍有边界 | 第三十六批非既有角色参数实体模板/实例/绑定、原Engine执行、规范root/COMP/WAL与Studio/SDK | 有界I32/Q8_8/Bool RuleGraph，不是任意TS/rpack或物理ECS；Arena/10旧格式拒绝、Lab模型消费仍欠 |
+| 下一主体优先 | Studio协作/同步及一般参数模型Lab/W3消费，再完整生命成本 | 原权限/CRDT/Actor为事实源；不做装饰预设，不因单段闭合宣称全产品完成 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付私有程序化音效制品有界扫描/签名依赖/私有发布下载及真实Arena配方消费；下一转一般规则/参数模板，再按依赖补协作/一般W3/生命成本和正式采样等欠项，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
+本阶段交付一般参数实体真实Studio→原权威Engine→规范根/COMP/WAL与SDK消费；下一补协作/同步和一般模型Lab/W3消费，再按依赖补完整生命成本和正式采样等欠项，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
