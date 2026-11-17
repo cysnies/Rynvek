@@ -122,21 +122,21 @@ impl SnapshotWriter {
             write_chunk(&mut uncompressed, NEUR_TAG, &n_bytes);
             chunk_count = chunk_count
                 .checked_add(1)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?;
         }
 
         for extra in extra_chunks {
             write_chunk(&mut uncompressed, extra.tag, &extra.payload);
             chunk_count = chunk_count
                 .checked_add(1)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?;
         }
 
         let sub = compute_snapshot_sub_roots(entity_root, neur, extra_chunks);
         let commit = CommitManifest::new(world_id, tick, world_revision, parent_state_root, sub);
 
         let compressed = zstd::bulk::compress(&uncompressed, SNAPSHOT_ZSTD_LEVEL)
-            .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+            .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         let header = SnapshotFileHeader::new(
             world_id,
             tick,
@@ -208,12 +208,12 @@ impl SnapshotWriter {
             extra_chunks,
         )?;
         let tmp_path = target.with_extension("rsnap.tmp");
-        let mut f = File::create(&tmp_path).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        let mut f = File::create(&tmp_path).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         f.write_all(&bytes)
-            .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
-        f.sync_all().map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+            .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+        f.sync_all().map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         drop(f);
-        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         Ok(out)
     }
 }

@@ -49,7 +49,7 @@ impl SnapshotReader {
             .read_to_end(&mut bytes)
             .map_err(|_| RynvekErrorCode::JournalTornWriteTruncated)?;
         if bytes.len() > MAX_SNAPSHOT_DECOMPRESSED_BYTES + SNAPSHOT_HEADER_LEN + 32 {
-            return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
         Self::read_bytes(&bytes)
     }
@@ -71,20 +71,20 @@ impl SnapshotReader {
         let compressed = &bytes[payload_start..payload_end];
         let uncompressed = if header.is_zstd() {
             let mut decoder = zstd::stream::read::Decoder::new(compressed)
-                .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+                .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
             let mut out = Vec::new();
             decoder
                 .by_ref()
                 .take((MAX_SNAPSHOT_DECOMPRESSED_BYTES + 1) as u64)
                 .read_to_end(&mut out)
-                .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+                .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
             if out.len() > MAX_SNAPSHOT_DECOMPRESSED_BYTES {
-                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             out
         } else {
             if compressed.len() > MAX_SNAPSHOT_DECOMPRESSED_BYTES {
-                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             compressed.to_vec()
         };
@@ -97,7 +97,7 @@ impl SnapshotReader {
 
         while offset < uncompressed.len() {
             if uncompressed.len() - offset < 40 {
-                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             let tag: [u8; 4] = uncompressed[offset..offset + 4].try_into().unwrap();
             let len = u32::from_le_bytes(uncompressed[offset + 4..offset + 8].try_into().unwrap()) as usize;
@@ -105,13 +105,13 @@ impl SnapshotReader {
             let body_start = offset + 40;
             let body_end = body_start
                 .checked_add(len)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?;
             if uncompressed.len() < body_end {
-                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             let body = &uncompressed[body_start..body_end];
             if Blake3Hash::of(body).as_bytes() != &expected_hash {
-                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             if tag == ENTI_TAG || tag == ENTS_TAG || &tag == b"ENTS" {
                 registry = Some(EntityRegistry::decode_snapshot_bytes(body)?);
@@ -125,15 +125,15 @@ impl SnapshotReader {
             }
             parsed_chunks = parsed_chunks
                 .checked_add(1)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?;
             offset = body_end;
         }
 
         if parsed_chunks != header.chunk_count {
-            return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
 
-        let registry = registry.ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        let registry = registry.ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?;
         Ok(SnapshotReadResult {
             header,
             state_root,
@@ -203,7 +203,7 @@ mod tests {
         bytes2[10] = 99;
         assert_eq!(
             SnapshotReader::read_bytes(&bytes2),
-            Err(RynvekErrorCode::SnapshotChunkChecksumFailed)
+            Err(RynvekErrorCode::Blake3ChecksumMismatch)
         );
     }
 }

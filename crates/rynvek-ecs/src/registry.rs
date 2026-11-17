@@ -21,8 +21,8 @@
 use std::collections::VecDeque;
 
 use rynvek_core::error::RynvekErrorCode;
-use rynvek_memory::budget::DEFAULT_HYSTERESIS_BPS;
-use rynvek_memory::{DEFAULT_WORLD_MEMORY_BUDGET_BYTES, MemoryBudget, MemoryBudgetLevel};
+use rynvek_memory::manager::DEFAULT_WORLD_MEMORY_BUDGET_BYTES;
+use rynvek_memory::{MemoryBudget, MemoryBudgetLevel};
 
 use crate::identity::{EntityHandle, EntityId, EntityLifecycleState, EntityTombstone, GpuEntityRef};
 
@@ -89,7 +89,6 @@ impl EntityRegistry {
 
     /// 创建指定世界内存预算上限（字节）的空注册表
     pub fn with_memory_budget(world_lineage_prefix: u64, limit_bytes: u64) -> Self {
-        let _ = DEFAULT_HYSTERESIS_BPS;
         Self {
             world_lineage_prefix,
             // 序号从 1 起，保留 0 作为 Invalid

@@ -128,12 +128,12 @@ struct ConfChunkDto {
 }
 
 fn to_chunk<T: Serialize>(tag: [u8; 4], val: &T) -> Result<SnapshotCustomChunk, RynvekErrorCode> {
-    let payload = serde_json::to_vec(val).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+    let payload = serde_json::to_vec(val).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
     Ok(SnapshotCustomChunk { tag, payload })
 }
 
 fn from_chunk<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, RynvekErrorCode> {
-    serde_json::from_slice(bytes).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)
+    serde_json::from_slice(bytes).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)
 }
 
 impl ArenaWorld {
@@ -144,7 +144,7 @@ impl ArenaWorld {
         world_revision: u64,
         parent_state_root: [u8; 32],
     ) -> Result<(Vec<u8>, SnapshotWriteOutput), RynvekErrorCode> {
-        let mut reg = EntityRegistry::new(u16::from_le_bytes([world_id[0], world_id[1]]));
+        let mut reg = EntityRegistry::new(u16::from_le_bytes([world_id[0], world_id[1]]).into());
         for _ in 0..(self.buildings.len() + self.units.len()) {
             reg.spawn(1)?;
         }
@@ -261,8 +261,8 @@ impl ArenaWorld {
         let target = path.as_ref();
         let (bytes, out) = self.encode_snapshot(world_id, world_revision, parent_state_root)?;
         let tmp_path = target.with_extension("rsnap.tmp");
-        std::fs::write(&tmp_path, &bytes).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
-        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        std::fs::write(&tmp_path, &bytes).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         Ok(out)
     }
 
@@ -271,35 +271,35 @@ impl ArenaWorld {
         let read = SnapshotReader::read_bytes(bytes)?;
         let conf: ConfChunkDto = from_chunk(
             read.find_chunk(CONF_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let comp: CompChunkDto = from_chunk(
             read.find_chunk(COMP_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let fild: FildChunkDto = from_chunk(
             read.find_chunk(FILD_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let econ: Vec<EconFactionDto> = from_chunk(
             read.find_chunk(ECON_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let evol: EvolChunkDto = from_chunk(
             read.find_chunk(EVOL_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let fogw: Vec<FogFactionDto> = from_chunk(
             read.find_chunk(FOGW_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let rngs: RngsChunkDto = from_chunk(
             read.find_chunk(RNGS_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let expected_canonical: CanonicalWorldState = from_chunk(
             read.find_chunk(ROOT_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
 
         let map = if conf.map_width == conf.config.map_size.side_tiles()
@@ -353,12 +353,12 @@ impl ArenaWorld {
         }
 
         if econ.len() != evol.factions.len() || econ.len() != fogw.len() {
-            return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
         let mut factions = Vec::with_capacity(econ.len());
         for ((ec, ev), fg) in econ.into_iter().zip(evol.factions).zip(fogw) {
             if ec.id != ev.id || ec.id != fg.id {
-                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             factions.push(Faction {
                 id: ec.id,
