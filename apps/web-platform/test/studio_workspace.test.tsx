@@ -25,3 +25,25 @@ it("真实创建请求使用Private和显式实验生态，随后读取新世界
  render(<StudioApp/>);fireEvent.change(screen.getByLabelText("Studio服务地址"),{target:{value:"http://srv"}});fireEvent.change(screen.getByLabelText("Studio令牌"),{target:{value:"owner"}});fireEvent.click(screen.getByText("创建私有世界并连接"));await screen.findByText(/世界 new-world/);
  expect(fetcher.mock.calls[0]?.[0]).toBe("http://srv/api/v1/worlds");const body=JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));expect(body.visibility).toBe("Private");expect(body.ecology.roles["unit.forager"].replication_mutation_rate_permille).toBe(50);expect(fetcher.mock.calls[1]?.[0]).toBe("http://srv/api/v1/worlds/new-world/authoring");
 });
+
+it("首次创建和删除均有权威撤销重做入口，删除回执前保留已提交模块",async()=>{
+ const sent:any[]=[];let pending:((r:Response)=>void)|undefined;let deferDelete=false;
+ vi.stubGlobal("fetch",vi.fn(async(url:unknown,init?:RequestInit)=>{
+  if(String(url).endsWith("compile-rule"))return Response.json({compiled_rir_blake3:new Array(32).fill(26)});
+  if(init?.method!=="POST")return Response.json(basis);
+  const p=JSON.parse(String(init.body));sent.push(p);
+  if(deferDelete)return new Promise<Response>(r=>{pending=r});
+  return Response.json({status:"applied",world_id:"w",world_revision:p.base_authoring_revision+4,effective_tick:sent.length*4,state_root:"cd".repeat(32)});
+ }));
+ await connect();fireEvent.click(screen.getByText("RuleGraph动作规则"));
+ const remove=screen.getByText("删除选中规则") as HTMLButtonElement;expect(remove.disabled).toBe(true);
+ fireEvent.click(screen.getByText("编译并提交规则"));await screen.findByText(/revision 11/);expect(screen.getByRole("button",{name:"control"})).toBeTruthy();
+ fireEvent.click(screen.getByText("权威撤销"));await screen.findByText(/revision 15/);expect(screen.queryByRole("button",{name:"control"})).toBeNull();
+ fireEvent.click(screen.getByText("权威重做"));await screen.findByText(/revision 19/);expect(screen.getByRole("button",{name:"control"})).toBeTruthy();
+ deferDelete=true;fireEvent.click(screen.getByText("删除选中规则"));await waitFor(()=>expect(sent.length).toBe(4));expect(screen.getByRole("button",{name:"control"})).toBeTruthy();expect(screen.getByText(/revision 19/)).toBeTruthy();
+ await act(async()=>pending!(Response.json({status:"applied",world_id:"w",world_revision:23,effective_tick:16,state_root:"ef".repeat(32)})));
+ await screen.findByText(/revision 23/);expect(screen.queryByRole("button",{name:"control"})).toBeNull();
+ deferDelete=false;fireEvent.click(screen.getByText("权威撤销"));await screen.findByText(/revision 27/);expect(screen.getByRole("button",{name:"control"})).toBeTruthy();
+ expect(sent.map(p=>Object.keys(p.operations[0])[0])).toEqual(["UpdateRuleModule","RemoveRuleModule","UpdateRuleModule","RemoveRuleModule","UpdateRuleModule"]);
+ expect(sent[4].operations[0]).toEqual(sent[0].operations[0]);expect(sent.every(p=>p.safety_class==="EpochBoundarySafe")).toBe(true);
+});
