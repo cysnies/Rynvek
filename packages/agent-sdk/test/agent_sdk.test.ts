@@ -12,8 +12,8 @@ import {
 } from "../src/index.js";
 
 describe("@rynvek/agent-sdk", () => {
-  it("exports all 9 frozen ToolBroker tool names and validates batches", () => {
-    expect(AGENT_TOOL_NAMES.length).toBe(9);
+  it("exports the six specified ToolBroker names and validates local groups", () => {
+    expect(AGENT_TOOL_NAMES).toEqual(["query_visible_clusters", "sample_regional_fields", "issue_strategic_intent", "configure_signal_beacon", "queue_vat_production", "trigger_crucible_breeding"]);
     const batch = [
       buildQueryWorldObservation(true),
       buildPlaceBuilding({ buildingKind: "bld.spawning_vat", tileX: 36, tileY: 32 }),

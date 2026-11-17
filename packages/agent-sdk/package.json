@@ -1,7 +1,7 @@
 {
   "name": "@rynvek/agent-sdk",
   "version": "0.1.0",
-  "description": "Rynvek 智能体客户端 SDK：封装 9 项标准 ToolBroker / MCP 权威工具调用、迷雾观测解析与神经调质引导助手",
+  "description": "Rynvek 智能体客户端 SDK：封装规范09的6项受控ToolBroker工具参数；权威鉴权、迷雾与限速由宿主裁决",
   "license": "Apache-2.0 WITH LLVM-exception",
   "type": "module",
   "sideEffects": false,

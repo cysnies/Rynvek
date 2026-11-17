@@ -1,0 +1,82 @@
+[
+  {
+    "name": "query_visible_clusters",
+    "arguments": {
+      "include_enemy": true,
+      "region_chunk": [
+        0,
+        0
+      ]
+    }
+  },
+  {
+    "name": "sample_regional_fields",
+    "arguments": {
+      "chunk_x": 0,
+      "chunk_y": 0
+    }
+  },
+  {
+    "name": "queue_vat_production",
+    "arguments": {
+      "vat_entity_id": "36,36",
+      "unit_archetype": "bld.signal_beacon",
+      "genome_slug": "",
+      "count": 1
+    }
+  },
+  {
+    "name": "configure_signal_beacon",
+    "arguments": {
+      "beacon_entity_id": "11",
+      "signal_channel": "field.signal_b",
+      "signal_strength": -12.5,
+      "neuromodulators": [
+        0.5,
+        0,
+        -0.25,
+        1
+      ]
+    }
+  },
+  {
+    "name": "issue_strategic_intent",
+    "arguments": {
+      "unit_archetype": "all",
+      "order_kind": "Move",
+      "target_world_x": 40,
+      "target_world_y": 40
+    }
+  },
+  {
+    "name": "queue_vat_production",
+    "arguments": {
+      "vat_entity_id": "11",
+      "unit_archetype": "unit.forager",
+      "genome_slug": "seed.forager.v1",
+      "count": 1
+    }
+  },
+  {
+    "name": "trigger_crucible_breeding",
+    "arguments": {
+      "crucible_entity_id": "1",
+      "action": "research_tech",
+      "tech_or_archetype_id": "tech.hebbian_plasticity"
+    }
+  },
+  {
+    "name": "configure_signal_beacon",
+    "arguments": {
+      "beacon_entity_id": "11",
+      "signal_channel": "field.signal_b",
+      "signal_strength": -0.0005,
+      "neuromodulators": [
+        -0.0005,
+        0.0005,
+        -1,
+        1
+      ]
+    }
+  }
+]
