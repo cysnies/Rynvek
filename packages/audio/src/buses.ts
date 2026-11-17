@@ -120,6 +120,14 @@ export class AudioMixer {
     return next;
   }
 
+  /** 权限/世界生命周期硬切断：同步撤销未来增益并断开输出，不等close Promise或包络尾音。 */
+  public disconnect(): void {
+    this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+    this.master.gain.setValueAtTime(0, this.ctx.currentTime);
+    this.master.disconnect();
+    for (const bus of this.buses.values()) bus.disconnect();
+  }
+
   private applyBus(name: AudioBusName): void {
     this.smooth(this.bus(name).gain, this.isAudible(name) ? this.busLevel(name) : 0);
   }

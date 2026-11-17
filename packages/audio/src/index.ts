@@ -8,3 +8,5 @@ export * from "./buses.js";
 export * from "./manifest.js";
 export * from "./director.js";
 export * from "./adaptive_music.js";
+
+export * from "./neural_sonifier.js";

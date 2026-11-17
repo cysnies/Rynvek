@@ -262,6 +262,9 @@ export class FakeAudioContext {
     return Promise.resolve();
   }
 
+  public onstatechange: (() => void) | null = null;
+  public close(): Promise<void> { this.state = "closed"; this.onstatechange?.(); return Promise.resolve(); }
+
   /** 以浏览器类型视图交给被测代码 */
   public asAudioContext(): AudioContext {
     return this as unknown as AudioContext;
