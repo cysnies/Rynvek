@@ -5,7 +5,8 @@
  * 可显式选择真实 Dedicated Worker + Rust/wgpu/WebGPU；两条路径都不是浏览器性能验收。
  */
 import { createArenaApp, type ArenaApp } from "@rynvek/arena";
-import { WebSocketTransport, buildingSpec, rawToFloat, type BuildingKind, type ArenaServerMessage, type RtsCommand } from "@rynvek/client";
+import { WebSocketTransport, buildingSpec, rawToFloat, type BuildingKind, type ArenaServerMessage } from "@rynvek/client";
+import { buildCommandPanelView, mountCommandPanel } from "./arena-command-panel.js";
 import { fogAt, project, unproject, viewScale, type Viewport } from "./arena-view.js";
 import { mountArenaRenderer } from "./arena-renderer.js";
 import { ArenaWorldClient, ReplayObservationTransport, type WorldRun, type PlaybackFrame } from "./arena-remote.js";
@@ -19,7 +20,7 @@ mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</
 <main class="layout"><section class="world"><div class="worldbar"><span>WORLD / <span id="clock">TICK —</span></span><span id="pointer">只读阵营视图</span></div><canvas id="world" tabindex="0" aria-label="Rynvek 战争迷雾地图，左键选择、右键命令"></canvas><div class="metrics"><span class="metric">生物质<b id="biomass">—</b></span><span class="metric">通量<b id="flux">—</b></span><span class="metric">神经胶<b id="neurogel">—</b></span><span class="metric">人口<b id="supply">—</b></span><span class="metric">波次<b id="wave">—</b></span></div></section>
 <aside class="sidebar"><section class="panel"><h2>指挥 / CONTROL</h2><div class="buttons"><button id="select" disabled>全选己方单位</button><button id="home" disabled>主脑居中</button><button id="harvest" disabled>采集 → 点目标</button><button id="move" disabled>移动 → 点目标</button><button disabled title="当前权威协议不提供暂停">暂停未开放</button></div><p id="selection" class="muted">尚未选择</p><p id="intent">开始后，左键点选或拖框；右键移动。黄绿色为营养沼泽，工蜂右键自动采集。</p><p id="outcome" class="outcome"></p></section>
 <section class="panel"><h2>建造 / BUILD</h2><div id="build" class="build"></div><p class="muted">${gpuRequested?"GPU 黄色轮廓仅表示落点意图，不表示可建；权限、占地、资源和科技由服务器最终验证。":"选择建筑后点地图；黄色框仅为落点预览，权限、占地、资源和科技由服务器最终验证。"}Esc / 右键取消。</p></section>
-<section class="panel"><h2>生产 / 科技 / 信标命令</h2><p class="muted">复用当前完整命令协议；需要真实己方建筑ID、目录slug、科技ID。填写真实JSON，服务端校验权限/资源/版本后才确认，不本地预扣或补资源。</p><textarea id="command-json" aria-label="Arena权威命令JSON" rows="5" spellcheck="false">{"type":"cancel_queue","vat":0}</textarea><div class="buttons"><button id="command-template" disabled>填入选中建筑ID</button><button id="send-command" data-game="1" disabled>提交权威命令</button></div><p class="muted">支持 queue_unit / cancel_queue / research_tech / crucible / configure_beacon / demolish / issue_order / place_building / surrender。</p></section>
+<section class="panel" id="command-panel" aria-label="生产科技信标操作面板"></section>
 <section class="panel"><h2>签名归档逐记录重演 / REPLAY</h2><p>真实已提交创作锚点 + 实际运行WAL + TickRecord重演后的阵营观测。服务端验签；只读，无控制租约。完整终根未到达前不声称全片验证。</p><div class="buttons"><button id="watch-replay" disabled>打开真实回放</button><button id="play-replay" disabled>播放</button><button id="pause-replay" disabled>暂停/停止定位</button><button id="close-replay" disabled>关闭回放</button></div><label>目标Tick<input id="replay-tick" aria-label="回放目标Tick" type="number" min="0" value="0" disabled></label><button id="seek-replay" disabled>定位（有界重演）</button><p id="replay-status" role="status">未装载归档</p><p class="muted">倒退从真实初态重新演算，每请求最多120条记录，可停止；不是插值/伪帧。首帧是实际已提交Studio状态，不伪造编辑过程帧；完整保留运行期及恢复前的真实WAL。</p></section>
 <section class="panel"><h2>权威回执 / EVENTS</h2><div id="log" class="log" role="status" aria-live="polite">尚未连接。没有本地随机单位或预演资源。</div><div class="buttons" style="margin-top:12px"><button id="surrender" disabled>结束练习（投降）</button><button id="replay" disabled>下载回放</button></div></section>
 <section class="panel"><h2>操作说明</h2><p>① 开始 → 全选己方单位<br>② 右键附近空地，观察真实位置变化<br>③ 点「采集」再点黄绿地块，观察生物质账本<br>④ 选择「萃取器」放在黄绿地块，或信标放在主脑附近空地；观察资源扣除与施工进度<br>⑤ 在主脑上重复建造会收到实际错误码。</p><p class="muted">滚轮缩放，方向键/WASD 平移，Home 回主脑。黑色未探索、暗色已探索；敌人只来自服务器迷雾裁剪观察。</p></section></aside></main>
@@ -47,8 +48,8 @@ let armed:"Move"|"Harvest"|null=null;
 let pointer:[number,number]=[0,0];
 let drag:{x:number;y:number;world:[number,number]}|null=null;
 let logLines:string[]=[];
-const labels:Partial<Record<BuildingKind,string>>={"bld.nexus_core":"主脑","bld.biomass_harvester":"萃取器","bld.signal_beacon":"信标","bld.spawning_vat":"孵化槽","bld.pulse_turret":"防御塔","bld.flux_reactor":"反应堆"};
-const kinds:BuildingKind[]=["bld.biomass_harvester","bld.signal_beacon","bld.spawning_vat","bld.flux_reactor","bld.pulse_turret"];
+const labels:Partial<Record<BuildingKind,string>>={"bld.nexus_core":"主脑","bld.biomass_harvester":"萃取器","bld.signal_beacon":"信标","bld.spawning_vat":"孵化槽","bld.pulse_turret":"防御塔","bld.flux_reactor":"反应堆","bld.synapse_refinery":"精炼厂","bld.mutation_crucible":"坩埚"};
+const kinds:BuildingKind[]=["bld.biomass_harvester","bld.signal_beacon","bld.spawning_vat","bld.flux_reactor","bld.pulse_turret","bld.synapse_refinery","bld.mutation_crucible"];
 for(const kind of kinds){
   const b=document.createElement("button"),spec=buildingSpec(kind);
   b.textContent=`${labels[kind]} · 生物质 ${spec.cost.biomass/1000} / 胶 ${spec.cost.neurogel/1000}`;
@@ -57,6 +58,16 @@ for(const kind of kinds){
   el("build").append(b);
 }
 function note(value:string):void{logLines=[...logLines,value].slice(-8);el("log").textContent=logLines.join("\n");}
+const commandPanel=mountCommandPanel(el("command-panel"),{
+  send:async(cmd)=>{if(!arena||!connected||playback)throw new Error("当前不可写入命令");const ack=await arena.controller.send(cmd);if(ack)note(`真实权威回执 ${ack.type}`);refreshPanel();return ack;},
+  onSelect:(id)=>{arena?.controller.selectOwnedBuilding(id);display();},
+  onStatus:(text)=>note(text),
+});
+function refreshPanel():void{
+  const obs=arena?.client.observation??null;
+  commandPanel.update(buildCommandPanelView(obs,arena?.ui.selectedBuilding??null,Boolean(connected&&!playback&&obs&&!obs.outcome)));
+}
+
 function controls():void{
   const active=connected && !arena?.client.observation?.outcome;
   for(const id of ["select","home","harvest","move","surrender"]) button(id).disabled=!active;
@@ -66,8 +77,7 @@ function controls():void{
   button("watch-replay").disabled=!ended||!session||starting||!!playback;
   button("start").disabled=starting || (connected && !ended);
   button("connect-world").disabled=starting || (connected && !ended);
-  button("command-template").disabled=!active;
-  (el("command-json") as HTMLTextAreaElement).disabled=!active;
+  refreshPanel();
   button("play-replay").disabled=!playback||playback.busy||playback.playing;
   button("pause-replay").disabled=!playback||(!playback.busy&&!playback.playing);
   button("seek-replay").disabled=!playback||playback.busy||playback.playing;
@@ -106,7 +116,7 @@ function clearRuntime():void{
 function disconnect():void{
   generation++;clearRuntime();session?.client.destroy();session=null;
   input("capability").value="";starting=false;logLines=[];el("log").textContent="身份已断开；未暂停服务器，也未把未确认命令算成功。";
-  (el("command-json") as HTMLTextAreaElement).value="";el("connection").textContent="身份已断开";controls();
+  el("connection").textContent="身份已断开";controls();
 }
 function mountGpu(current:ArenaApp,info:WorldRun):void{
   if(!gpuRequested)return;
@@ -228,15 +238,6 @@ button("watch-replay").onclick=()=>{void watchReplay();};
 button("seek-replay").onclick=()=>{if(playback)void seekReplay(playback,Number(input("replay-tick").value));};
 button("play-replay").onclick=()=>{void playReplay();};button("pause-replay").onclick=pauseReplay;
 button("close-replay").onclick=()=>{generation++;clearRuntime();el("connection").textContent="回放已关闭 / 可按原世界重连";controls();};
-button("command-template").onclick=()=>{if(!arena||!connected)return;const text=el("command-json") as HTMLTextAreaElement;
-  try{const command=JSON.parse(text.value) as Record<string,unknown>;const id=arena.ui.selectedBuilding;if(id===null)throw new Error("先选择真实己方建筑");
-    for(const key of ["vat","site","beacon","building","crucible"])if(key in command)command[key]=id;text.value=JSON.stringify(command,null,2);
-  }catch(error){note(String(error));}};
-button("send-command").onclick=()=>{void(async()=>{if(!connected||!arena||playback)return;try{
-  const command=JSON.parse((el("command-json") as HTMLTextAreaElement).value) as RtsCommand;
-  if(!command||!["queue_unit","cancel_queue","research_tech","crucible","configure_beacon","demolish","issue_order","place_building","surrender"].includes(command.type))throw new Error("不是当前权威命令类型");
-  const ack=await arena.controller.send(command);if(ack)note(`真实权威回执 ${ack.type}`);display();
-}catch(error){note(String(error));}})();};
 button("select").onclick=()=>{if(arena?.client.observation){arena.ui.selection=new Set(arena.client.observation.units.filter(u=>u.faction===arena!.client.identity.faction).map(u=>u.id));display();}};
 button("home").onclick=()=>arena?.controller.jumpToNexus();
 for(const [id,order] of [["harvest","Harvest"],["move","Move"]] as const)button(id).onclick=()=>{armed=order;if(arena)arena.ui.buildMode=null;el("intent").textContent=`${order==="Move"?"移动":"采集"}：左键点击目标地块`;};
