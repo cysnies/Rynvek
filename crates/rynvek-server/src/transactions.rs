@@ -10,7 +10,7 @@ use crate::{
 use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use rynvek_protocol::WireUuid;
 use rynvek_rts::commands::RtsCommand;
-use rynvek_rts::{ArenaRuntime, FactionId};
+use rynvek_rts::{ArenaRuntime, FactionId, MatchConfig};
 use rynvek_storage::BlobStore;
 use rynvek_world::{PatchApplyReport, WorldPatch};
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,26 @@ impl TickRecord {
     }
 
     pub fn replay(&self, runtime: &ArenaRuntime) -> Result<ArenaRuntime, RynvekErrorCode> {
+        self.replay_inner(runtime, None)
+    }
+
+    /// 旧记录只在独立可信创世配置锁定的上下文中回放；记录本身不能自证旧模式。
+    pub fn replay_with_config(
+        &self,
+        runtime: &ArenaRuntime,
+        expected: &MatchConfig,
+    ) -> Result<ArenaRuntime, RynvekErrorCode> {
+        self.replay_inner(runtime, Some(expected))
+    }
+
+    fn replay_inner(
+        &self,
+        runtime: &ArenaRuntime,
+        expected: Option<&MatchConfig>,
+    ) -> Result<ArenaRuntime, RynvekErrorCode> {
+        if expected.map_or(runtime.config.has_unbound_ecology(), |c| c != &runtime.config) {
+            return Err(RynvekErrorCode::SchemaMigrationPathNotFound);
+        }
         if self.format != "rynvek-tick/1"
             || runtime.revision() != self.base_revision
             || runtime.state_root() != self.base_root
@@ -245,6 +265,18 @@ pub async fn restore_committed(store: &Store, snapshots: &dyn BlobStore, world: 
     {
         return Err(conflict("世界元数据与提交链不一致"));
     }
+    // 信任来自已提交创世CID，而不是待验证快照中的自述。缺失时只能走自绑定格式。
+    let genesis = commits.first().ok_or_else(|| conflict("缺少创世提交"))?;
+    let genesis_bytes = snapshots.get(&Blake3Hash(genesis.journal_segment_cid))?;
+    if Blake3Hash::of(&genesis_bytes).0 != genesis.journal_segment_cid {
+        return Err(conflict("创世契约CID不一致"));
+    }
+    let genesis_value: serde_json::Value =
+        serde_json::from_slice(&genesis_bytes).map_err(|_| conflict("创世记录损坏"))?;
+    let expected_config: Option<MatchConfig> = genesis_value
+        .get("config")
+        .map(|v| serde_json::from_value(v.clone()).map_err(|_| conflict("创世世界契约损坏")))
+        .transpose()?;
     let (index, anchor) = commits
         .iter()
         .enumerate()
@@ -264,13 +296,22 @@ pub async fn restore_committed(store: &Store, snapshots: &dyn BlobStore, world: 
     if Blake3Hash::of(&bytes).0 != cid {
         return Err(conflict("检查点 CID 不一致"));
     }
-    let mut runtime = ArenaRuntime::restore(
-        world.world_id.0,
-        anchor.world_revision,
-        anchor.state_root_blake3,
-        &bytes,
-    )
-    .map_err(|e| ApiError::new(e, "完整锚点与身份/修订/根不一致"))?;
+    let mut runtime = match &expected_config {
+        Some(config) => ArenaRuntime::restore_with_config(
+            world.world_id.0,
+            anchor.world_revision,
+            anchor.state_root_blake3,
+            &bytes,
+            config,
+        ),
+        None => ArenaRuntime::restore(
+            world.world_id.0,
+            anchor.world_revision,
+            anchor.state_root_blake3,
+            &bytes,
+        ),
+    }
+    .map_err(|e| ApiError::new(e, "完整锚点与创世契约/身份/修订/根不一致"))?;
     if runtime.tick != anchor.tick {
         return Err(conflict("完整锚点 Tick 不一致"));
     }
@@ -288,9 +329,11 @@ pub async fn restore_committed(store: &Store, snapshots: &dyn BlobStore, world: 
         {
             return Err(conflict("Tick 日志元数据不一致"));
         }
-        runtime = record
-            .replay(&runtime)
-            .map_err(|e| ApiError::new(e, "Tick 后缀重放失败"))?;
+        runtime = match &expected_config {
+            Some(config) => record.replay_with_config(&runtime, config),
+            None => record.replay(&runtime),
+        }
+        .map_err(|e| ApiError::new(e, "Tick后缀契约或重放失败"))?;
     }
     if runtime.revision() != world.latest_revision
         || runtime.tick != world.latest_tick

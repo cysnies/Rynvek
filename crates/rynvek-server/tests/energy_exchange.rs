@@ -106,6 +106,8 @@ async fn run_energy_version(
     let mut config = MatchConfig::pve(57, 1);
     config.ecology = Some(version);
     config.forager_survival = survival;
+    // 本请求创建的是当前根编码世界；宿主必须匹配真实创世身份，不能用legacy模板替换。
+    config.bind_ecology_identity();
     let host = server
         .state
         .attach_world_host(MatchSpec {

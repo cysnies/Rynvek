@@ -216,6 +216,8 @@ pub async fn create(
     };
     authorize(&subject, CapabilityScope::WorldCreate, &Resource::Org { org_id }).map_err(ApiError::from)?;
     let initial_world = ArenaWorld::new(config.clone());
+    let mut manifest = manifest;
+    manifest["config"] = serde_json::to_value(&initial_world.config).expect("可序列化");
     let manifest = serde_json::to_vec(&manifest).expect("可序列化");
     let genesis = app.inner.world_snapshots.put(&manifest)?;
     let world_id = new_uuid_v7();
@@ -309,6 +311,7 @@ async fn fork_world(
     let world_id = new_uuid_v7();
     let checkpoint = runtime
         .fork(world_id.0)
+        .map_err(|e| ApiError::new(e, "历史生态世界须显式迁移身份，不能普通分叉升级"))?
         .checkpoint()
         .map_err(|e| ApiError::new(e, "无法编码分叉检查点"))?;
     let snapshot = app.inner.world_snapshots.put(&checkpoint.bytes)?;
@@ -540,4 +543,101 @@ pub fn axum_link(socket: WebSocket) -> Link {
         Err(e) => Err(NetError::Transport(e.to_string())),
     });
     Link::from_messages(TransportKind::WebSocket, Box::pin(sink), stream)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EcologyMigrationRequest {
+    base_revision: u64,
+    base_root: [u8; 32],
+    expected_config: MatchConfig,
+}
+
+/// 仅显式创建私有迁移分支；来源历史、旧根、WAL和正在运行的宿主绝不改写。
+pub async fn migrate_ecology_identity(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let subject = app.require(&headers, CapabilityScope::WorldEdit).await?;
+    let source = load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
+    authorize(
+        &subject,
+        CapabilityScope::WorldCreate,
+        &Resource::Org {
+            org_id: subject.principal_id,
+        },
+    )
+    .map_err(ApiError::from)?;
+    let req: EcologyMigrationRequest = super::parse_json(&body)?;
+    if source.lease_holder_node.is_some()
+        || req.base_revision != source.latest_revision
+        || req.base_root != source.latest_state_root
+    {
+        return Err(crate::transactions::conflict("迁移须停宿主并明确锁定来源修订及真实根"));
+    }
+    // restore_runtime使用已提交创世CID锁定旧模式，不信任请求或快照单方自述。
+    let runtime = restore_runtime(&app, &source).await?;
+    let world_id = new_uuid_v7();
+    let migrated = runtime
+        .migrate_ecology_identity(world_id.0, &req.expected_config)
+        .map_err(|e| ApiError::new(e, "身份迁移契约不符或已绑定；没有修改来源"))?;
+    let cp = migrated
+        .checkpoint()
+        .map_err(|e| ApiError::new(e, "迁移检查点编码失败"))?;
+    let commits = app.store().list_commits(source.world_id).await?;
+    let source_commit = commits
+        .iter()
+        .find(|c| c.world_revision == req.base_revision)
+        .ok_or_else(|| crate::transactions::conflict("来源提交缺失"))?;
+    let manifest = serde_json::json!({
+        "format":"rynvek-ecology-identity-migration/1", "config":migrated.config,
+        "source": { "world_id":source.world_id.to_string(), "revision":req.base_revision,
+            "tick":runtime.tick, "state_root":hex(&req.base_root),
+            "journal_cid":hex(&source_commit.journal_segment_cid), "config":req.expected_config }
+    });
+    let snapshot = app.inner.world_snapshots.put(&cp.bytes)?;
+    let journal = app
+        .inner
+        .world_snapshots
+        .put(&serde_json::to_vec(&manifest).expect("可序列化"))?;
+    let row = WorldRow {
+        world_id,
+        org_id: subject.principal_id,
+        owner_principal_id: subject.principal_id,
+        title: format!("{}（生态身份迁移）", source.title),
+        visibility: Visibility::Private,
+        parent_world_id: Some(source.world_id),
+        forked_at_revision: Some(req.base_revision),
+        latest_tick: cp.tick,
+        latest_revision: 0,
+        latest_state_root: cp.state_root,
+        lease_holder_node: None,
+        fencing_token: 1,
+        ..source.clone()
+    };
+    // 唯一发布点复用已有插入事务。配额/持久化失败最多留下不可达CAS，不发布半迁移世界。
+    app.store()
+        .insert_world(
+            row.clone(),
+            CommitRow {
+                world_id,
+                world_revision: 0,
+                tick: cp.tick,
+                parent_revision: None,
+                state_root_blake3: cp.state_root,
+                journal_segment_cid: journal.0,
+                snapshot_cid: Some(snapshot.0),
+            },
+        )
+        .await?;
+    app.audit(
+        Some(subject.principal_id),
+        "world.migrate_ecology_identity",
+        format!("world:{world_id}"),
+        manifest,
+    )
+    .await;
+    Ok((StatusCode::CREATED, Json(world_json(&row))).into_response())
 }
