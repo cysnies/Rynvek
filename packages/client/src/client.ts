@@ -203,8 +203,15 @@ export class ArenaClient {
       principal_id: this.identity.principalId,
       kind: this.identity.kind,
       faction: this.identity.faction,
-    });}catch(error){this.welcomeWaiter?.reject(error instanceof ArenaError?error:local(0x8001,"UnauthorizedCapabilityToken",String(error)));this.welcomeWaiter=null;}
+    });}catch(error){this.rejectWelcome(error instanceof ArenaError?error:local(0x8001,"UnauthorizedCapabilityToken",String(error)));}
     return p;
+  }
+
+  /** 单独结清握手等待者，避免 TS 跨同步回调误窄化为空。 */
+  private rejectWelcome(error: ArenaError): void {
+    const waiter = this.welcomeWaiter;
+    this.welcomeWaiter = null;
+    waiter?.reject(error);
   }
 
   acquireLease(level: ControlLevel): Promise<ControlLease> {

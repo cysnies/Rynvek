@@ -18,3 +18,9 @@ it("只读/已关闭传输的同步拒绝会结清请求，不留下悬挂租约
  const client=new ArenaClient(transport,{principalId:"viewer",kind:"Human",faction:0});
  await expect(client.acquireLease("Sovereign")).rejects.toThrow("只读回放拒绝写入");client.dispose();
 });
+it("同步握手发送失败会结清等待者，之后可以再次握手而不误报仍在进行",async()=>{
+ const transport:ArenaTransport={send(){throw new Error("网络同步拒绝")},onMessage(){return ()=>{}}};
+ const client=new ArenaClient(transport,{principalId:"123",kind:"Human",faction:0});
+ await expect(client.connect()).rejects.toThrow("网络同步拒绝");
+ await expect(client.connect()).rejects.toThrow("网络同步拒绝");client.dispose();
+});
