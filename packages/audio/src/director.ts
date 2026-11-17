@@ -12,7 +12,7 @@ import {
   type AudioManifest,
   type AudioManifestEntry,
 } from "./manifest.js";
-import { PLACEHOLDER_SYNTH_RECIPES, ProceduralPlaceholderSynth } from "./placeholder_synth.js";
+import { PLACEHOLDER_SYNTH_RECIPES, ProceduralPlaceholderSynth, type SynthRecipe } from "./placeholder_synth.js";
 
 /** 各总线同一事件缺省冷却（毫秒）：告警最长，避免“基地遭到攻击”连续刷屏 */
 export const DEFAULT_COOLDOWN_MS: Readonly<Record<AudioBusName, number>> = {
@@ -61,6 +61,7 @@ export class AudioDirector {
   private readonly ctx: AudioContext;
   public readonly mixer: AudioMixer;
   private readonly synth: ProceduralPlaceholderSynth;
+  private readonly recipes: Readonly<Record<string,SynthRecipe>>;
   private readonly loader: AudioAssetLoader | null;
   private manifest: AudioManifest;
   private readonly samples = new Map<string, AudioBuffer>();
@@ -69,11 +70,12 @@ export class AudioDirector {
 
   public constructor(
     ctx: AudioContext,
-    options: { mixer?: AudioMixer; manifest?: AudioManifest; loader?: AudioAssetLoader } = {},
+    options: { mixer?: AudioMixer; manifest?: AudioManifest; loader?: AudioAssetLoader; recipes?: Readonly<Record<string,SynthRecipe>> } = {},
   ) {
     this.ctx = ctx;
     this.mixer = options.mixer ?? new AudioMixer(ctx);
-    this.synth = new ProceduralPlaceholderSynth(ctx);
+    this.recipes = options.recipes ?? PLACEHOLDER_SYNTH_RECIPES;
+    this.synth = new ProceduralPlaceholderSynth(ctx, this.recipes);
     this.loader = options.loader ?? null;
     this.manifest = options.manifest ?? createPlaceholderManifest();
   }
@@ -171,7 +173,7 @@ export class AudioDirector {
       return { source: "sample", endTime: now + sample.duration };
     }
     // 占位条目，或采样尚未加载 / 加载失败时回退到程序化合成
-    const recipe = PLACEHOLDER_SYNTH_RECIPES[eventId];
+    const recipe = this.recipes[eventId];
     if (recipe === undefined) return null;
     let destination: AudioNode = this.mixer.bus(entry.bus);
     if (entry.gain !== undefined && entry.gain !== 1) {
@@ -181,7 +183,7 @@ export class AudioDirector {
       destination = trim;
     }
     this.synth.trigger(eventId, destination, intensity, pan);
-    return { source: "synth", endTime: now + recipeDurationSec(eventId) };
+    return { source: "synth", endTime: now + (recipe.attackMs + recipe.decayMs + recipe.releaseMs)/1000 };
   }
 
   private pruneVoices(): void {

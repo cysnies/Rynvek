@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // 规范 12.2 冻结源码：24 类语义占位音效的 Web Audio 程序化合成器（零外部音频文件依赖）。
-// 配方表与合成算法逐字照搬规范，仅补充中文注释；任何参数或可观察行为都不得修改。
+// 缺省配方与算法保持规范原值；私有音效制品可显式提供经过sound-bank限界的独立配方映射。
 
 /** 单条合成配方 */
 export interface SynthRecipe {
@@ -65,7 +65,7 @@ export class ProceduralPlaceholderSynth {
   private readonly ctx: AudioContext;
   private readonly noiseBuffer: AudioBuffer;
 
-  public constructor(ctx: AudioContext) {
+  public constructor(ctx: AudioContext, private readonly recipes: Readonly<Record<string, SynthRecipe>> = PLACEHOLDER_SYNTH_RECIPES) {
     this.ctx = ctx;
     // 预先生成 1 秒确定性粉红噪声，所有触发共享
     this.noiseBuffer = this.createPinkNoiseBuffer(1.0);
@@ -73,7 +73,7 @@ export class ProceduralPlaceholderSynth {
 
   /** 触发一条语义音效；未知事件或音频上下文未运行时静默忽略 */
   public trigger(eventId: string, destination: AudioNode, intensity = 1.0, pan = 0.0): void {
-    const r = PLACEHOLDER_SYNTH_RECIPES[eventId];
+    const r = this.recipes[eventId];
     if (!r || this.ctx.state !== "running") return;
 
     // 包络时间轴：起音结束 → 衰减结束 → 释音结束

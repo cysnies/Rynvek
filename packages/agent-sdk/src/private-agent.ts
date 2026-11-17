@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 /** 私有Agent包的协议编解码/签名回调、HTTP消费与显式单步委托。不在SDK/浏览器执行包源码。 */
+import { PrivateAudioClient } from "./private-audio.js";
 import { AgentRunClient } from "./agent-run.js";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { AGENT_TOOL_NAMES, type AgentToolCall, type AgentToolName } from "./index.js";
@@ -57,6 +58,7 @@ export class PrivateAgentHubClient {
   constructor(origin:string,readonly ownerId:string,private token:()=>string,private fetcher:typeof fetch=fetch) {
     owner(ownerId);const u=new URL(origin);if(!["http:","https:"].includes(u.protocol)||u.username||u.password||u.pathname!=="/"||u.search||u.hash)throw new Error("私有Hub只允许无凭据HTTP(S) origin");this.origin=u.origin;
   }
+  audio():PrivateAudioClient{return new PrivateAudioClient(this.ownerId,(path,method,body,signal)=>this.request(path,method,body,signal));}
   runs():AgentRunClient{return new AgentRunClient(this.ownerId,(path,method,body,signal)=>this.request(path,method,body,signal));}
   destroy():void{this.enabled=false;this.token=()=>"";}
   private async request(path:string,method="GET",body?:unknown,signal?:AbortSignal):Promise<Response> {
