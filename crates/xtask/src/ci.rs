@@ -127,8 +127,17 @@ fn typescript(root: &Path) -> Result<(), String> {
         &["install", "--frozen-lockfile", "--offline", "--silent"],
         "pnpm install --frozen-lockfile --offline",
     )?;
+    // 工作区包的exports指向dist；干净检出必须先按依赖DAG生成真实声明/产物。
+    // 否则旧dist会让本机假绿，CI在agent-sdk导入@rynvek/core时以TS2307失败。
+    // 后续原typecheck/test/build全部保留，且不静默吞掉具体编译诊断。
+    util::run_in(
+        root,
+        &pnpm,
+        &["-r", "--filter", "./packages/**", "--fail-if-no-match", "build"],
+        "pnpm 工作区包依赖DAG前置构建（干净检出）",
+    )?;
     for script in ["typecheck", "test", "build"] {
-        util::run_in(root, &pnpm, &["-r", "--silent", script], &format!("pnpm -r {script}"))?;
+        util::run_in(root, &pnpm, &["-r", script], &format!("pnpm -r {script}"))?;
     }
     Ok(())
 }

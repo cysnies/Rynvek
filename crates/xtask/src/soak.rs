@@ -34,35 +34,60 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
 
 /// 构建并运行
 pub fn run(root: &Path, duration: Duration, report: Option<&str>) -> Result<(), String> {
-    let mut build = util::cargo();
-    build.current_dir(root).args([
-        "build",
-        "--quiet",
-        "--profile",
-        "opt-dev",
-        "-p",
-        "xtask",
-        "--bin",
-        "rynvek-soak",
-    ]);
-    util::run(build, "构建 rynvek-soak（opt-dev）")?;
     let report = report.map_or_else(|| root.join("target/soak/soak-report.json"), |r| root.join(r));
-    let mut c = std::process::Command::new(root.join("target/opt-dev/rynvek-soak"));
-    c.arg("--duration-secs")
-        .arg(duration.as_secs().to_string())
-        .arg("--report")
-        .arg(&report)
-        .arg("--root")
-        .arg(root);
+    let c = soak_command(root, duration, &report);
     util::run(
         c,
         &format!("浸泡测试 {} 秒（报告 {}）", duration.as_secs(), report.display()),
     )
 }
 
+fn soak_command(root: &Path, duration: Duration, report: &Path) -> std::process::Command {
+    // 交给Cargo构建并解析执行体：同时尊重共享CARGO_TARGET_DIR、配置文件与平台后缀。
+    // 不猜测root/target，也不复制二进制伪装通过；仍执行同一opt-dev浸泡程序。
+    let mut c = util::cargo();
+    c.current_dir(root)
+        .args([
+            "run",
+            "--quiet",
+            "--profile",
+            "opt-dev",
+            "-p",
+            "xtask",
+            "--bin",
+            "rynvek-soak",
+            "--",
+        ])
+        .arg("--duration-secs")
+        .arg(duration.as_secs().to_string())
+        .arg("--report")
+        .arg(&report)
+        .arg("--root")
+        .arg(root);
+    c
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runner_honors_cargo_target_resolution() {
+        let root = std::env::temp_dir().join("rynvek-soak-runner-contract");
+        let report = root.join("target/soak/report.json");
+        let cmd = soak_command(&root, Duration::from_secs(90), &report);
+        assert_eq!(
+            cmd.get_program(),
+            util::cargo().get_program(),
+            "执行体必须由Cargo解析，不能猜测root/target忽略共享CARGO_TARGET_DIR"
+        );
+        assert_eq!(cmd.get_current_dir(), Some(root.as_path()));
+        let args: Vec<_> = cmd.get_args().collect();
+        assert!(args.windows(2).any(|w| w == ["--profile", "opt-dev"]));
+        assert!(args.windows(2).any(|w| w == ["--bin", "rynvek-soak"]));
+        assert!(args.windows(2).any(|w| w == ["--duration-secs", "90"]));
+        assert!(args.iter().any(|a| *a == report.as_os_str()));
+    }
 
     #[test]
     fn durations() {

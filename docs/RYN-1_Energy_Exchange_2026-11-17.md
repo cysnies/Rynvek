@@ -38,3 +38,9 @@
 仍未完成：所有单位有依据的出生/补能契约、非脉冲基础代谢、普遍吸收/化学分泌、内部能量场恢复、能量耗尽自然死亡、自然分裂/能量分配/遗传谱系及无人工适应度选择闭环。现有 Q8.8 扩散核的全世界数值舍入不是本批重写的内容；严格守恒证明是实际交换账与受控闭合交换步，不能扩大为所有环境源/汇的整世界总能量证明。浏览器、硬件 GPU、真 PG、断电/长浸泡等未验收范围继续如实说明。
 
 附加环境事实：额外尝试 `cargo test --workspace --lib --tests` 会强制运行原本 `test=false` 的 Python 扩展链接目标，本机没有 `libpython3.13.so`，该附加命令失败。APT 补开发库因文件锁权限被拒绝后停止，没有 sudo/手动下载库或网络策略绕过。仓库原 CI 命令 `cargo test --workspace` 及原有 `test=false` 均未改；Python 行为仍以原 `cargo xtask pytest`（锁定 uv + Maturin 扩展）独立执行，不把扩展链接限制当作 Python 测试通过。
+
+## 中断恢复与门禁实败收敛
+
+2026-11-17 16:24 中国标准时间只读恢复快照：本地已有 a2cef5c、3fcb96b、e15cb53 三个本批功能/测试提交；远端仍为 c4da2da，尚未推送。工作树只有本批 `crates/xtask/src/soak.rs` 红测/提取改动；未重置或删除任何代码/数据。此前最终功能 HEAD 的完整门禁已通过 fmt、严格 Clippy、工作区测试、黄金向量、插件、许可证、TS、Python，最后在 Soak 启动失败：硬编码 root/target 忽略共享 CARGO_TARGET_DIR。新增行为红测确认误寻执行体；改为 Cargo 原生 run 同一 opt-dev 执行体，保留全部不变量与 90 秒时长。
+
+最新 CI 44039247935（c4da2da）单次快照为 completed/failure，更新于 2026-11-17 15:49:32 中国标准时间；失败日志表明 pnpm -r typecheck 退出 2，原 --silent 吞掉具体诊断。独立、无旧 dist 的 HEAD 导出离线安装后，真实复现 agent-sdk 导入 @rynvek/core 的 TS2307：工作区 exports 指向未生成的 dist。本批按包依赖 DAG 前置构建真实产物，原 typecheck/test/build 全部保留，并移除静默参数，避免再把旧产物的假绿当验收。不继续增加生态功能。
