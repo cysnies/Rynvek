@@ -86,10 +86,10 @@ fn gpu_mirror_verifies_every_readback_and_never_changes_state_roots() {
     eprintln!("[engine] {s:?}");
     assert_eq!(s.divergences, 0);
     assert!(s.verified_ticks > 0);
-    // seed_world 标脏 → 首个 Tick 以重同步代替 GPU 推进；其余每个 GPU Tick 的回读要么核对通过，
+    // seed_world 标脏 → 首个 Tick 以重同步代替 GPU 推进；随后只在场更新 Tick 回读，
     // 要么因忙槽跳过 / 被覆盖 / 历史过期而未核对（从不等待），但绝不允许出现分歧
     assert_eq!(s.resyncs, 1);
-    assert_eq!(s.gpu_ticks, 39);
+    assert_eq!(s.gpu_ticks, 13);
     assert_eq!(
         s.verified_ticks + s.skipped_readbacks + s.dropped_readbacks + s.stale_readbacks,
         s.gpu_ticks
@@ -239,4 +239,33 @@ fn engine_renders_world_and_resolves_gpu_pick() {
     let at = |x: usize, y: usize| &pixels[(y * 256 + x) * 4..(y * 256 + x) * 4 + 4];
     assert_eq!(at(32, 32), rynvek_render::WorldPalette::faction(0).0);
     assert!(owner.take_uncaptured_errors().is_empty());
+}
+
+#[test]
+fn field_mirror_matches_cpu_at_every_multirate_boundary() {
+    let Some(mut gpu) = gpu_engine() else { return };
+    let mut cpu = cpu_engine();
+    for tick in 1..=12 {
+        assert_eq!(gpu.step().unwrap(), cpu.step().unwrap());
+        settle(&mut gpu);
+        assert_mirror_matches_cpu(&gpu);
+        assert_eq!(gpu.stats().divergences, 0, "第 {tick} Tick 不应重复推进 GPU 场");
+    }
+}
+
+#[test]
+fn non_field_tick_uploads_edits_without_advancing_the_field() {
+    let Some(mut gpu) = gpu_engine() else { return };
+    let mut cpu = cpu_engine();
+    assert_eq!(gpu.step().unwrap(), cpu.step().unwrap());
+    gpu.set_field_value(FieldChannelId::Nutrient, 7, 9, 12345);
+    cpu.set_field_value(FieldChannelId::Nutrient, 7, 9, 12345);
+    for tick in 2..=7 {
+        assert_eq!(gpu.step().unwrap(), cpu.step().unwrap(), "Tick {tick}");
+        settle(&mut gpu);
+        assert_mirror_matches_cpu(&gpu);
+    }
+    assert_eq!(gpu.stats().resyncs, 2);
+    assert_eq!(gpu.stats().gpu_ticks, 2);
+    assert_eq!(gpu.stats().divergences, 0);
 }

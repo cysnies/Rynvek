@@ -25,7 +25,7 @@ impl Default for EntityProvider {
     fn default() -> Self {
         Self {
             radius: 1.5,
-            color: [0.36, 0.88, 0.90, 1.0],
+            color: rynvek_render::WorldPalette::faction(0).0.map(|v| f32::from(v) / 255.0),
         }
     }
 }
