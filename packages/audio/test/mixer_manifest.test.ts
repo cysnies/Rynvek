@@ -98,7 +98,7 @@ describe("AudioManifest", () => {
     ["占位必须有配方", { schema: AUDIO_MANIFEST_SCHEMA, events: { "custom.x": { status: "placeholder", bus: "sfx_ui" } } }, '$.events["custom.x"]'],
     ["路径穿越", { schema: AUDIO_MANIFEST_SCHEMA, events: { "ui.click": { status: "asset", bus: "sfx_ui", src: "../a.ogg", license: "CC0-1.0" } } }, '$.events["ui.click"].src'],
     ["URL", { schema: AUDIO_MANIFEST_SCHEMA, events: { "ui.click": { status: "asset", bus: "sfx_ui", src: "https://x/a.ogg", license: "CC0-1.0" } } }, '$.events["ui.click"].src'],
-    ["非 ogg", { schema: AUDIO_MANIFEST_SCHEMA, events: { "ui.click": { status: "asset", bus: "sfx_ui", src: "a.wav", license: "CC0-1.0" } } }, '$.events["ui.click"].src'],
+    ["非支持音频", { schema: AUDIO_MANIFEST_SCHEMA, events: { "ui.click": { status: "asset", bus: "sfx_ui", src: "a.mp3", license: "CC0-1.0" } } }, '$.events["ui.click"].src'],
     ["许可证", { schema: AUDIO_MANIFEST_SCHEMA, events: { "ui.click": { status: "asset", bus: "sfx_ui", src: "a.ogg", license: "MIT" } } }, '$.events["ui.click"].license'],
     ["状态", { schema: AUDIO_MANIFEST_SCHEMA, events: { "ui.click": { status: "wav", bus: "sfx_ui" } } }, '$.events["ui.click"].status'],
     ["占位不得带 src", { schema: AUDIO_MANIFEST_SCHEMA, events: { "ui.click": { status: "placeholder", bus: "sfx_ui", src: "a.ogg" } } }, '$.events["ui.click"].src'],

@@ -12,3 +12,5 @@ export * from "./adaptive_music.js";
 export * from "./neural_sonifier.js";
 
 export * from "./sound-bank.js";
+
+export * from "./pcm.js";

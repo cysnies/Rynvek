@@ -39,11 +39,12 @@ export interface PlaceholderAudioEntry extends AudioManifestEntryBase {
   readonly status: "placeholder";
 }
 
-/** 音频文件条目：`.ogg` 相对路径（相对清单所在目录） */
+/** 音频文件条目：`.ogg`/`.wav` 相对路径（相对清单所在目录） */
 export interface AssetAudioEntry extends AudioManifestEntryBase {
   readonly status: "asset";
   readonly src: string;
   readonly license: AudioAssetLicense;
+  readonly credit?:string;
 }
 
 export type AudioManifestEntry = PlaceholderAudioEntry | AssetAudioEntry;
@@ -59,8 +60,8 @@ export const STANDARD_AUDIO_EVENT_IDS: readonly string[] = Object.keys(PLACEHOLD
 /** 事件名格式：`类别.名称`，小写蛇形 */
 export const AUDIO_EVENT_ID_PATTERN = /^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/;
 
-/** `.ogg` 相对路径格式：禁止绝对路径、协议前缀、反斜杠与 `..` 穿越 */
-export const AUDIO_ASSET_SRC_PATTERN = /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$))(?![a-zA-Z][a-zA-Z0-9+.-]*:)[A-Za-z0-9_./-]+\.ogg$/;
+/** 音频相对路径格式：禁止绝对路径、协议前缀、反斜杠与 `..` 穿越 */
+export const AUDIO_ASSET_SRC_PATTERN = /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$))(?![a-zA-Z][a-zA-Z0-9+.-]*:)[A-Za-z0-9_./-]+\.(?:ogg|wav)$/;
 
 /** 由规范配方表生成的开发期缺省清单：24 条全部为占位 */
 export function createPlaceholderManifest(): AudioManifest {
@@ -126,16 +127,17 @@ function parseEntry(id: string, raw: unknown): AudioManifestEntry {
     return { ...base, status: "placeholder" };
   }
   if (raw["status"] === "asset") {
-    rejectUnknownKeys(raw, [...common, "src", "license"], path);
+    rejectUnknownKeys(raw, [...common, "src", "license", "credit"], path);
     const src = raw["src"];
     if (typeof src !== "string" || !AUDIO_ASSET_SRC_PATTERN.test(src)) {
-      throw new AudioManifestError(`${path}.src`, "必须是不含 .. 的相对 .ogg 路径");
+      throw new AudioManifestError(`${path}.src`, "必须是不含 .. 的相对 .ogg/.wav 路径");
     }
     const license = raw["license"];
     if (typeof license !== "string" || !(AUDIO_ASSET_LICENSES as readonly string[]).includes(license)) {
       throw new AudioManifestError(`${path}.license`, `必须是 ${AUDIO_ASSET_LICENSES.join(" | ")} 之一`);
     }
-    return { ...base, status: "asset", src, license: license as AudioAssetLicense };
+    const credit=raw["credit"];if(credit!==undefined&&(typeof credit!=="string"||!credit.trim()||new TextEncoder().encode(credit).length>256))throw new AudioManifestError(path,"署名须1..256 UTF8字节");
+    return { ...base, status: "asset", src, license: license as AudioAssetLicense,...(typeof credit==="string"?{credit}:{}) };
   }
   throw new AudioManifestError(`${path}.status`, `必须是 ${AUDIO_SOURCE_STATUSES.join(" | ")} 之一`);
 }

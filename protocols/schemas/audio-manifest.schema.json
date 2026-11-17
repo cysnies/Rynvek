@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://rynvek.dev/schemas/audio-manifest.schema.json",
   "title": "Rynvek AudioManifest",
-  "description": "语义音频事件到音源的映射。开发期 24 类事件均为程序化占位（status: placeholder），后期替换为 CC0 / 原创 .ogg 文件。",
+  "description": "语义音频事件到音源的映射。开发期 24 类事件均为程序化占位（status: placeholder），可描述 CC0 / 授权音源；当前私有profile仅接严格PCM16 mono WAV。",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -147,14 +147,19 @@
         },
         "src": {
           "type": "string",
-          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![a-zA-Z][a-zA-Z0-9+.-]*:)[A-Za-z0-9_./-]+\\.ogg$",
-          "description": "相对清单目录的 .ogg 路径"
+          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?![a-zA-Z][a-zA-Z0-9+.-]*:)[A-Za-z0-9_./-]+\\.(?:ogg|wav)$",
+          "description": "相对清单目录的 .ogg/.wav 路径；私有PCM profile另执行严格内容地址/格式校验"
         },
         "license": {
           "enum": [
             "CC0-1.0",
             "CC-BY-4.0"
           ]
+        },
+        "credit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
         }
       }
     }

@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { parseAudioManifest, createPlaceholderManifest, type AudioManifest } from "./manifest.js";
 import { PLACEHOLDER_SYNTH_RECIPES, type SynthRecipe } from "./placeholder_synth.js";
-export interface SoundBank {readonly manifest:AudioManifest;readonly recipes:Readonly<Record<string,SynthRecipe>>}
+import {parsePcmSamples,PCM_PATH,type PcmClip} from "./pcm.js";
+export interface SoundBank {readonly manifest:AudioManifest;readonly recipes:Readonly<Record<string,SynthRecipe>>;readonly samples:Readonly<Record<string,PcmClip>>}
 /** Bounded data-only patch; cannot change the fixed semantic event -> bus permission map. */
-export function parseSoundBank(manifest:unknown,patches:unknown):SoundBank {
- const parsed=parseAudioManifest(manifest);if(Object.keys(parsed.events).length>24)throw new Error("最多24音频事件");
- for(const [id,e]of Object.entries(parsed.events))if(e.status!=="placeholder"||!Object.hasOwn(PLACEHOLDER_SYNTH_RECIPES,id)||e.max_voices!==undefined&&e.max_voices>16)throw new Error("本profile仅支持有界程序化音效，不加载媒体或URL");
+export function parseSoundBank(manifest:unknown,patches:unknown,samples:unknown={}):SoundBank {
+ const clips=parsePcmSamples(samples);const parsed=parseAudioManifest(manifest);if(Object.keys(parsed.events).length>24)throw new Error("最多24音频事件");
+ for(const [id,e]of Object.entries(parsed.events))if(!Object.hasOwn(PLACEHOLDER_SYNTH_RECIPES,id)||PLACEHOLDER_SYNTH_RECIPES[id]!.bus!==e.bus||e.max_voices!==undefined&&e.max_voices>16)throw new Error("事件或声部配额非法");
+ for(const e of Object.values(parsed.events))if(e.status==="asset"&&(!PCM_PATH.test(e.src)||!clips[e.src]||(e.license==="CC-BY-4.0"&&!e.credit)))throw new Error("采样缺失/路径或署名非法");
  if(!patches||typeof patches!=="object"||Array.isArray(patches)||Object.keys(patches).length>24)throw new Error("配方覆写须为有界对象");
  const recipes:Record<string,SynthRecipe>={...PLACEHOLDER_SYNTH_RECIPES};
  for(const [id,raw]of Object.entries(patches)){
@@ -17,5 +19,5 @@ export function parseSoundBank(manifest:unknown,patches:unknown):SoundBank {
    out[key]=value;
   }recipes[id]=Object.freeze(out) as unknown as SynthRecipe;
  }
- return Object.freeze({manifest:{schema:parsed.schema,events:Object.freeze({...createPlaceholderManifest().events,...parsed.events})},recipes:Object.freeze(recipes)});
+ return Object.freeze({samples:clips,manifest:{schema:parsed.schema,events:Object.freeze({...createPlaceholderManifest().events,...parsed.events})},recipes:Object.freeze(recipes)});
 }

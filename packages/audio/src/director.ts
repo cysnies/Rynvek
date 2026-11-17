@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// AudioDirector：把语义音频事件路由到占位合成器或已加载的 .ogg 采样。
+// AudioDirector：把语义音频事件路由到占位合成器或显式内存加载器提供的采样（Arena仅受限PCM）。
 //
 // 规范只给出合成器本体；事件路由、重复触发冷却与发声数上限按游戏音频最佳实践补全（ERRATA E-018）：
 // 大规模 RTS 同帧可能产生上百个同类事件，不加限制会削波并淹没关键告警。
@@ -43,6 +43,8 @@ export interface PlayOptions {
   readonly intensity?: number;
   /** 声像 [-1, 1] */
   readonly pan?: number;
+  /** Camera-derived distance attenuation, applied equally to synth and samples. */
+  readonly attenuation?:number;
 }
 
 export type PlaySkipReason = "unknown_event" | "context_not_running" | "muted" | "cooldown" | "voice_limit";
@@ -99,7 +101,7 @@ export class AudioDirector {
   }
 
   /**
-   * 预加载清单中全部 `.ogg`；失败的条目保持未加载，播放时回退到占位合成（若有配方）。
+   * 用显式注入的加载器预加载清单中全部采样；失败的条目保持未加载，播放时回退到占位合成（若有配方）。
    * 返回加载失败的 src 列表。
    */
   public async preload(): Promise<string[]> {
@@ -158,7 +160,7 @@ export class AudioDirector {
     options: PlayOptions,
   ): { source: "synth" | "sample"; endTime: number } | null {
     const now = this.ctx.currentTime;
-    const intensity = options.intensity ?? 1;
+    const intensity = clamp01(options.intensity ?? 1) * clamp01(options.attenuation ?? 1);
     const pan = options.pan ?? 0;
     const sample = entry.status === "asset" ? this.samples.get(entry.src) : undefined;
     if (sample !== undefined) {
@@ -169,6 +171,7 @@ export class AudioDirector {
       const panner = this.ctx.createStereoPanner();
       panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), now);
       source.connect(gain).connect(panner).connect(this.mixer.bus(entry.bus));
+      source.onended=()=>{source.disconnect();gain.disconnect();panner.disconnect();};
       source.start(now);
       return { source: "sample", endTime: now + sample.duration };
     }
@@ -210,5 +213,5 @@ function assetSources(manifest: AudioManifest): string[] {
 }
 
 function clamp01(v: number): number {
-  return Math.max(0, Math.min(1, v));
+  return Number.isFinite(v)?Math.max(0, Math.min(1, v)):0;
 }
