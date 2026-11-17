@@ -262,6 +262,14 @@ export class ArenaController {
   // ---------------------------------------------------------------- 建造与经济
 
   /** 底部建造抽屉中选择建筑 → 进入建造模式 */
+  /** 选中观测中的己方建筑，不创建实体，也不进入建造模式。 */
+  selectOwnedBuilding(id: number): void {
+    const o = this.obs;
+    const b = o?.buildings.find((x) => x.id === id && x.faction === o.faction);
+    this.ui.selectedBuilding = b?.id ?? null;
+    this.ui.buildMode = null;
+  }
+
   chooseBuilding(kind: BuildingKind): void {
     this.ui.buildMode = kind;
     this.ui.buildMenuOpen = false;
@@ -273,7 +281,7 @@ export class ArenaController {
   }
 
   private demolishSelected(): void {
-    if (this.ui.selectedBuilding !== null) void this.send({ type: "demolish", building: this.ui.selectedBuilding });
+    if (this.ui.selectedBuilding !== null) void this.demolish(this.ui.selectedBuilding);
   }
 
   private openBeaconPanel(): void {
@@ -295,6 +303,16 @@ export class ArenaController {
   queueUnit(vat: number, unit: UnitKind, count = 1, genomeSlug?: string): Promise<CommandAck | null> {
     const slug = genomeSlug ?? defaultGenome(unit, this.obs?.genomes ?? []);
     return this.send({ type: "queue_unit", vat, unit, genome_slug: slug, count });
+  }
+
+  /** 取消孵化槽队尾并全额退款；空队列由服务器回执说明。 */
+  cancelQueue(vat: number): Promise<CommandAck | null> {
+    return this.send({ type: "cancel_queue", vat });
+  }
+
+  /** 拆除己方非主脑建筑（返还 50% 造价，队列项全额退款）。 */
+  demolish(building: number): Promise<CommandAck | null> {
+    return this.send({ type: "demolish", building });
   }
 
   /** 研发科技：Tier 1 在突触精炼厂，Tier 2/3 经演化坩埚 */
