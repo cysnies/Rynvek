@@ -224,6 +224,19 @@ fn candidate_birth_rollback_checkpoint_replay_and_ancestry_after_death_are_real(
         tampered.encode_snapshot([105; 16], 1, [0; 32]).is_err(),
         "不能保留亲本转出却丢弃出生收款谱系"
     );
+    for field in ["faction", "slug", "genome"] {
+        let mut forged = original.world().clone();
+        let birth = forged.ecology.as_mut().unwrap().births.values_mut().next().unwrap();
+        match field {
+            "faction" => birth.faction = FactionId::WILD,
+            "slug" => birth.slug = "伪造出生目录".into(),
+            _ => birth.child_genome.0[0] ^= 1,
+        }
+        assert!(
+            forged.encode_snapshot([105; 16], 1, [0; 32]).is_err(),
+            "出生元数据篡改必须拒绝：{field}"
+        );
+    }
     let eco = original.ecology.as_ref().unwrap();
     assert!(!eco.births.is_empty());
     let (&child, birth) = eco.births.iter().next().unwrap();

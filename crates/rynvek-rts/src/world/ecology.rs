@@ -4,7 +4,7 @@
 //! 显式Forager契约统一局部摄食、实际脉冲预算与首次有来源供能后的生存成本。
 //! 孵化槽出生实扣Biomass，自然出生由亲本原池分配；摄食继续等额扣环境场。
 use super::ArenaWorld;
-use crate::{EntitySerial, FieldId, UnitKind};
+use crate::{EntitySerial, FactionId, FieldId, UnitKind};
 use rynvek_core::Blake3Hash;
 use rynvek_neural::metabolism::{ENERGY_Q_PER_MILLI, EnergyAccount};
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,9 @@ pub struct RemainsEnergy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MitosisBirth {
+    pub faction: FactionId,
+    pub unit: UnitKind,
+    pub slug: String,
     pub parent: EntitySerial,
     pub born_tick: u64,
     pub parent_generation: u32,

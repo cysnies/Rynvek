@@ -26,8 +26,37 @@ impl ArenaWorld {
                 .get(child)
                 .map(|b| &b.account)
                 .or_else(|| ecology.remains.get(child).map(|r| &r.account));
+            // 不可变出生元数据既供恢复校验，也供Lab；不从slug或目录猜测祖先。
+            let parent_matches = if let Some(p) = ecology.births.get(&birth.parent) {
+                p.faction == birth.faction
+                    && p.unit == birth.unit
+                    && p.generation == birth.parent_generation
+                    && p.child_genome == birth.parent_genome
+                    && p.born_tick < birth.born_tick
+            } else if let Some(p) = self.units.get(&birth.parent) {
+                p.faction == birth.faction
+                    && p.kind == birth.unit
+                    && p.genome.generation == birth.parent_generation
+                    && p.genome.digest() == birth.parent_genome
+                    && p.born_tick <= birth.born_tick
+            } else {
+                // 已死亡的初始/设施出生根没有伪造的自然亲代元数据；由原快照根认证历史。
+                true
+            };
             if account.is_none_or(|a| a.received_q < birth.allocated_q)
-                || self.units.get(child).is_some_and(|u| u.born_tick != birth.born_tick)
+                || birth.unit != crate::UnitKind::Forager
+                || birth.faction.is_wild()
+                || self.faction(birth.faction).is_none()
+                || birth.slug.is_empty()
+                || !parent_matches
+                || self.units.get(child).is_some_and(|u| {
+                    u.born_tick != birth.born_tick
+                        || u.faction != birth.faction
+                        || u.kind != birth.unit
+                        || u.genome.slug != birth.slug
+                        || u.genome.generation != birth.generation
+                        || u.genome.digest() != birth.child_genome
+                })
             {
                 return false;
             }
@@ -91,6 +120,7 @@ impl ArenaWorld {
             return;
         };
         let child_genome = genome.digest();
+        let slug = genome.slug.clone();
         let mut account = EnergyAccount::default();
         if !self
             .ecology
@@ -117,6 +147,9 @@ impl ArenaWorld {
         ecology.births.insert(
             child,
             MitosisBirth {
+                faction,
+                unit: kind,
+                slug,
                 parent,
                 born_tick: self.tick,
                 parent_generation,

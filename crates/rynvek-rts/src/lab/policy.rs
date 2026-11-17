@@ -249,11 +249,13 @@ pub fn expand(world: &ArenaWorld, faction: FactionId, action: MacroAction) -> Ve
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyKind {
-    /// 不下任何命令（观察虫潮自然选择的对照组）
+    /// 不下任何命令（策略对照；虫潮生成不是自然选择的证明）
     Idle,
     /// 经济 + 防守开局：采集 → 孵化槽 → 补采集工蜂 → 突击虫回防，对手进入后期再压上
     #[default]
     Economy,
+    /// 仅真实采集引导与孵化槽人口设施，不生产单位，隔离自然繁殖与玩家训练。
+    Ecology,
 }
 
 /// 脚本策略的决策间隔（Ticks，30 Hz 下 1 秒）
@@ -271,15 +273,15 @@ pub fn run_policy(world: &mut ArenaWorld, faction: FactionId, policy: PolicyKind
     let mut plan = vec![MacroAction::Harvest];
     if building_count(world, faction, BuildingKind::SpawningVat) == 0 {
         plan.push(MacroAction::BuildVat);
-    } else if unit_count(world, faction, UnitKind::Forager) < ECONOMY_FORAGERS {
+    } else if policy != PolicyKind::Ecology && unit_count(world, faction, UnitKind::Forager) < ECONOMY_FORAGERS {
         plan.push(MacroAction::TrainForager);
-    } else if unit_count(world, faction, UnitKind::Striker) < ECONOMY_STRIKERS {
+    } else if policy != PolicyKind::Ecology && unit_count(world, faction, UnitKind::Striker) < ECONOMY_STRIKERS {
         plan.push(MacroAction::TrainStriker);
-    } else {
+    } else if policy != PolicyKind::Ecology {
         plan.push(MacroAction::BuildHarvester);
     }
     // 每 20 秒一次战术决策：兵力充足时进攻，否则回防
-    if world.tick % (POLICY_INTERVAL_TICKS * 20) == 0 {
+    if policy != PolicyKind::Ecology && world.tick % (POLICY_INTERVAL_TICKS * 20) == 0 {
         let strikers = unit_count(world, faction, UnitKind::Striker);
         plan.push(if strikers >= ECONOMY_STRIKERS {
             MacroAction::AttackMove

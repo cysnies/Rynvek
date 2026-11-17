@@ -5,8 +5,8 @@
 //!
 //! - 实验规格 [`ExperimentSpec`] = 变体 × 种子；每个 run 是一局独立的确定性对局，
 //!   同一规格永远得到逐字节相同的结果（Parquet 编码见 `arrow` 特性下的 [`arrow_io`]）。
-//! - 谱系：[`crate::genome::Genome`] 不记录亲代链接，谱系表因此记录每个基因组 slug
-//!   首次出现的 Tick、所属阵营与代数（ERRATA E-047）。
+//! - 谱系从真实出生事实读取实体/亲代/基因指纹/能量投入；不再把基因目录首次出现冒充家谱。
+//! - 私有实验按采样导出全世界精确生命账，出生历史每Tick收集，不受采样间隔漏记。
 //! - 多个 run 用 `std::thread::scope` 并行执行，结果按 run 序号归并，与线程调度无关。
 
 pub mod policy;
@@ -54,6 +54,9 @@ pub struct VariantSpec {
     /// 所有玩家阵营使用的脚本策略
     #[serde(default)]
     pub policy: PolicyKind,
+    /// 显式实验生态契约，仅允许PvE；不改变未指定的世界，也不补免费出生能量。
+    #[serde(default)]
+    pub ecology: Option<crate::world::ecology::ForagerEcologyContract>,
 }
 
 impl VariantSpec {
@@ -64,6 +67,7 @@ impl VariantSpec {
             mode: LabMode::Pve,
             players: None,
             policy: PolicyKind::Economy,
+            ecology: None,
         }
     }
 
@@ -76,10 +80,12 @@ impl VariantSpec {
 
     /// 该变体在给定种子下的对局配置
     pub fn match_config(&self, seed: u64) -> MatchConfig {
-        match self.mode {
+        let mut config = match self.mode {
             LabMode::Pve => MatchConfig::pve(seed, self.player_count()),
             LabMode::Duel => MatchConfig::duel(seed),
-        }
+        };
+        config.ecology = self.ecology;
+        config
     }
 }
 
@@ -137,6 +143,15 @@ impl ExperimentSpec {
             if !labels.insert(v.label.as_str()) {
                 return Err(format!("变体 label 重复：{}", v.label));
             }
+            if let Some(ecology) = v.ecology {
+                if v.mode != LabMode::Pve {
+                    return Err("生态实验只允许显式PvE变体".into());
+                }
+                ecology.validate().map_err(str::to_owned)?;
+            }
+            if v.policy == PolicyKind::Ecology && v.ecology.is_none() {
+                return Err("ecology策略必须提供显式生态契约".into());
+            }
             let p = v.player_count();
             let ok = match v.mode {
                 LabMode::Pve => (1..=2).contains(&p),
@@ -192,6 +207,8 @@ pub struct RunRecord {
     pub commands_rejected: u64,
     pub genomes_bred: u32,
     pub waves_spawned: u32,
+    pub natural_births: u32,
+    pub max_generation: u32,
 }
 
 /// 指标采样行（每个采样 Tick × 玩家阵营一行）
@@ -214,16 +231,41 @@ pub struct MetricRow {
     pub state_root: [u8; 32],
 }
 
-/// 谱系行：基因组 slug 首次出现
+/// 真实单位谱系节点；非自然出生的亲代未知，不能从slug/目录猜测。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LineageRow {
     pub run: u32,
-    /// 所属阵营（野生虫潮为 255）
     pub faction: u8,
+    pub entity: u32,
+    pub parent: Option<u32>,
+    pub origin: String,
     pub slug: String,
     pub unit: String,
     pub generation: u32,
-    pub first_seen_tick: u64,
+    pub born_tick: u64,
+    pub genome: [u8; 32],
+    pub parent_genome: Option<[u8; 32]>,
+    pub allocated_q: u64,
+}
+
+/// 一个run的全世界生命账采样；u128汇总后用Arrow Decimal128精确导出，不转浮点。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct EnergyRow {
+    pub enabled: bool,
+    pub run: u32,
+    pub tick: u64,
+    pub live_bodies: u32,
+    pub remains: u32,
+    pub natural_births: u32,
+    pub max_generation: u32,
+    pub received_q: u128,
+    pub stored_q: u128,
+    pub dissipated_q: u128,
+    pub exported_q: u128,
+    pub returned_q: u128,
+    pub transferred_q: u128,
+    pub external_received_q: u128,
+    pub state_root: [u8; 32],
 }
 
 /// 一个实验的全部结果
@@ -232,6 +274,7 @@ pub struct ExperimentResult {
     pub runs: Vec<RunRecord>,
     pub metrics: Vec<MetricRow>,
     pub lineage: Vec<LineageRow>,
+    pub energy: Vec<EnergyRow>,
 }
 
 /// 固定长度的阵营特征向量（定点整数，Python 侧零拷贝导出为 Int64Array）
@@ -340,28 +383,9 @@ pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResul
     let mut bred = 0u32;
     let mut waves = 0u32;
     let mut metrics = Vec::new();
-    let mut seen: BTreeMap<String, LineageRow> = BTreeMap::new();
-    let observe_lineage = |world: &ArenaWorld, seen: &mut BTreeMap<String, LineageRow>| {
-        let mut note = |faction: u8, g: &crate::genome::Genome| {
-            seen.entry(g.slug.clone()).or_insert_with(|| LineageRow {
-                run: plan.run,
-                faction,
-                slug: g.slug.clone(),
-                unit: g.unit.as_str().to_owned(),
-                generation: g.generation,
-                first_seen_tick: world.tick,
-            });
-        };
-        for f in &world.factions {
-            for g in f.genomes.values() {
-                note(f.id.0, g);
-            }
-        }
-        for u in world.units.values().filter(|u| u.faction == FactionId::WILD) {
-            note(FactionId::WILD.0, &u.genome);
-        }
-    };
-    observe_lineage(&world, &mut seen);
+    let mut seen = BTreeMap::new();
+    let mut energy = Vec::new();
+    observe_lineage(&world, plan.run, &mut seen);
     while world.tick < ticks && !world.is_over() {
         for &f in &players {
             let o = run_policy(&mut world, f, plan.variant.policy);
@@ -376,9 +400,11 @@ pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResul
                 _ => {}
             }
         }
+        observe_lineage(&world, plan.run, &mut seen);
         if world.tick % sample_every == 0 || world.is_over() || world.tick == ticks {
-            sample(&world, plan.run, &players, &mut metrics);
-            observe_lineage(&world, &mut seen);
+            let root = world.state_hash().0;
+            sample(&world, plan.run, &players, &mut metrics, root);
+            energy.push(sample_energy(&world, plan.run, root));
         }
     }
     let outcome = world.outcome.clone();
@@ -389,9 +415,10 @@ pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResul
     let policy = match plan.variant.policy {
         PolicyKind::Idle => "idle",
         PolicyKind::Economy => "economy",
+        PolicyKind::Ecology => "ecology",
     };
     let mut lineage: Vec<LineageRow> = seen.into_values().collect();
-    lineage.sort_by(|a, b| (a.first_seen_tick, &a.slug).cmp(&(b.first_seen_tick, &b.slug)));
+    lineage.sort_by_key(|r| (r.born_tick, r.entity));
     ExperimentResult {
         runs: vec![RunRecord {
             run: plan.run,
@@ -408,14 +435,85 @@ pub fn run_one(plan: &RunPlan, ticks: u64, sample_every: u64) -> ExperimentResul
             commands_rejected: rejected,
             genomes_bred: bred,
             waves_spawned: waves,
+            natural_births: world.ecology.as_ref().map_or(0, |e| e.births.len() as u32),
+            max_generation: lineage.iter().map(|r| r.generation).max().unwrap_or(0),
         }],
         metrics,
         lineage,
+        energy,
     }
 }
 
-fn sample(world: &ArenaWorld, run: u32, players: &[FactionId], out: &mut Vec<MetricRow>) {
-    let root = world.state_hash().0;
+// 自然出生有不可变历史，即使同Tick被杀也不会漏记；不依赖采样时仍存活。
+fn observe_lineage(world: &ArenaWorld, run: u32, seen: &mut BTreeMap<crate::EntitySerial, LineageRow>) {
+    if let Some(ecology) = &world.ecology {
+        for (&id, birth) in &ecology.births {
+            seen.entry(id).or_insert_with(|| LineageRow {
+                run,
+                faction: birth.faction.0,
+                entity: id.0,
+                parent: Some(birth.parent.0),
+                origin: "mitosis".into(),
+                slug: birth.slug.clone(),
+                unit: birth.unit.as_str().into(),
+                generation: birth.generation,
+                born_tick: birth.born_tick,
+                genome: birth.child_genome.0,
+                parent_genome: Some(birth.parent_genome.0),
+                allocated_q: birth.allocated_q,
+            });
+        }
+    }
+    for (&id, u) in &world.units {
+        seen.entry(id).or_insert_with(|| LineageRow {
+            run,
+            faction: u.faction.0,
+            entity: id.0,
+            parent: None,
+            origin: if u.born_tick == 0 { "initial" } else { "spawn" }.into(),
+            slug: u.genome.slug.clone(),
+            unit: u.kind.as_str().into(),
+            generation: u.genome.generation,
+            born_tick: u.born_tick,
+            genome: u.genome.digest().0,
+            parent_genome: None,
+            allocated_q: 0,
+        });
+    }
+}
+
+fn sample_energy(world: &ArenaWorld, run: u32, root: [u8; 32]) -> EnergyRow {
+    let mut row = EnergyRow {
+        run,
+        tick: world.tick,
+        state_root: root,
+        ..Default::default()
+    };
+    if let Some(e) = &world.ecology {
+        row.enabled = true;
+        row.live_bodies = e.bodies.len() as u32;
+        row.remains = e.remains.len() as u32;
+        row.natural_births = e.births.len() as u32;
+        row.max_generation = e.births.values().map(|b| b.generation).max().unwrap_or(0);
+        for a in e
+            .bodies
+            .values()
+            .map(|b| &b.account)
+            .chain(e.remains.values().map(|r| &r.account))
+        {
+            row.received_q += u128::from(a.received_q);
+            row.stored_q += u128::from(a.stored_q);
+            row.dissipated_q += u128::from(a.dissipated_q);
+            row.exported_q += u128::from(a.exported_q);
+            row.returned_q += u128::from(a.returned_q);
+            row.transferred_q += u128::from(a.transferred_q);
+        }
+    }
+    row.external_received_q = row.received_q - row.transferred_q;
+    row
+}
+
+fn sample(world: &ArenaWorld, run: u32, players: &[FactionId], out: &mut Vec<MetricRow>, root: [u8; 32]) {
     let wild_units = world.units.values().filter(|u| u.faction == FactionId::WILD).count() as u32;
     for &f in players {
         let Some(obs) = world.observe(f) else { continue };
@@ -470,6 +568,7 @@ pub fn run_experiment(spec: &ExperimentSpec, on_run_done: &(dyn Fn(usize, usize)
         out.runs.extend(r.runs);
         out.metrics.extend(r.metrics);
         out.lineage.extend(r.lineage);
+        out.energy.extend(r.energy);
     }
     out
 }
@@ -530,8 +629,8 @@ mod tests {
         // 每个 run 采样 3 次（300/600/900）× 玩家阵营数
         assert_eq!(a.metrics.iter().filter(|m| m.run == 0).count(), 3);
         assert_eq!(a.metrics.iter().filter(|m| m.run == 4).count(), 6);
-        // 种子基因组全部进入谱系表
-        assert!(a.lineage.iter().filter(|l| l.run == 0).count() >= 6);
+        // 真正存在的单位才是谱系节点，不把未表达的种子目录当成生命。
+        assert!(a.lineage.iter().filter(|l| l.run == 0).count() >= 4);
         // 经济策略确实下达了命令，空闲策略没有
         assert!(a.runs[0].commands_accepted > 0);
         assert_eq!(a.runs[2].commands_accepted, 0);

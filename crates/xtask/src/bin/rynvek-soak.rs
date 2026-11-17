@@ -275,6 +275,7 @@ fn lab_cycle(ctx: &mut Ctx) -> Result<(), String> {
                 mode: LabMode::Duel,
                 players: None,
                 policy: PolicyKind::Economy,
+                ecology: None,
             },
         ],
     };

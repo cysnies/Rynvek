@@ -3,10 +3,10 @@
 
 //! Lab 结果与实时观测的 Arrow RecordBatch / Parquet 编码（规范 1.1：Arrow 53+，Parquet 谱系文件）。
 //!
-//! 三张表的列结构在此冻结，`@rynvek/lab`、Python 包与服务端 `GET .../parquet?table=` 共用：
+//! 当前四张表的列结构在此统一定义，`@rynvek/lab`、Python 包与服务端 `GET .../parquet?table=` 共用：
 //! - `runs`：每个 run 一行的汇总；
 //! - `metrics`：每个采样 Tick × 玩家阵营一行的经济 / 规模 / 得分指标与状态根；
-//! - `lineage`：基因组 slug 首次出现记录（演化谱系）。
+//! - `lineage`：真实单位出生节点与自然亲代链接；`energy`：精确生命账。
 //!
 //! Parquet 写出使用固定的写入属性（ZSTD 默认级别、单行组、不写统计时间戳），
 //! 同一实验结果总是编码为逐字节相同的文件，可直接作为 CAS 内容寻址。
@@ -14,8 +14,8 @@
 use std::sync::Arc;
 
 use arrow::array::{
-    ArrayRef, BooleanArray, FixedSizeBinaryArray, Int64Array, RecordBatch, StringArray, UInt8Array, UInt32Array,
-    UInt64Array,
+    ArrayRef, BooleanArray, Decimal128Array, FixedSizeBinaryArray, FixedSizeBinaryBuilder, Int64Array, RecordBatch,
+    StringArray, UInt8Array, UInt32Array, UInt64Array,
 };
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use arrow::error::ArrowError;
@@ -23,7 +23,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
 
-use super::{ExperimentResult, FEATURE_NAMES, LineageRow, MetricRow, RunRecord};
+use super::{EnergyRow, ExperimentResult, FEATURE_NAMES, LineageRow, MetricRow, RunRecord};
 use crate::observation::FactionObservation;
 
 /// 结果表名
@@ -32,16 +32,18 @@ pub enum LabTable {
     Runs,
     Metrics,
     Lineage,
+    Energy,
 }
 
 impl LabTable {
-    pub const ALL: [Self; 3] = [Self::Runs, Self::Metrics, Self::Lineage];
+    pub const ALL: [Self; 4] = [Self::Runs, Self::Metrics, Self::Lineage, Self::Energy];
 
     pub const fn name(self) -> &'static str {
         match self {
             Self::Runs => "runs",
             Self::Metrics => "metrics",
             Self::Lineage => "lineage",
+            Self::Energy => "energy",
         }
     }
 
@@ -71,6 +73,8 @@ pub fn runs_schema() -> SchemaRef {
         field("commands_rejected", DataType::UInt64, false),
         field("genomes_bred", DataType::UInt32, false),
         field("waves_spawned", DataType::UInt32, false),
+        field("natural_births", DataType::UInt32, false),
+        field("max_generation", DataType::UInt32, false),
     ]))
 }
 
@@ -103,7 +107,34 @@ pub fn lineage_schema() -> SchemaRef {
         field("slug", DataType::Utf8, false),
         field("unit", DataType::Utf8, false),
         field("generation", DataType::UInt32, false),
-        field("first_seen_tick", DataType::UInt64, false),
+        field("entity", DataType::UInt32, false),
+        field("parent", DataType::UInt32, true),
+        field("origin", DataType::Utf8, false),
+        field("born_tick", DataType::UInt64, false),
+        field("genome", DataType::FixedSizeBinary(32), false),
+        field("parent_genome", DataType::FixedSizeBinary(32), true),
+        field("allocated_q", DataType::UInt64, false),
+    ]))
+}
+
+/// `energy` 表使用Decimal128保存全世界q，禁止转成浮点导致伪守恒。
+pub fn energy_schema() -> SchemaRef {
+    Arc::new(Schema::new(vec![
+        field("enabled", DataType::Boolean, false),
+        field("run", DataType::UInt32, false),
+        field("tick", DataType::UInt64, false),
+        field("live_bodies", DataType::UInt32, false),
+        field("remains", DataType::UInt32, false),
+        field("natural_births", DataType::UInt32, false),
+        field("max_generation", DataType::UInt32, false),
+        field("received_q", DataType::Decimal128(38, 0), false),
+        field("stored_q", DataType::Decimal128(38, 0), false),
+        field("dissipated_q", DataType::Decimal128(38, 0), false),
+        field("exported_q", DataType::Decimal128(38, 0), false),
+        field("returned_q", DataType::Decimal128(38, 0), false),
+        field("transferred_q", DataType::Decimal128(38, 0), false),
+        field("external_received_q", DataType::Decimal128(38, 0), false),
+        field("state_root", DataType::FixedSizeBinary(32), false),
     ]))
 }
 
@@ -139,6 +170,8 @@ pub fn runs_batch(rows: &[RunRecord]) -> Result<RecordBatch, ArrowError> {
             arc(UInt64Array::from_iter_values(rows.iter().map(|r| r.commands_rejected))),
             arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.genomes_bred))),
             arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.waves_spawned))),
+            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.natural_births))),
+            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.max_generation))),
         ],
     )
 }
@@ -173,6 +206,14 @@ pub fn metrics_batch(rows: &[MetricRow]) -> Result<RecordBatch, ArrowError> {
 }
 
 pub fn lineage_batch(rows: &[LineageRow]) -> Result<RecordBatch, ArrowError> {
+    let mut parents = FixedSizeBinaryBuilder::with_capacity(rows.len(), 32);
+    for row in rows {
+        if let Some(root) = &row.parent_genome {
+            parents.append_value(root)?;
+        } else {
+            parents.append_null();
+        }
+    }
     RecordBatch::try_new(
         lineage_schema(),
         vec![
@@ -181,7 +222,73 @@ pub fn lineage_batch(rows: &[LineageRow]) -> Result<RecordBatch, ArrowError> {
             arc(StringArray::from_iter_values(rows.iter().map(|r| r.slug.as_str()))),
             arc(StringArray::from_iter_values(rows.iter().map(|r| r.unit.as_str()))),
             arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.generation))),
-            arc(UInt64Array::from_iter_values(rows.iter().map(|r| r.first_seen_tick))),
+            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.entity))),
+            arc(UInt32Array::from_iter(rows.iter().map(|r| r.parent))),
+            arc(StringArray::from_iter_values(rows.iter().map(|r| r.origin.as_str()))),
+            arc(UInt64Array::from_iter_values(rows.iter().map(|r| r.born_tick))),
+            if rows.is_empty() {
+                arc(FixedSizeBinaryArray::new_null(32, 0))
+            } else {
+                roots(rows.iter().map(|r| &r.genome))?
+            },
+            arc(parents.finish()),
+            arc(UInt64Array::from_iter_values(rows.iter().map(|r| r.allocated_q))),
+        ],
+    )
+}
+
+pub fn energy_batch(rows: &[EnergyRow]) -> Result<RecordBatch, ArrowError> {
+    RecordBatch::try_new(
+        energy_schema(),
+        vec![
+            arc(BooleanArray::from_iter(rows.iter().map(|r| Some(r.enabled)))),
+            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.run))),
+            arc(UInt64Array::from_iter_values(rows.iter().map(|r| r.tick))),
+            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.live_bodies))),
+            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.remains))),
+            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.natural_births))),
+            arc(UInt32Array::from_iter_values(rows.iter().map(|r| r.max_generation))),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.received_q).expect("最多u32个实体的u64账本之和可由i128精确表示")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.stored_q).expect("最多u32个实体的u64账本之和可由i128精确表示")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.dissipated_q).expect("最多u32个实体的u64账本之和可由i128精确表示")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.exported_q).expect("最多u32个实体的u64账本之和可由i128精确表示")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.returned_q).expect("最多u32个实体的u64账本之和可由i128精确表示")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.transferred_q).expect("最多u32个实体的u64账本之和可由i128精确表示")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter().map(|r| {
+                    i128::try_from(r.external_received_q).expect("最多u32个实体的u64账本之和可由i128精确表示")
+                }),
+            )
+            .with_precision_and_scale(38, 0)?),
+            if rows.is_empty() {
+                arc(FixedSizeBinaryArray::new_null(32, 0))
+            } else {
+                roots(rows.iter().map(|r| &r.state_root))?
+            },
         ],
     )
 }
@@ -192,6 +299,7 @@ pub fn table_batch(result: &ExperimentResult, table: LabTable) -> Result<RecordB
         LabTable::Runs => runs_batch(&result.runs),
         LabTable::Metrics => metrics_batch(&result.metrics),
         LabTable::Lineage => lineage_batch(&result.lineage),
+        LabTable::Energy => energy_batch(&result.energy),
     }
 }
 
