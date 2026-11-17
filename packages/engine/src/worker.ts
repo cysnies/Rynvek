@@ -141,3 +141,26 @@ export function runEngineWorker(
     frame,
   };
 }
+
+
+/** 先注册消息循环，再异步加载真实 WASM；加载期间的 INIT/观察不会因 await 丢失。 */
+export function bootstrapEngineWorker(
+  scope: WorkerScopeLike,
+  load: () => Promise<WasmEngineWorkerLike>,
+  options: RunEngineWorkerOptions = {},
+): EngineWorkerLoop {
+  let engine: WasmEngineWorkerLike | undefined;
+  const ready = (): WasmEngineWorkerLike => {
+    if (!engine) throw new Error("WASM 尚未初始化，首条消息必须为 ENGINE_INIT");
+    return engine;
+  };
+  return runEngineWorker(scope, {
+    async init(canvas, json) {
+      engine ??= await load();
+      return engine.init(canvas, json);
+    },
+    post: (json) => ready().post(json),
+    frame: (now) => ready().frame(now),
+    phase: () => engine?.phase() ?? "awaiting-init",
+  }, options);
+}

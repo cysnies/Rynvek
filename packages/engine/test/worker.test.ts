@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { describe, expect, it } from "vitest";
-import { type WasmEngineWorkerLike, type WorkerScopeLike, runEngineWorker } from "../src/index.js";
+import { type WasmEngineWorkerLike, type WorkerScopeLike, runEngineWorker, bootstrapEngineWorker } from "../src/index.js";
 import { FakeOffscreen, READY_GPU, ROOT } from "./fakes.js";
 
 /** 模拟 rynvek-wasm 的 EngineWorker：记录调用，初始化可延迟完成 */
@@ -229,4 +229,30 @@ it("初始化未完成的 WASM 即使伪发正确能力也不能发布就绪", a
   expect(scope.raf).toHaveLength(0);
   expect(scope.out).toEqual([[{ type: "ENGINE_ERROR", code: 0x3003,
     message: expect.stringContaining("阵营只读显示能力") }]]);
+});
+
+
+it("真实模块入口先监听再加载WASM，加载期间排队观察而非丢失", async () => {
+  const scope = new FakeScope(); const wasm = new FakeWasmWorker();
+  wasm.readyEvents = [{ ...READY_GPU, arenaFaction: 0 }];
+  let release!: (engine: WasmEngineWorkerLike) => void;
+  const loop = bootstrapEngineWorker(scope, () => new Promise((resolve) => { release = resolve; }));
+  scope.send({ type: "ENGINE_INIT", canvas: new FakeOffscreen(9), width: 4, height: 4,
+    gpuMode: "required", arenaFaction: 0 });
+  scope.send({ type: "ARENA_OBSERVATION", worldId: "0".repeat(32), observation: { faction: 0 } });
+  await flush(); expect(wasm.calls).toEqual([]);
+  release(wasm); await flush(); wasm.finishInit(); await flush();
+  expect(loop.stopped).toBe(false); expect(scope.raf).toHaveLength(1);
+  expect(wasm.calls[0]).toContain("init:"); expect(wasm.calls[1]).toContain('post:{"type":"ARENA_OBSERVATION"');
+});
+
+it("WASM下载/实例化失败显式回报一次，停止队列且不调度空白假成功帧", async () => {
+  const scope = new FakeScope();
+  const loop = bootstrapEngineWorker(scope, async () => { throw new Error("真实WASM加载失败"); });
+  scope.send({ type: "ENGINE_INIT", canvas: new FakeOffscreen(10), width: 4, height: 4,
+    gpuMode: "required", arenaFaction: 0 });
+  scope.send({ type: "ARENA_OBSERVATION" });
+  await flush();
+  expect(loop.stopped).toBe(true); expect(scope.raf).toHaveLength(0);
+  expect(scope.out).toEqual([[{ type: "ENGINE_ERROR", code: 0x3003, message: "Worker 调用失败：真实WASM加载失败" }]]);
 });

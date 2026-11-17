@@ -1,26 +1,30 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/** 真实平台 /arena 的临时 Canvas2D 开发显示层；仿真只在服务器的 ArenaRuntime/Actor。
- * 最终 Dedicated Worker + Rust/wgpu/WebGPU 管线尚待接入，不能把此显示层当作性能验收。
+/** 真实平台 /arena 的显式双显示入口（临时 Canvas2D / 真实 WebGPU Worker）；仿真只在服务器的 ArenaRuntime/Actor。
+ * 可显式选择真实 Dedicated Worker + Rust/wgpu/WebGPU；两条路径都不是浏览器性能验收。
  */
 import { createArenaApp, type ArenaApp } from "@rynvek/arena";
 import { WebSocketTransport, buildingSpec, rawToFloat, type BuildingKind, type ArenaServerMessage } from "@rynvek/client";
 import { fogAt, project, unproject, viewScale, type Viewport } from "./arena-view.js";
+import { mountArenaRenderer } from "./arena-renderer.js";
 import "./browser.css";
 
+const gpuRequested = new URLSearchParams(location.search).get("renderer") === "webgpu";
+
 const mount=document.querySelector<HTMLDivElement>("#app")!;
-mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</span></h1><span id="connection" class="chip">等待开始</span><span class="mode muted">本地 PvE 生存 · 服务器权威 · 非排位</span><button id="start" class="primary">开始本地练习</button></header>
+mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</span></h1><span id="connection" class="chip">等待开始</span><span class="mode muted">本地 PvE 生存 · 服务器权威 · 非排位</span><span id="renderer" class="chip">${gpuRequested?"WebGPU Worker 待连接":"临时 Canvas2D"}</span><button id="start" class="primary">开始本地练习</button></header>
 <main class="layout"><section class="world"><div class="worldbar"><span>SECTOR 42 / <span id="clock">TICK —</span></span><span id="pointer">只读阵营视图</span></div><canvas id="world" tabindex="0" aria-label="Rynvek 战争迷雾地图，左键选择、右键命令"></canvas><div class="metrics"><span class="metric">生物质<b id="biomass">—</b></span><span class="metric">通量<b id="flux">—</b></span><span class="metric">神经胶<b id="neurogel">—</b></span><span class="metric">人口<b id="supply">—</b></span><span class="metric">波次<b id="wave">—</b></span></div></section>
 <aside class="sidebar"><section class="panel"><h2>指挥 / CONTROL</h2><div class="buttons"><button id="select" disabled>全选己方单位</button><button id="home" disabled>主脑居中</button><button id="harvest" disabled>采集 → 点目标</button><button id="move" disabled>移动 → 点目标</button><button disabled title="当前权威协议不提供暂停">暂停未开放</button></div><p id="selection" class="muted">尚未选择</p><p id="intent">开始后，左键点选或拖框；右键移动。黄绿色为营养沼泽，工蜂右键自动采集。</p><p id="outcome" class="outcome"></p></section>
 <section class="panel"><h2>建造 / BUILD</h2><div id="build" class="build"></div><p class="muted">选择建筑后点地图；黄色框仅为落点预览，权限、占地、资源和科技由服务器最终验证。Esc / 右键取消。</p></section>
 <section class="panel"><h2>权威回执 / EVENTS</h2><div id="log" class="log" role="status" aria-live="polite">尚未连接。没有本地随机单位或预演资源。</div><div class="buttons" style="margin-top:12px"><button id="surrender" disabled>结束练习（投降）</button><button id="replay" disabled>下载回放</button></div></section>
 <section class="panel"><h2>操作说明</h2><p>① 开始 → 全选己方单位<br>② 右键附近空地，观察真实位置变化<br>③ 点「采集」再点黄绿地块，观察生物质账本<br>④ 选择「萃取器」放在黄绿地块，或信标放在主脑附近空地；观察资源扣除与施工进度<br>⑤ 在主脑上重复建造会收到实际错误码。</p><p class="muted">滚轮缩放，方向键/WASD 平移，Home 回主脑。黑色未探索、暗色已探索；敌人只来自服务器迷雾裁剪观察。</p></section></aside></main>
-<footer>开发显示层：Canvas2D / 工业像素占位，不是最终 WebGPU。最终方向保留 Rust + wgpu + Dedicated Engine Worker + OffscreenCanvas。<br>此显式回环开发服免输入账号，为每局分配临时能力身份；进程内存储，重启丢失。服务器持续推进，关闭页面不等于暂停。神经生态完整闭环、正式美术和浏览器性能未验收。<a href="/api/v1/meta/source-offer" target="_blank" rel="noopener">源码要约</a></footer>`;
+<footer>${gpuRequested?"当前显示：真实 Rust/wgpu + Dedicated Engine Worker / OffscreenCanvas；GPU不可用会显式报错，不静默切换。选择见侧栏，建造落点请看坐标，选择光圈/落点叠层待补。":"当前显示：临时 Canvas2D / 工业像素占位，不是 WebGPU。"} <a href="${gpuRequested?"/arena":"/arena?renderer=webgpu"}">${gpuRequested?"手动重载为临时 Canvas2D":"显式启用 WebGPU Worker"}</a>；生成WASM与软件GPU通过不等于浏览器验收。<br>此显式回环开发服免输入账号，为每局分配临时能力身份；进程内存储，重启丢失。服务器持续推进，关闭页面不等于暂停。神经生态完整闭环、正式美术和浏览器性能未验收。<a href="/api/v1/meta/source-offer" target="_blank" rel="noopener">源码要约</a></footer>`;
 const el=(id:string):HTMLElement=>document.getElementById(id)!;
 const button=(id:string):HTMLButtonElement=>el(id) as HTMLButtonElement;
-const canvas=el("world") as HTMLCanvasElement;
-const ctx=canvas.getContext("2d")!;
+let canvas=el("world") as HTMLCanvasElement;
+const ctx=gpuRequested?null:canvas.getContext("2d");
+let gpuRenderer:ReturnType<typeof mountArenaRenderer>|null=null;
 let arena:ArenaApp|null=null;
 let socket:WebSocket|null=null;
 let session:{token:string;world_id:string;match_id:string;principal_id:string;faction:number}|null=null;
@@ -69,7 +73,7 @@ async function deadline<T>(pending:Promise<T>,label:string):Promise<T>{
 async function start():Promise<void>{
   starting=true;button("start").disabled=true;el("connection").textContent="创建真实私有 PvE…";
   try{
-    arena?.dispose();socket?.close();initialized=false;logLines=[];lastNotice=null;
+    gpuRenderer?.dispose();gpuRenderer=null;arena?.dispose();socket?.close();initialized=false;logLines=[];lastNotice=null;
     // sessionStorage 仅保留本开发服新分配的临时能力，刷新重连而不是悄悄生成无限对局。
     const saved=sessionStorage.getItem("rynvek.local.practice");
     if(saved)session=JSON.parse(saved) as typeof session;
@@ -101,6 +105,16 @@ async function start():Promise<void>{
     ws.onclose=()=>{if(socket!==ws)return;connected=false;if(!current.client.observation?.outcome){el("connection").textContent="连接关闭 / 点击开始重连";note("连接已关闭；没有把未确认命令标为成功。");}controls();};
     await deadline(current.client.connect(),"身份/席位握手");await deadline(current.client.acquireLease("Sovereign"),"控制租约");
     connected=true;el("connection").textContent="服务器仿真中 / 已获控制租约";note("真实 PvE 已连接，权限租约已确认。初始数据来自服务器。");controls();
+    if(gpuRequested){
+      // 已授权真实连接才挂载；每局/重连换新画布，不能二次移交旧 OffscreenCanvas。
+      const next=canvas.cloneNode(false) as HTMLCanvasElement;canvas.replaceWith(next);canvas=next;drag=null;bindCanvasInput();
+      try{gpuRenderer=mountArenaRenderer(canvas,current.client,{worldId:info.world_id,faction:info.faction,
+        view:view(),dpr:devicePixelRatio||1,
+        createWorker:()=>new Worker(new URL("./engine.worker.ts",import.meta.url),{type:"module",name:"rynvek-arena-engine"}),
+        onStatus:status=>{el("renderer").textContent=status;},
+        onError:error=>note(`显示失败：${error.message}；服务器仿真未暂停，可手动切换临时 Canvas2D。`)});
+      }catch(error){el("renderer").textContent="WebGPU 挂载失败";note(String(error));}
+    }
   }catch(error){connected=false;socket?.close();session=null;sessionStorage.removeItem("rynvek.local.practice");el("connection").textContent="启动失败";note(String(error));}
   finally{starting=false;controls();}
 }
@@ -110,14 +124,21 @@ button("home").onclick=()=>arena?.controller.jumpToNexus();
 for(const [id,order] of [["harvest","Harvest"],["move","Move"]] as const)button(id).onclick=()=>{armed=order;if(arena)arena.ui.buildMode=null;el("intent").textContent=`${order==="Move"?"移动":"采集"}：左键点击目标地块`;};
 button("surrender").onclick=()=>{void arena?.controller.send({type:"surrender"}).then(()=>display());};
 button("replay").onclick=()=>{void(async()=>{try{if(!session)return;const r=await fetch(`/api/v1/matches/${session.match_id}/replay`,{headers:{Authorization:`Bearer ${session.token}`}});if(!r.ok)throw new Error(`回放归档尚未就绪或请求拒绝：${r.status}`);const url=URL.createObjectURL(await r.blob());const a=document.createElement("a");a.href=url;a.download=`${session.match_id}.rreplay`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);note("已下载真实服务器签名回放；此界面未实现回放播放器。");}catch(e){note(String(e));}})();};
+function bindCanvasInput():void{
 canvas.oncontextmenu=e=>{e.preventDefault();if(!connected)return;const [x,y]=worldPoint(e);armed=null;arena?.router.handlePointer({kind:"click",button:"right",x,y});display();};
 canvas.onpointerdown=e=>{canvas.focus();if(e.button!==0||!connected)return;const r=canvas.getBoundingClientRect();drag={x:e.clientX-r.left,y:e.clientY-r.top,world:worldPoint(e)};canvas.setPointerCapture(e.pointerId);};
 canvas.onpointermove=e=>{pointer=worldPoint(e);el("pointer").textContent=`Tile ${Math.floor(pointer[0])}, ${Math.floor(pointer[1])}${arena?.client.observation?` / 视野 ${fogAt(arena.client.observation,...pointer)}`:""}`;};
 canvas.onpointerup=e=>{if(!drag||!arena)return;const start=drag;drag=null;const point=worldPoint(e);if(armed){void arena.controller.order(armed,point)?.then(()=>display());armed=null;}else if(Math.hypot(point[0]-start.world[0],point[1]-start.world[1])>.5&&!arena.ui.buildMode)arena.router.handlePointer({kind:"drag",button:"left",x:start.world[0],y:start.world[1],x2:point[0],y2:point[1]});else arena.router.handlePointer({kind:"click",button:"left",x:point[0],y:point[1],shift:e.shiftKey});display();};
 canvas.onwheel=e=>{e.preventDefault();if(arena)arena.ui.camera.zoom=Math.min(4,Math.max(.35,arena.ui.camera.zoom*(e.deltaY>0?.85:1.15)));};
 canvas.onkeydown=e=>{if(!arena)return;if(e.key==="Home"){arena.controller.jumpToNexus();e.preventDefault();return;}if(e.key==="Escape")armed=null;if(arena.router.handleKey({key:e.key,ctrlKey:e.ctrlKey,altKey:e.altKey,metaKey:e.metaKey,shiftKey:e.shiftKey}))e.preventDefault();display();};
+}
+bindCanvasInput();
+if(!gpuRequested&&!ctx){el("renderer").textContent="Canvas2D 不可用";note("无法取得 Canvas2D 上下文，没有生成替代世界。");}
+window.addEventListener("pagehide",()=>{gpuRenderer?.dispose();arena?.dispose();socket?.close();});
 const terrainColors=["#27362b","#3b4547","#536c32","#6e3b28","#171d1b"];
 function draw():void{
+  if(gpuRequested){gpuRenderer?.sync(view(),devicePixelRatio||1);requestAnimationFrame(draw);return;}
+  if(!ctx)return;
   const dpr=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
   if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
   ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle="#070908";ctx.fillRect(0,0,w,h);
