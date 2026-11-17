@@ -1,23 +1,25 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 /** 私有包工作台：不执行上传源码，不收集签名私钥，不携带凭据到下载URL或离开当前origin。 */
+import { mountAgentRunPanel } from "./agent-run-panel.js";
 import { PrivateAgentRunner, type AgentArenaPort, type PrivateAgentHubClient, type PrivateAgentVersion, type SignedAgentUpload } from "@rynvek/agent-sdk";
 export interface PrivateAgentContext {worldId:string;principalId:string;arena:AgentArenaPort;hub:PrivateAgentHubClient}
 export function mountPrivateAgentPanel(root:HTMLElement,context:()=>PrivateAgentContext|null):{update():void;reset():void} {
  root.innerHTML=`<h2>私有 Agent 包 / 真实工具委托</h2><p class="muted">仅本人已连接的 Private 单人 PvE。包在服务器无I/O QuickJS执行，真实fog输入；每次只生成一个候选，再通过本人现有控制租约走 ToolBroker。不是独立注册AI、不是人类排位代打，未取得控制不会自动开局。Trust 3 / 64步扫描不等于社区Trust 2认证。</p>
  <div class="buttons"><button data-action="refresh">发现我的私有包</button><label>SDK生成的签名上传JSON（不含私钥）<input data-file type="file" accept="application/json,.json"></label><button data-action="publish">扫描并私有发布</button></div>
  <div class="buttons"><label>精确版本 <select data-pack aria-label="私有Agent精确版本"></select></label><button data-action="download">下载并验摘要/签名</button><button data-action="revoke">撤销此版本</button><button data-action="step" class="primary">委托执行一步真实工具</button><button data-action="stop">停止委托 / 清空记忆</button></div>
- <p class="muted">发布用 @rynvek/agent-sdk 的 signPrivateAgentPackage 外部签名回调生成文件；输入不应含令牌/私钥。禁止公共Hub发行。下载验签公钥来自认证服务元数据，非外部信任链。停止不能撤回已发送工具；未知回执不自动重试。</p><pre data-status aria-live="polite">先连接本人已有世界；本地练习/观战/回放/排位不可用。</pre>`;
+ <p class="muted">发布用 @rynvek/agent-sdk 的 signPrivateAgentPackage 外部签名回调生成文件；输入不应含令牌/私钥。禁止公共Hub发行。下载验签公钥来自认证服务元数据，非外部信任链。停止不能撤回已发送工具；未知回执不自动重试。</p><pre data-status aria-live="polite">先连接本人已有世界；本地练习/观战/回放/排位不可用。</pre><section data-agent-runs></section>`;
  const status=root.querySelector<HTMLElement>("[data-status]")!;const select=root.querySelector<HTMLSelectElement>("[data-pack]")!;const file=root.querySelector<HTMLInputElement>("[data-file]")!;
  const buttons=Array.from(root.querySelectorAll<HTMLButtonElement>("[data-action]"));
  let current:PrivateAgentContext|null=null,rows:PrivateAgentVersion[]=[],runner:PrivateAgentRunner|null=null,busy=false,epoch=0,pending:AbortController|null=null;
  const selected=()=>rows.find(m=>`${m.package_id}@${m.version}`===select.value);
+ const execution=mountAgentRunPanel(root.querySelector<HTMLElement>("[data-agent-runs]")!,()=>current,selected);
  function controls():void {const m=selected();for(const b of buttons){const a=b.dataset["action"];b.disabled=a==="stop"?!runner:!current||busy||(a==="publish"?!file.files?.length:a==="refresh"?false:!m||m.revoked||(a==="step"&&m.profile.role!=="agent"));}select.disabled=!current||busy||!rows.length;file.disabled=!current||busy;}
  function stop():void{runner?.stop();runner=null;}
- function reset():void{epoch++;pending?.abort();pending=null;stop();busy=false;current=null;rows=[];select.replaceChildren();file.value="";status.textContent="先连接本人已有世界；本地练习/观战/回放/排位不可用。";controls();}
- function update():void {const next=context();if(!next){if(current||busy||rows.length)reset();return;}if(!current||current.arena!==next.arena||current.hub!==next.hub||current.worldId!==next.worldId||current.principalId!==next.principalId){reset();current=next;status.textContent=`已连接本人 ${next.principalId} 的真实世界；点击发现我的私有包。未加载/未运行程序。`;}controls();}
- function render():void {const old=select.value;select.replaceChildren();for(const m of rows){const o=document.createElement("option");o.value=`${m.package_id}@${m.version}`;o.textContent=`${m.package_id}@${m.version} · ${m.profile.role} · ${m.revoked?"已撤销":"Private / Trust3"}`;select.append(o);}if(rows.some(m=>`${m.package_id}@${m.version}`===old))select.value=old;controls();}
- select.onchange=()=>{stop();const m=selected();status.textContent=m?`${m.package_id}@${m.version}\nBLAKE3 ${m.artifact_cid}\n仅选择，不代表已执行。`:"没有私有版本";controls();};file.onchange=controls;
+ function reset():void{execution.reset();epoch++;pending?.abort();pending=null;stop();busy=false;current=null;rows=[];select.replaceChildren();file.value="";status.textContent="先连接本人已有世界；本地练习/观战/回放/排位不可用。";controls();}
+ function update():void {const next=context();if(!next){if(current||busy||rows.length)reset();return;}if(!current||current.arena!==next.arena||current.hub!==next.hub||current.worldId!==next.worldId||current.principalId!==next.principalId){reset();current=next;status.textContent=`已连接本人 ${next.principalId} 的真实世界；点击发现我的私有包。未加载/未运行程序。`;}execution.update();controls();}
+ function render():void {const old=select.value;select.replaceChildren();for(const m of rows){const o=document.createElement("option");o.value=`${m.package_id}@${m.version}`;o.textContent=`${m.package_id}@${m.version} · ${m.profile.role} · ${m.revoked?"已撤销":"Private / Trust3"}`;select.append(o);}if(rows.some(m=>`${m.package_id}@${m.version}`===old))select.value=old;execution.update();controls();}
+ select.onchange=()=>{stop();const m=selected();status.textContent=m?`${m.package_id}@${m.version}\nBLAKE3 ${m.artifact_cid}\n仅选择，不代表已执行。`:"没有私有版本";execution.update();controls();};file.onchange=controls;
  for(const b of buttons)b.onclick=()=>{const action=b.dataset["action"]!;if(action==="stop"){epoch++;pending?.abort();pending=null;stop();busy=false;status.textContent="已停止委托并清空本地记忆；已发送的工具不可撤回，未知回执不自动重试。";controls();return;}
    update();const c=current;if(!c||busy)return;const own=epoch;busy=true;const abort=new AbortController();pending=abort;controls();const timer=setTimeout(()=>abort.abort(),10000);
    void (async()=>{try{

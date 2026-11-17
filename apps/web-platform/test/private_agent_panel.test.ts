@@ -15,3 +15,18 @@ it("工作台真实调用SDK发现与受控工具，不执行上传源码；stop
 it("身份断开后清空包清单并丢弃迟到发现，不向下一身份恢复私有信息",async()=>{
  let resolve!:(r:Response)=>void;const fetcher=vi.fn(()=>new Promise<Response>(r=>{resolve=r;}));const s=setup(fetcher);let ctx:PrivateAgentContext|null={worldId:world,principalId:"42",arena:s.arena,hub:s.hub};const panel=mountPrivateAgentPanel(s.root,()=>ctx);panel.update();s.button("refresh").click();ctx=null;panel.update();resolve(Response.json({visibility:"Private",packages:[meta]}));await new Promise(r=>setTimeout(r,10));expect(s.root.querySelectorAll("option")).toHaveLength(0);expect(s.root.textContent).not.toContain("owner.agent");expect(s.button("refresh").disabled).toBe(true);expect(s.arena.callTool).not.toHaveBeenCalled();s.hub.destroy();
 });
+
+it("原面板真实持久运行入口要求明确授权，创建/发现/取消读服务端记录并在断开清空",async()=>{
+ let row={run_id:"b0000000-0000-4000-8000-000000000002",owner_id:"42",world_id:world,package_id:meta.package_id,version:meta.version,artifact_cid:meta.artifact_cid,status:"ready",revision:0,tools:meta.profile.tools,budget:{turns:4,tool_calls:4,wall_seconds:120},turns_used:0,calls_used:0,lease:null,last_result:null,pending:null,events:[] as unknown[]};
+ const fetcher=vi.fn(async(url:unknown,init?:RequestInit)=>{const p=new URL(String(url)).pathname;
+  if(p.includes("private-hub"))return Response.json({visibility:"Private",packages:[meta]});
+  expect(init?.credentials).toBe("omit");expect(init?.redirect).toBe("error");
+  if(init?.method==="POST"&&p.endsWith("agent-runs")){const body=JSON.parse(String(init.body));expect(body.consent).toBe("private-pve-tools/1");expect(body.tools).toEqual(meta.profile.tools);expect(body.control_fence).toBe("7");return Response.json(row);}
+  if(p.endsWith("/control")){const body=JSON.parse(String(init?.body));expect(body.action).toBe("cancel");row={...row,status:"cancelled",revision:1,events:[{seq:0,kind:"lifecycle",data:{action:"cancel"}}]};return Response.json(row);}
+  return Response.json(p.endsWith("agent-runs")?{runs:[row]}:row);
+ });const s=setup(fetcher as typeof fetch);let ctx:PrivateAgentContext|null={worldId:world,principalId:"42",arena:s.arena,hub:s.hub};const panel=mountPrivateAgentPanel(s.root,()=>ctx);panel.update();s.button("refresh").click();await vi.waitFor(()=>expect(s.root.querySelectorAll("[data-pack] option")).toHaveLength(1));
+ const button=(action:string)=>s.root.querySelector<HTMLButtonElement>(`[data-run="${action}"]`)!;
+ expect(button("create").disabled).toBe(true);const consent=s.root.querySelector<HTMLInputElement>("[data-consent]")!;consent.click();expect(button("create").disabled).toBe(false);button("create").click();await vi.waitFor(()=>expect(s.root.querySelector("[data-run-status]")?.textContent).toContain(row.run_id));
+ button("list").click();await vi.waitFor(()=>expect(button("cancel").disabled).toBe(false));button("cancel").click();await vi.waitFor(()=>expect(s.root.querySelector("[data-run-status]")?.textContent).toContain("cancelled"));
+ ctx=null;panel.update();expect(s.root.querySelectorAll("option")).toHaveLength(0);expect(s.root.textContent).not.toContain(meta.package_id);expect(s.root.textContent).not.toContain(row.run_id);expect(s.arena.callTool).not.toHaveBeenCalled();s.hub.destroy();
+});
