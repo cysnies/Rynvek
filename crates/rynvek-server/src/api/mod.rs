@@ -12,6 +12,7 @@ pub mod matches;
 pub mod meta;
 pub mod multiplayer;
 pub mod observers;
+pub mod studio_collaboration;
 pub mod private_agents;
 pub mod private_audio;
 pub mod user;
@@ -80,6 +81,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/worlds/{world_id}/fork", post(worlds::fork))
         .route("/api/v1/worlds/{world_id}/patches", post(worlds::patches))
         .route("/api/v1/worlds/{world_id}/authoring", get(worlds::authoring))
+        .route("/api/v1/worlds/{world_id}/authoring/editors", get(studio_collaboration::list).post(studio_collaboration::change))
+        .route("/api/v1/worlds/{world_id}/authoring/changes",get(studio_collaboration::changes))
         .route(
             "/api/v1/worlds/{world_id}/multiplayer",
             get(multiplayer::get).post(multiplayer::change),

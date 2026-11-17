@@ -412,8 +412,7 @@ pub async fn patches(
     Path(id): Path<String>,
     body: Bytes,
 ) -> ApiResult<Response> {
-    let subject = app.require(&headers, CapabilityScope::WorldEdit).await?;
-    let world = load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
+    let (subject,world,permit)=super::studio_collaboration::admission(&app,&headers,&id,true).await?;
     if body.len() > MAX_PATCH_BYTES {
         return Err(ApiError::bad_request("WorldPatch 超过 1 MiB"));
     }
@@ -427,8 +426,10 @@ pub async fn patches(
     let required = crate::patch::validate(&patch)?;
     let active = app.registry().by_world(&world.world_id);
     if let Some(host) = active {
-        let applied = host.apply_patch(patch.clone()).await?;
-        return Ok((
+        let applied = host.apply_patch_as(patch.clone(),Some(permit.clone())).await?;
+        app.store().check_editor(world.world_id,permit.clone()).await?;
+        app.audit(Some(subject.principal_id),"world.patch",format!("world:{}",world.world_id),serde_json::json!({"revision":applied.revision,"patch_id":crate::ids::hex(&patch.patch_id),"studio_grant":permit.grant_id.map(|g|g.to_string())})).await;
+        return Ok(super::studio_collaboration::private((
             StatusCode::OK,
             Json(serde_json::json!({
                 "status": "applied", "state_root": crate::ids::hex(&applied.state_root),
@@ -437,7 +438,7 @@ pub async fn patches(
                 "scheduled_for": "applied_tick_boundary", "effective_tick": applied.effective_tick, "forked_from": null,
             })),
         )
-            .into_response());
+            .into_response()));
     }
     if world.lease_holder_node.is_some() {
         return Err(ApiError::new(
@@ -475,7 +476,7 @@ pub async fn patches(
     let revision = checkpoint.revision;
     // 持久化事务是唯一发布点；并发失败只留下不可达 CAS 对象，不更新任何运行中内存副本。
     app.store()
-        .append_commit(
+        .append_commit_checked(
             CommitRow {
                 world_id: world.world_id,
                 world_revision: revision,
@@ -485,7 +486,7 @@ pub async fn patches(
                 journal_segment_cid: cid.0,
                 snapshot_cid: Some(snapshot.0),
             },
-            world.fencing_token,
+            world.fencing_token,vec![permit],
         )
         .await?;
     app.audit(
@@ -500,7 +501,7 @@ pub async fn patches(
         }),
     )
     .await;
-    Ok((
+    Ok(super::studio_collaboration::private((
         StatusCode::OK,
         Json(serde_json::json!({
             "status": "applied",
@@ -515,7 +516,7 @@ pub async fn patches(
             "forked_from": null,
         })),
     )
-        .into_response())
+        .into_response()))
 }
 
 /// `09 WS /api/v1/worlds/{world_id}/stream`（`world.connect`，令牌在首帧 ClientHello 中校验）
@@ -565,8 +566,7 @@ pub fn axum_link(socket: WebSocket) -> Link {
 pub async fn authoring(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
     use base64::Engine as _;
     use std::collections::BTreeMap;
-    let subject = app.require(&headers, CapabilityScope::WorldEdit).await?;
-    let row = load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
+    let (_,row,permit)=super::studio_collaboration::admission(&app,&headers,&id,false).await?;
     let runtime = restore_runtime(&app, &row).await?;
     let world = runtime.world();
     // 通用补丁面向共享种子目录；不同阵营私有定向繁育目录不伪装成同一可撤销基线。
@@ -610,11 +610,13 @@ pub async fn authoring(State(app): State<AppState>, headers: HeaderMap, Path(id)
             )
         })
         .collect();
-    let mut response=Json(serde_json::json!({"world_id":row.world_id.to_string(),"revision":runtime.revision(),"tick":world.tick,"state_root":hex(&runtime.state_root()),"rule_fault":world.authoring.rule_fault,"parameter_state":world.parameter_state,"baseline":{"width":world.map.width,"height":world.map.height,"terrain":world.map.tiles.iter().map(|t|*t as u8).collect::<Vec<_>>(),"params":params,"genomes":genomes,"rules":rules,"templates":templates}})).into_response();
+    let mut response=Json(serde_json::json!({"world_id":row.world_id.to_string(),"revision":runtime.revision(),"tick":world.tick,"state_root":hex(&runtime.state_root()),"rule_fault":world.authoring.rule_fault,"parameter_state":world.parameter_state,"collaboration":super::studio_collaboration::access(&row,&permit),"baseline":{"width":world.map.width,"height":world.map.height,"terrain":world.map.tiles.iter().map(|t|*t as u8).collect::<Vec<_>>(),"params":params,"genomes":genomes,"rules":rules,"templates":templates}})).into_response();
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("private, no-store"),
     );
+    app.store().check_editor(row.world_id,permit).await?;
+    response.headers_mut().insert(axum::http::header::VARY,axum::http::HeaderValue::from_static("Authorization, X-Rynvek-Studio-Grant"));
     Ok(response)
 }
 #[derive(Debug, Deserialize)]
@@ -628,8 +630,7 @@ pub async fn compile_authoring_rule(
     Path(id): Path<String>,
     Json(body): Json<CompileActionRule>,
 ) -> ApiResult<Response> {
-    let subject = app.require(&headers, CapabilityScope::WorldEdit).await?;
-    load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
+    let (_,row,permit)=super::studio_collaboration::admission(&app,&headers,&id,true).await?;
     let module = rynvek_rts::world::authoring::compile_authored_rule_detailed(&body.rule_graph_json)
         .map_err(|e| ApiError::new(e.code, e.message))?;
     let hash = rynvek_core::Blake3Hash::of(&rynvek_rules::encode_rir(&module));
@@ -638,5 +639,7 @@ pub async fn compile_authoring_rule(
         axum::http::header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("private, no-store"),
     );
+    app.store().check_editor(row.world_id,permit).await?;
+    response.headers_mut().insert(axum::http::header::VARY,axum::http::HeaderValue::from_static("Authorization, X-Rynvek-Studio-Grant"));
     Ok(response)
 }
