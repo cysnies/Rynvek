@@ -72,6 +72,7 @@ struct UnitSnapshotDto {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct CompChunkDto {
+    pub parameter_state: super::parameter_rules::ParameterState,
     pub buildings: Vec<Building>,
     pub units: Vec<UnitSnapshotDto>,
 }
@@ -158,6 +159,7 @@ impl ArenaWorld {
         parent_state_root: [u8; 32],
     ) -> Result<(Vec<u8>, SnapshotWriteOutput), RynvekErrorCode> {
         self.authoring.validate()?;
+        self.parameter_state.validate(&self.authoring)?;
         if self.authoring.last_edit_revision > world_revision {
             return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
@@ -165,20 +167,21 @@ impl ArenaWorld {
             return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
         let mut reg = EntityRegistry::new(u16::from_le_bytes([world_id[0], world_id[1]]).into());
-        for _ in 0..(self.buildings.len() + self.units.len()) {
+        for _ in 0..(self.buildings.len() + self.units.len() + self.parameter_state.entities.len()) {
             reg.spawn(1)?;
         }
         let neur = self.to_neur_chunk();
         let canonical = self.canonical_state_with_parent(Blake3Hash(parent_state_root));
 
         let conf = ConfChunkDto {
-            arena_format: "rynvek-arena/9".into(),
+            arena_format: "rynvek-arena/10".into(),
             authoring: self.authoring.clone(),
             config: self.config.clone(),
             map_width: self.map.width,
             map_height: self.map.height,
         };
         let comp = CompChunkDto {
+            parameter_state: self.parameter_state.clone(),
             buildings: self.buildings.values().cloned().collect(),
             units: self
                 .units
@@ -330,7 +333,7 @@ impl ArenaWorld {
             read.find_chunk(CONF_TAG)
                 .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
-        if conf.arena_format != "rynvek-arena/9" {
+        if conf.arena_format != "rynvek-arena/10" {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
         let comp: CompChunkDto = from_chunk(
@@ -447,11 +450,13 @@ impl ArenaWorld {
 
         let ecology = read.find_chunk(super::ecology::ECOL_TAG).map(from_chunk).transpose()?;
         conf.authoring.validate()?;
+        comp.parameter_state.validate(&conf.authoring)?;
         if conf.authoring.last_edit_revision > read.header.world_revision {
             return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
         let mut world = Self {
             authoring: conf.authoring,
+            parameter_state: comp.parameter_state,
             ecology,
             config: conf.config,
             map,

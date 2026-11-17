@@ -17,6 +17,7 @@
 //! 所有集合以 `BTreeMap<EntitySerial, _>` 保存并按序号遍历；随机性只来自 Philox。
 
 pub mod authoring;
+pub mod parameter_rules;
 mod combat_sys;
 pub mod ecology;
 mod economy;
@@ -445,6 +446,7 @@ impl CanonicalWorldState {
 pub struct ArenaWorld {
     pub config: MatchConfig,
     pub authoring: authoring::AuthoringState,
+    pub parameter_state: parameter_rules::ParameterState,
     pub map: ArenaMap,
     pub nav: NavGrid,
     pub hpa: HpaGraph,
@@ -503,6 +505,7 @@ impl ArenaWorld {
             pve: (config.mode == MatchMode::PveSurvival).then(|| PveDirector::new(config.world_seed)),
             config,
             authoring: Default::default(),
+            parameter_state: Default::default(),
             nav,
             hpa,
             fields,
@@ -1294,7 +1297,7 @@ impl ArenaWorld {
         let config_root = {
             let mut h = Hasher::new();
             // 当前格式绑定整个配置，删除历史模式共用标签与二次身份来源。
-            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_9");
+            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_10");
             h.update(&serde_json::to_vec(&self.config).expect("配置仅含确定性枚举和整数"));
             h.update(&serde_json::to_vec(&self.authoring).expect("有序创作规则"));
             h.update(&self.map.width.to_le_bytes());
@@ -1308,6 +1311,7 @@ impl ArenaWorld {
         let entity_root = {
             let mut h = Hasher::new();
             h.update(b"RYNVEK_SUBROOT_ENTITY");
+            h.update(&serde_json::to_vec(&self.parameter_state).expect("确定性参数实体COMP状态"));
             h.update(&(self.buildings.len() as u32).to_le_bytes());
             for b in self.buildings.values() {
                 h.update(&b.id.0.to_le_bytes());

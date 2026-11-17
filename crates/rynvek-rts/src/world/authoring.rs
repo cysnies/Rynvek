@@ -31,6 +31,9 @@ pub struct AuthoringState {
     /// 最近创作提交的权威修订；普通Tick不使安全边界排队的编辑自行过期。
     pub last_edit_revision: u64,
     pub rules: BTreeMap<String, AuthoredRule>,
+    pub parameter_templates: BTreeMap<String, super::parameter_rules::ParameterTemplate>,
+    pub parameter_instances: BTreeMap<String, super::parameter_rules::ParameterInstance>,
+    pub rule_bindings: BTreeMap<String, super::parameter_rules::RuleBinding>,
     /// 拒绝整个动作写集合，保留原脑动作；错误事实入根和快照，工作台可见。
     pub rule_fault: Option<(String, u16)>,
 }
@@ -45,6 +48,16 @@ pub fn compile_action_rule(source: &str) -> Result<RuleModule, RynvekErrorCode> 
     compile_action_rule_detailed(source).map_err(|e| e.code)
 }
 pub fn compile_action_rule_detailed(source: &str) -> rynvek_rules::error::RuleResult<RuleModule> {
+    let module = compile_authored_rule_detailed(source)?;
+    if super::parameter_rules::parameter_module(&module) {
+        return Err(rynvek_rules::error::RuleError::new(
+            RynvekErrorCode::PluginCapabilityDenied,
+            "此调用只接受原动作profile",
+        ));
+    }
+    Ok(module)
+}
+pub fn compile_authored_rule_detailed(source: &str) -> rynvek_rules::error::RuleResult<RuleModule> {
     if source.len() > 256 * 1024 {
         return Err(rynvek_rules::error::RuleError::new(
             RynvekErrorCode::DimensionMismatch,
@@ -54,13 +67,20 @@ pub fn compile_action_rule_detailed(source: &str) -> rynvek_rules::error::RuleRe
     let module = compile_rule_graph_json(
         source,
         &CompileOptions {
-            allowed_write_prefixes: Some(vec!["unit.actions.".into()]),
+            allowed_write_prefixes: Some(vec!["unit.actions.".into(), "state.".into()]),
         },
     )?;
-    if module
+    let action = module
         .components
         .iter()
-        .any(|c| c.ty != ValueType::Q8_8 || !ACTION_COMPONENTS.contains(&c.name.as_str()))
+        .all(|c| c.ty == ValueType::Q8_8 && ACTION_COMPONENTS.contains(&c.name.as_str()));
+    let parameter = super::parameter_rules::parameter_module(&module)
+        && module.components.len() <= 16
+        && module
+            .components
+            .iter()
+            .all(|c| matches!(c.ty, ValueType::I32 | ValueType::Q8_8 | ValueType::Bool));
+    if !(action || parameter)
         || module.field_write_mask != 0
         || module.instrs.iter().any(|i| {
             matches!(
@@ -71,13 +91,13 @@ pub fn compile_action_rule_detailed(source: &str) -> rynvek_rules::error::RuleRe
     {
         return Err(rynvek_rules::error::RuleError::new(
             RynvekErrorCode::PluginCapabilityDenied,
-            "只绑定六个Q8.8动作分量；不开放HP/能量/场/邻居写入",
+            "仅原六动作或模板state/param profile；不混用/不开放HP/能量/场/邻居",
         ));
     }
     Ok(module)
 }
 pub fn checked_rule(source: &str, expected: [u8; 32]) -> Result<AuthoredRule, RynvekErrorCode> {
-    let module = compile_action_rule(source)?;
+    let module = compile_authored_rule_detailed(source).map_err(|e| e.code)?;
     if Blake3Hash::of(&encode_rir(&module)).0 != expected {
         return Err(RynvekErrorCode::Blake3ChecksumMismatch);
     }
@@ -89,6 +109,7 @@ pub fn checked_rule(source: &str, expected: [u8; 32]) -> Result<AuthoredRule, Ry
 }
 impl AuthoringState {
     pub fn validate(&self) -> Result<(), RynvekErrorCode> {
+        self.validate_parameter_registry()?;
         if self.rules.len() > 32 {
             return Err(RynvekErrorCode::DimensionMismatch);
         }
@@ -112,6 +133,7 @@ impl AuthoringState {
 }
 impl ArenaWorld {
     pub(super) fn step_authored_rules(&mut self) {
+        self.step_parameter_rules();
         if self.authoring.rules.is_empty() {
             return;
         }
@@ -120,6 +142,9 @@ impl ArenaWorld {
         for (id, rule) in &self.authoring.rules {
             let result = (|| {
                 let module = rynvek_rules::decode_rir(&rule.rir).map_err(|e| e.code)?;
+                if super::parameter_rules::parameter_module(&module) {
+                    return Ok(());
+                }
                 let state = RuleWorldState {
                     tick: self.tick,
                     world_seed: self.config.world_seed,

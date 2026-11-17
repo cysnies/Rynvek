@@ -6,7 +6,7 @@
 //! 线上 JSON 表示与 `@rynvek/studio` 的 `patch.ts` 严格逐字节对齐：
 //! - `LiveEditSafetyClass`：Class 0 (`HotSafePresentation`) / Class 1 (`TickBoundarySafe`) / Class 2 (`EpochBoundarySafe`) / Class 3 (`RequiresForkRestart`)；
 //! - `WorldPatchOp`：定义 `SetWorldParam`、`PaintTerrainRect`、`UpsertSeedGenome`、`UpdateRuleModule` 与 `RemoveEntityTemplate`；
-//! - `WorldPatch::apply_to_arena`：支持地形和明确列出的资源发放；其余操作在接通前显式拒绝，整包先校验后应用。
+//! - `WorldPatch::apply_to_arena`：地形/生态/基因、原动作与一般参数实体Rules registry，整包预检后边界应用。
 
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_rts::nav::Rect;
@@ -80,7 +80,14 @@ impl WorldPatchOp {
                     _ => LiveEditSafetyClass::RequiresForkRestart,
                 }
             }
-            Self::PaintTerrainRect { .. } | Self::RemoveEntityTemplate { .. } => LiveEditSafetyClass::TickBoundarySafe,
+            Self::PaintTerrainRect { .. } => LiveEditSafetyClass::TickBoundarySafe,
+            Self::RemoveEntityTemplate { template_id } => {
+                if template_id.starts_with("parameter/") {
+                    LiveEditSafetyClass::EpochBoundarySafe
+                } else {
+                    LiveEditSafetyClass::TickBoundarySafe
+                }
+            }
             Self::UpsertSeedGenome { .. } | Self::UpdateRuleModule { .. } | Self::RemoveRuleModule { .. } => {
                 LiveEditSafetyClass::EpochBoundarySafe
             }
@@ -183,10 +190,14 @@ impl WorldPatch {
             Rule(String, AuthoredRule),
             RemoveRule(String),
             Remove(String),
+            Registry,
+            RemoveParameterTemplate,
         }
         let invalid = RynvekErrorCode::InvalidFileMagicOrVersion;
         let mut plan = Vec::new();
         let mut config = world.config.clone();
+        let mut authored = world.authoring.clone();
+        let mut parameter_state = world.parameter_state.clone();
         let mut catalogue: std::collections::BTreeSet<_> =
             world.factions.iter().flat_map(|f| f.genomes.keys().cloned()).collect();
         let ambiguous: std::collections::BTreeSet<_> = catalogue
@@ -235,7 +246,18 @@ impl WorldPatch {
                     key_path,
                     new_value_json,
                 } => {
-                    if key_path == "economy.grant_biomass_milli" {
+                    if key_path.starts_with("rules.templates.")
+                        || key_path.starts_with("rules.instances.")
+                        || key_path.starts_with("rules.bindings.")
+                    {
+                        rynvek_rts::world::parameter_rules::apply_registry_param(
+                            &mut authored,
+                            &mut parameter_state,
+                            key_path,
+                            new_value_json,
+                        )?;
+                        Prepared::Registry
+                    } else if key_path == "economy.grant_biomass_milli" {
                         let amount: i64 = serde_json::from_str(new_value_json).map_err(|_| invalid)?;
                         if amount <= 0 {
                             return Err(RynvekErrorCode::DimensionMismatch);
@@ -299,7 +321,10 @@ impl WorldPatch {
                     if rule_ids.len() > 32 {
                         return Err(RynvekErrorCode::DimensionMismatch);
                     }
-                    Prepared::Rule(module_id.clone(), checked_rule(rule_graph_json, *compiled_rir_blake3)?)
+                    let rule = checked_rule(rule_graph_json, *compiled_rir_blake3)?;
+                    authored.rules.insert(module_id.clone(), rule.clone());
+                    authored.rule_fault = None;
+                    Prepared::Rule(module_id.clone(), rule)
                 }
                 WorldPatchOp::RemoveRuleModule { module_id } => {
                     if !rynvek_rts::world::authoring::valid_authoring_key(module_id) {
@@ -308,7 +333,24 @@ impl WorldPatch {
                     if !rule_ids.remove(module_id) {
                         return Err(RynvekErrorCode::EntityNotFoundOrTombstoned);
                     }
+                    authored.rules.remove(module_id);
+                    if authored.rule_fault.as_ref().is_some_and(|(id, _)| id == module_id) {
+                        authored.rule_fault = None;
+                    }
                     Prepared::RemoveRule(module_id.clone())
+                }
+                WorldPatchOp::RemoveEntityTemplate { template_id } if template_id.starts_with("parameter/") => {
+                    let id = &template_id[10..];
+                    if !authored.parameter_templates.contains_key(id) {
+                        return Err(RynvekErrorCode::EntityNotFoundOrTombstoned);
+                    }
+                    rynvek_rts::world::parameter_rules::apply_registry_param(
+                        &mut authored,
+                        &mut parameter_state,
+                        &format!("rules.templates.{id}"),
+                        "null",
+                    )?;
+                    Prepared::RemoveParameterTemplate
                 }
                 WorldPatchOp::RemoveEntityTemplate { template_id } => {
                     let slug = template_id
@@ -324,8 +366,35 @@ impl WorldPatch {
                 }
             });
         }
+        // Validate projected definitions/references and dynamic-state shape before any terrain/resource mutation.
+        authored.validate()?;
+        for (id, old) in &world.authoring.parameter_templates {
+            if let Some(next) = authored.parameter_templates.get(id) {
+                let shape = |t: &rynvek_rts::world::parameter_rules::ParameterTemplate| {
+                    t.components
+                        .iter()
+                        .map(|(n, c)| (n.clone(), c.ty))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                };
+                if shape(old) != shape(next)
+                    && authored
+                        .parameter_instances
+                        .iter()
+                        .any(|(instance, i)| i.template_id == *id && parameter_state.entities.contains_key(instance))
+                {
+                    return Err(RynvekErrorCode::StructuralMutationConflict);
+                }
+            }
+        }
+        parameter_state.reconcile(&authored)?;
         for op in &plan {
             match op {
+                Prepared::RemoveParameterTemplate => {
+                    report.templates_removed += 1;
+                }
+                Prepared::Registry => {
+                    report.params_updated += 1;
+                }
                 Prepared::Paint {
                     x0,
                     y0,
@@ -403,7 +472,12 @@ impl WorldPatch {
                 }
                 Prepared::RemoveRule(id) => {
                     world.authoring.rules.remove(id);
-                    if world.authoring.rule_fault.as_ref().is_some_and(|(fault, _)| fault == id) {
+                    if world
+                        .authoring
+                        .rule_fault
+                        .as_ref()
+                        .is_some_and(|(fault, _)| fault == id)
+                    {
                         world.authoring.rule_fault = None;
                     }
                     report.rules_removed += 1;
@@ -417,6 +491,8 @@ impl WorldPatch {
             }
         }
 
+        world.authoring = authored;
+        world.parameter_state = parameter_state;
         Ok(report)
     }
 }
