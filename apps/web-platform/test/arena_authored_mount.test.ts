@@ -5,6 +5,7 @@
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 import {afterEach,expect,it,vi} from "vitest";
+import {FakeAudioContext, FakeGainNode} from "@rynvek/audio/testing";
 const world="10000000-0000-4000-8000-000000000001",match="10000000-0000-4000-8000-000000000002";
 const transcript=JSON.parse(readFileSync(resolve(process.cwd(),"../../tests/arena/opening.transcript.json"),"utf8"));
 const welcome=transcript[0].recv[0].message,observation=transcript[5].recv.find((e:{to:string})=>e.to==="human:p0").message;
@@ -137,4 +138,22 @@ it("显式创建私有双人世界保留实际ID；断开后迟到邀请回执�
  });await mount(fetcher);field("custom-create").click();await vi.waitFor(()=>expect(field("custom-status").textContent).toContain("unconfigured"));expect(field("world-id").value).toBe(world);
  field("custom-guest").value="789";field("custom-invite").click();await vi.waitFor(()=>expect(resolve).toBeTypeOf("function"));field("disconnect").click();resolve(Response.json({world_id:world,principal_id:"123",owner_id:"123",guest_id:"789",role:"owner",status:"invited",version:roomVersion,custom:true,faction:0}));
  await new Promise(r=>setTimeout(r,0));expect(field("connection").textContent).toBe("身份已断开");expect(Socket.all).toHaveLength(0);expect(field("biomass").textContent).toBe("—");
+});
+
+it("实际Arena挂载需显式音频手势；原阵营WS事件入混音，静音/断线/换世界无旧声图",async()=>{
+ const contexts:FakeAudioContext[]=[];
+ class Context extends FakeAudioContext {constructor(_options?:AudioContextOptions){super(48000,"suspended");contexts.push(this);}}
+ await mount(vi.fn(async()=>Response.json(run)));vi.stubGlobal("AudioContext",Context);
+ field("connect-world").click();await vi.waitFor(()=>expect(field("connection").textContent).toContain("已获控制租约"));
+ expect(contexts).toHaveLength(0);expect(field("audio-enable").disabled).toBe(false);
+ field("audio-enable").click();await vi.waitFor(()=>expect(field("audio-status").textContent).toContain("音频已启用"));
+ const frames=transcript.flatMap((s:{recv:{to:string;message:{type:string;observation?:unknown}}[]})=>s.recv.filter(r=>r.to==="human:p0"&&r.message.type==="observation").map(r=>r.message));
+ Socket.all[0]!.receive(frames[2]);expect(contexts[0]!.nodesOfType("oscillator")).toHaveLength(1);
+ field("audio-mute").click();expect(contexts[0]!.state).toBe("closed");
+ expect(contexts[0]!.nodesOfType<FakeGainNode>("gain").some(g=>g.disconnected)).toBe(true);
+ field("audio-enable").click();await vi.waitFor(()=>expect(contexts).toHaveLength(2));
+ expect(contexts[1]!.nodesOfType("oscillator")).toHaveLength(0);
+ Socket.all[0]!.close();expect(contexts[1]!.state).toBe("closed");expect(field("audio-enable").disabled).toBe(true);
+ field("connect-world").click();await vi.waitFor(()=>expect(Socket.all).toHaveLength(2));
+ expect(contexts).toHaveLength(2);expect(field("audio-status").textContent).not.toContain("音频已启用");
 });

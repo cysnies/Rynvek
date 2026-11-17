@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+// 真实Rust会话生成的跨语言夹具 + 录制型AudioContext；不冒称DSP离线渲染/浏览器策略/硬件听验。
+import {readFileSync} from "node:fs";
+import {resolve} from "node:path";
+import {afterEach,expect,it,vi} from "vitest";
+import {ArenaClient,type ArenaServerMessage,type ArenaTransport,type FactionObservation,type RtsEvent} from "@rynvek/client";
+import {FakeAudioContext,FakeOscillatorNode,FakeGainNode} from "@rynvek/audio/testing";
+import {ArenaAudioSession,planArenaAudio,AUDIO_STALE_MS} from "../src/arena-audio.js";
+const transcript=JSON.parse(readFileSync(resolve(process.cwd(),"../../tests/arena/opening.transcript.json"),"utf8"));
+const observations=transcript.flatMap((s:{recv:{to:string;message:ArenaServerMessage}[]})=>s.recv.filter(r=>r.to==="human:p0"&&r.message.type==="observation").map(r=>r.message)) as Extract<ArenaServerMessage,{type:"observation"}>[];
+const first=observations[0]!,building=observations[2]!;
+function harness(){
+ let receiver:((m:ArenaServerMessage)=>void)|undefined;
+ const t:ArenaTransport={send:()=>{},close:()=>{},onMessage:h=>{receiver=h;return ()=>{receiver=undefined;}}};
+ const client=new ArenaClient(t,{principalId:"123",kind:"Human",faction:0});
+ return {client,receive:(m:ArenaServerMessage)=>receiver!(m)};
+}
+afterEach(()=>vi.useRealTimers());
+it("真实跨语言窗口分离spiking/continuous且声音不受敌方事件、ghost消失或全世界指标影响",()=>{
+ const a=planArenaAudio(building.observation,building.events,first.observation);
+ expect(a.events).toEqual(["building.completed"]);expect(a.neural.ringDensity).toBe(24/(32*64));expect(a.neural.continuousLevel).toBe(64/256);
+ const altered: FactionObservation={...building.observation,ghosts:[],units:building.observation.units.filter(u=>u.faction===0)};
+ const hidden:RtsEvent={type:"building_destroyed",id:999,faction:1,kind:"bld.nexus_core"};
+ expect(planArenaAudio(altered,[...building.events,hidden],first.observation)).toEqual(a);
+ const continuous=observations[4]!.observation;expect(continuous.neural.spiking_neurons).toBe(0);
+ expect(planArenaAudio(continuous,[],null).neural.ringDensity).toBe(0);
+ expect(()=>planArenaAudio({...altered,neural:{...altered.neural,sample_tick:0}},[],null)).toThrow(/投影非法/);
+});
+it("默认不创图；手势后真实观察驱动原配方与神经声化，重复Tick和静音期间事件不补播",async()=>{
+ const h=harness(),made:FakeAudioContext[]=[];const audio=new ArenaAudioSession(()=>{},()=>{const c=new FakeAudioContext(48000,"suspended");made.push(c);return c.asAudioContext();});
+ audio.bind(h.client);h.receive(first);expect(made).toHaveLength(0);audio.setNeural(true);
+ await audio.enableFromGesture();const c=made[0]!;expect(audio.status.state).toBe("running");expect(c.nodesOfType("oscillator")).toHaveLength(0);
+ h.receive(building);expect(c.nodesOfType("oscillator")).toHaveLength(3); // 合并同类completed一条+两个真实状态声化载波。
+ const gain=c.nodesOfType<FakeGainNode>("gain");expect(gain.some(g=>g.gain.events.some(e=>e.value===24/(32*64)*.08))).toBe(true);
+ h.receive(building);expect(c.nodesOfType("oscillator")).toHaveLength(3);
+ audio.mute();expect(c.state).toBe("closed");expect(c.nodesOfType<FakeGainNode>("gain").some(g=>g.disconnected)).toBe(true);
+ h.receive(observations[3]!);await audio.enableFromGesture();expect(made[1]!.nodesOfType("oscillator")).toHaveLength(0);
+ audio.setNeural(false);audio.detach();h.receive(observations[4]!);expect(made[1]!.state).toBe("closed");
+});
+it("挂起/隐藏/神经关闭/过期/终局都同步切断旧图；错误或换身份不影响世界且不保留观察",async()=>{
+ vi.useFakeTimers();const h=harness(),contexts:FakeAudioContext[]=[];const audio=new ArenaAudioSession(()=>{},()=>{const c=new FakeAudioContext();contexts.push(c);return c.asAudioContext();});
+ audio.bind(h.client);h.receive(first);audio.setNeural(true);await audio.enableFromGesture();h.receive(building);const c=contexts[0]!;
+ audio.setNeural(false);expect(c.nodesOfType<FakeOscillatorNode>("oscillator").slice(-2).every(o=>o.stopTime!==null&&o.disconnected)).toBe(true);
+ audio.suspend();expect(c.state).toBe("closed");expect(audio.status.state).toBe("suspended");
+ h.receive(observations[3]!);await audio.enableFromGesture();const newer=contexts[1]!;newer.state="suspended";newer.onstatechange?.();expect(newer.state).toBe("closed");
+ await audio.enableFromGesture();vi.advanceTimersByTime(AUDIO_STALE_MS);expect(audio.status.state).toBe("suspended");expect(audio.status.ready).toBe(false);
+ h.receive(observations[4]!);await audio.enableFromGesture();const final=contexts.at(-1)!;
+ h.receive({type:"observation",observation:{...observations[4]!.observation,outcome:{result:"draw",tick:1531}},events:[]});expect(final.state).toBe("closed");expect(audio.status.state).toBe("ended");
+ audio.detach();expect(audio.status.bound).toBe(false);h.receive(first);expect(audio.status.ready).toBe(false);
+});
+it("迟到resume不能复活已换世界的图，创建失败不会阻塞权威客户端",async()=>{
+ const a=harness(),b=harness(),old=new FakeAudioContext(48000,"suspended");let resume!:()=>void;
+ old.resume=()=>new Promise<void>(r=>{resume=()=>{old.state="running";r();};});
+ const audio=new ArenaAudioSession(()=>{},()=>old.asAudioContext());audio.bind(a.client);a.receive(first);
+ const pending=audio.enableFromGesture();audio.bind(b.client);b.receive(first);resume();await pending;
+ expect(audio.status.state).toBe("off");expect(old.state).toBe("closed");expect(old.nodesOfType<FakeGainNode>("gain").some(g=>g.disconnected)).toBe(true);audio.detach();
+ const bad=new ArenaAudioSession(()=>{},()=>{throw new Error("No audio device");});bad.bind(b.client);b.receive(building);await bad.enableFromGesture();expect(bad.status.state).toBe("error");expect(b.client.observation?.tick).toBe(331);bad.detach();
+});
