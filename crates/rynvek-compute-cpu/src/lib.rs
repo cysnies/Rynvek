@@ -60,10 +60,10 @@ impl CpuReferenceBackend {
         F: FnMut(u32, u32, u32),
     {
         let meta = self.kernels.get(kernel).ok_or(DispatchError::UnknownKernel)?;
-        if !self.profile().satisfies(meta.min_profile) {
-            return Err(DispatchError::InsufficientCapability {
-                required: meta.min_profile,
-                actual: self.profile(),
+        if !self.profile().meets(meta.min_profile) {
+            return Err(DispatchError::ProfileTooLow {
+                need: meta.min_profile,
+                have: self.profile(),
             });
         }
         if workgroup_x == 0 {
