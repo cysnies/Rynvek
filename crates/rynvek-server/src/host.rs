@@ -1374,6 +1374,19 @@ impl Host {
             replay,
         };
         let _ = self.events.send(HostEvent::Completed(Box::new(completed)));
+        // 终局连接关闭前发布真实裁剪观察，浏览器和 SDK 不必在已结束 Actor 上追问。
+        for c in self.conns.values_mut() {
+            let message = ArenaServerMessage::Observation {
+                observation: Box::new(self.session.world.observe(FactionId(c.faction)).expect("有效席位")),
+                events: Vec::new(),
+            };
+            let body = serde_json::to_vec(&CommandReply {
+                idempotency_key: None,
+                message,
+            })
+            .expect("JSON");
+            let _ = send(c, WireChannelId::Command, self.session.world.tick, &body, false);
+        }
         self.transition(MatchState::Completed);
         let ids: Vec<u64> = self.conns.keys().copied().collect();
         for id in ids {

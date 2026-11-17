@@ -56,6 +56,8 @@ pub struct AppConfig {
     pub blob_dir: Option<std::path::PathBuf>,
     /// 同时执行的 Lab 实验数（每个实验内部再按 CPU 核数并行 run）
     pub lab_max_concurrent: usize,
+    /// 显式开启且仅限回环内存开发服的 Web Origin；生产缺省关闭。
+    pub local_practice_origin: Option<String>,
 }
 
 /// WebTransport 入口信息
@@ -80,6 +82,7 @@ impl Default for AppConfig {
             fixed_map_seed: None,
             blob_dir: None,
             lab_max_concurrent: 2,
+            local_practice_origin: None,
         }
     }
 }
@@ -162,6 +165,7 @@ pub struct AppInner {
     pub experiments: Mutex<BTreeMap<String, Experiment>>,
     /// Lab 执行并发槽
     pub lab_slots: Arc<tokio::sync::Semaphore>,
+    pub practice_slots: Arc<tokio::sync::Semaphore>,
     /// WASM 插件运行时（首次使用时创建）
     pub plugins: std::sync::OnceLock<rynvek_rules::plugin::PluginRuntime>,
     pub signer: ServerSigningKey,
@@ -192,6 +196,7 @@ impl AppState {
         let (events, rx) = mpsc::unbounded_channel();
         let state = Self {
             inner: Arc::new(AppInner {
+                practice_slots: Arc::new(tokio::sync::Semaphore::new(4)),
                 store,
                 blobs: match &config.blob_dir {
                     Some(dir) => Arc::new(

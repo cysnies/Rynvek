@@ -489,8 +489,27 @@ pub async fn patches(
 }
 
 /// `09 WS /api/v1/worlds/{world_id}/stream`（`world.connect`，令牌在首帧 ClientHello 中校验）
-pub async fn stream(State(app): State<AppState>, Path(id): Path<String>, ws: WebSocketUpgrade) -> ApiResult<Response> {
+#[derive(Debug, Default, Deserialize)]
+pub struct StreamFormat {
+    pub format: Option<String>,
+}
+
+pub async fn stream(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Query(format): Query<StreamFormat>,
+    ws: WebSocketUpgrade,
+) -> ApiResult<Response> {
     let world_id: WireUuid = parse_world_id(&id)?;
+    if let Some(format) = format.format {
+        if format != "arena-json" {
+            return Err(ApiError::bad_request("未知流格式"));
+        }
+        return Ok(ws
+            .max_message_size(64 * 1024)
+            .on_upgrade(move |socket| crate::browser::serve(app, world_id, socket))
+            .into_response());
+    }
     let max = rynvek_protocol::wire::WIRE_FRAME_HEADER_LEN + rynvek_protocol::wire::MAX_WIRE_PAYLOAD_LEN as usize;
     Ok(ws
         .max_message_size(max)

@@ -17,11 +17,13 @@
 
 pub mod api;
 pub mod app;
+pub mod browser;
 pub mod client;
 pub mod error;
 pub mod glicko2;
 pub mod host;
 pub mod ids;
+pub mod local;
 pub mod matchmaking;
 pub mod patch;
 pub mod replay;
