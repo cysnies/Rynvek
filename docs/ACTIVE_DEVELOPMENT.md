@@ -5,6 +5,35 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第三十五批：私有程序化音效制品与真实Arena消费（从main 8bfad5a继续）
+
+**主体继续，整体未完成。** 已闭合可用的**程序化音色/包络/混音制品**段，而非只存manifest：SDK构建/签名RYPK → 原Store私有registry/有界扫描/精确依赖/私有CAS → 私有发现/验签下载/解析 → 原Arena真实己方事件 → 下载的配方参数实际进入原Director/mixer/synth。没有生成音乐或第三方音色，无公共发行/外部部署；本profile明确不接`.ogg`/压缩媒体/任意网络音源，正式采样/分轨/空间化仍欠，不能把该完整程序化段泛称全部音频资产完工。
+
+### 真实入口 / SDK
+
+- 原`/arena`连接真实席位 → 新「私有程序化音效制品」：显式上传SDK已签名JSON、发现本人版本、校验下载并应用、下载原签名RYPK、撤销、恢复内置配方。不自动发布示例、生成世界、造对手或拿控制权；观战/回放/练习不挂该私有入口。
+- **应用不创AudioContext也不播放**；替换先切断旧图，必须再点击原手势启用。仅之后新己方事件进入原调度，不补播；原fog/真实神经观测/静音/失焦/隐藏/过期/终局/断线/换世界治理保留。世界/身份变化取消下载并拒绝迟到结果，换世界清包。制品没有观察/事件源/网络/工具权限，不泄隐藏状态、不编造spikes或相干度。
+- 原`PrivateAgentHubClient.audio()`返回`PrivateAudioClient`，复用原已认证transport，不另收凭据。`buildPrivateAudioPackage/signPrivateAudioPackage`（显式签名回调，不收私钥）、list/get/publish/download/load/revoke。原始下载有界流读取、BLAKE3+Ed25519复验；load校验根/所有锁定制品再消费受信私有服务的解析，不冒称独立CA/独立客户端全解析。
+
+### 容器扫描 / 私有持久治理
+
+- 原RYPK v1/rpack，`engine_compat=rynvek-audio-recipes/1`，≤64KiB；恰四个data/JSON：audio.json、manifest.json、recipes.json、dependencies.lock；所有路径/排序/偏移/填充/整包与条目哈希继续原权威校验，未知/源码/媒体blob/URL入口不接受。新`audio-pack.schema.json`给出profile及recipe/manifestPatch定义。
+- 24规范事件/原总线固定；gain0–1、cooldown0–60000ms、voice整数1–16。包独立覆写原合成器音色：波形白名单、频率20–8000Hz、attack1–50ms、decay/release各1–500ms、sustain0–1、Q0.1–5、noise0–0.8；缺省冻结配方不改，客户端/服务端均拒绝未知/原型字段和越界。原总线/事件预算继续限并发，Arena只触发已接的真实事件子集，不谎称24类都有权威来源。
+- 精确同owner音频library依赖：4直接、8传递唯一、4层、依赖原制品总量≤256KiB（含根最多320KiB）；拒绝缺失/撤销/CID冲突/非library/跨owner/环。按锁序后序合并、共享节点一次、根最后覆写；配方逐字段、manifest逐事件。
+- 新`/api/v1/private-hub/audio`发现，`/{id}/{version}` GET/PUT/DELETE，`/artifact`与`/resolved` GET。原WorldRead/HubPublish+owner隔离，未知/他人404；私有no-store、Vary Authorization，原始下载nosniff。Ed25519新私有audio签名域覆盖owner/ID/精确版本/整制品BLAKE3，与Agent/公共域分离。
+- 复用原私有CAS与Store锁/PG事务；共享行形状准确命名PrivateArtifactRow（不改已有Agent序列化），独立0008音频表。事务重验active发布者/公钥/所有锁定依赖，主体锁保护配额/撤销竞态；每owner最多256不可变版本，含撤销墓碑不覆盖，CAS孤立预写可保留不删除。data-export包含本人音频元数据。无新执行框架。
+- 撤销禁止后续解析/下载/新依赖发布，面板本地撤销会切图；已下载字节不能收回，不冒称跨标签即时DRM。Memory元数据不跨服务端进程持久化；真正跨进程仍需原PG/持久私有CAS/稳定鉴权，SQL仅Rust编译，未连实库，不是PG多机灾备。
+
+### 必要直接快验 / 未验
+
+**11个不同直接用例通过，重跑不累计**：恶意音频数据/容器1，真正本机认证HTTP→Node SDK构建/签名/私有库依赖→原Arena WS/租约/真实建造命令→权威building_placed→实际ArenaAudioSession消费下载音色1，音色/参数/原型字段2，原Arena音频生命周期5，面板显式应用/迟到隔离2。真实集成用录制型FakeAudioContext替代设备，断言733Hz/222Hz振荡器参数与0.17 trim来自实际下载制品，非伪造事件；重复版本、错签名/CID、匿名/他人、公共blob隔离、撤销依赖阻止解析/新发布、data-export均走真服务。仅必要server编译、audio/SDK tsc build、web tsc --noEmit与diff --check；命令及示例见[私有音效制品说明](PRIVATE_AUDIO_PACKAGES.md)。
+
+**未验**真实浏览器/手势策略、声卡/耳听或DSP离线波形，服务端重启/PG实库多连接多机/断电/长稳；夹具主动有界推进Tick，不称实时长稳或灾备。未全workspace/Clippy/license/SBOM/soak/CI轮询。未引Pi代码/外部LLM/密钥/收费，不绕网络/浏览器，不删原始资料/Git历史/无关数据。中文细提交、最终HEAD/一次PRIVATE普通push证据见同一Page/交接。
+
+### 下一主体继续
+
+转**一般规则/参数模板的真实Studio→权威应用→Lab消费**完整可用段，依据原模型/最终设计限制必要范围，不做装饰预设或只导出JSON。随后一般W3/TS/rpack/.rview/协作与未覆盖的攻击/修复/分泌/生长合成等完整生命成本继续按依赖推进；正式音频采样/分轨/空间化与真实LLM/独立Agent赛道也仍有明确欠项，未实施不冒称完成。主体齐后集中全面验收，不无限磨音频或Adapter，持续任务继续。
+
 ## 第三十四批：Pi参考受控Agent Adapter与独立持久执行治理（从main 634258a继续）
 
 **主体持续开发，整体未完成。** 已接原私有Agent包/六工具/原Arena Actor，不是空适配层：真实fog → 白名单provider上下文 → 原无I/O QuickJS包或明确本地测试provider → 候选 → 持久派发意图/预算预留 → 原CommandGate/ToolBroker/Tick/WAL → 真工具结果/事件 → 取消和新控制进程续跑。中文细提交、完整最终HEAD及一次PRIVATE普通push证据见同一Page/交接。无公共发行/部署，无第三方模型/密钥/费用/私有数据外发。
@@ -484,7 +513,7 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 | 已推进，仍有边界 | 第三十二批原Arena真实阵营事件、手势/静音/断线换世界生命周期与仅己方真实脑态声化 | 必要编译与9个直接用例；节点/状态验证非硬件听验，无Hub音色资产链、观战/回放音频 |
 | 已推进，仍有边界 | 第三十三批Lab持久提交/发现、租约fencing、取消/重试幂等、run检查点恢复、私有四表原子发布与原工作台/TS SDK | 本机HTTP/Node与同Store重建通过，非PG实库灾备/硬杀恢复；未完成run从种子重算，单作业汇总仍在内存 |
 | 已推进，仍有边界 | 第三十四批Pi参考受控Adapter、独立持久运行/事件/预算、真工具收据、双控制进程取消续跑 | 设计借鉴非Pi代码复用；同源私有包/明确本地测试provider，不冒称LLM/独立注册Agent或PG灾备 |
-| 下一主体优先 | 音频制品真实容器/校验/私有消费；再一般模板/规则/协作与生命成本 | 原真实音频入口消费合法制品，不以空manifest或演示充主体完成 |
+| 下一主体优先 | 一般规则/参数模板真实Studio→权威应用→Lab；再协作/一般W3与完整生命成本 | 不做装饰预设；正式音频采样/空间化等仍保留欠项，不因程序化制品闭合宣称全音频完成 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付Pi参考受控Agent Adapter和独立持久执行治理、真实工具事件/预算/取消续跑及原入口；下一转音频制品链，再按依赖补一般规则/模板/协作/生命成本，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
+本阶段交付私有程序化音效制品有界扫描/签名依赖/私有发布下载及真实Arena配方消费；下一转一般规则/参数模板，再按依赖补协作/一般W3/生命成本和正式采样等欠项，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
