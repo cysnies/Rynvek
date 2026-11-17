@@ -17,7 +17,7 @@ fn fixture() -> Value {
 fn every_fixture_command_roundtrips_field_by_field() {
     let f = fixture();
     let cmds = f["commands"].as_array().unwrap();
-    assert_eq!(cmds.len(), 11, "11 种命令各一条");
+    assert_eq!(cmds.len(), 15, "15 种命令各一条");
     for raw in cmds {
         let cmd: EngineCommand = serde_json::from_value(raw.clone()).unwrap_or_else(|e| panic!("{raw}: {e}"));
         assert_eq!(&serde_json::to_value(&cmd).unwrap(), raw);

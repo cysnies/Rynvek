@@ -290,3 +290,104 @@ fn observations_are_fog_filtered_per_seat_and_events_do_not_leak() {
     let too_many = s.handle("p0", ArenaClientMessage::Advance { ticks: 901 });
     assert!(matches!(&too_many[0].message, ArenaServerMessage::Error { error } if error.code == 0x5001));
 }
+
+/// 同一夹具由TS构造器逐字段比对，再经服务实际复用的ArenaSession/ToolBroker执行。
+#[test]
+fn sdk_fixture_reaches_authoritative_broker_and_replays_identically() {
+    let calls: Vec<Value> = serde_json::from_str(include_str!("../../../tests/arena/agent-sdk-tools.json")).unwrap();
+    assert_eq!(calls.len(), 8);
+    let registry = rynvek_agent::ToolRegistry::v1();
+    let (mut live, token) = setup();
+    let (mut replay, replay_token) = setup();
+    assert_eq!(live.world.next_serial(), 11, "夹具中的实体标识来自真实初始世界");
+    let names: std::collections::BTreeSet<_> = calls.iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), registry.tools().len(), "必须覆盖全部六工具");
+    for (i, call) in calls.iter().enumerate() {
+        let name = call["name"].as_str().unwrap();
+        let args = call["arguments"].clone();
+        registry.validate(name, &args).unwrap();
+        advance(&mut live, "agent:x", 30);
+        advance(&mut replay, "agent:x", 30);
+        let response = tool(&mut live, "agent:x", token, name, args.clone());
+        let replayed = tool(&mut replay, "agent:x", replay_token, name, args);
+        assert_eq!(response, replayed, "第{i}项回执必须可重放");
+        if i == 5 || i == 6 {
+            // Schema合法不代表实体种类正确，更不能由SDK预判或绕过服务端裁决。
+            assert_eq!(response["error"]["code"], 0x2002, "{response}");
+        } else {
+            assert!(response["error"].is_null(), "第{i}项应真实执行：{response}");
+        }
+        match i {
+            0 => assert_eq!(
+                response["result"]["nexus"].as_array().unwrap().len(),
+                1,
+                "查询不得泄露敌方主脑"
+            ),
+            1 => assert_eq!(response["result"]["channels"].as_array().unwrap().len(), 5),
+            2 => {
+                assert_eq!(response["result"]["ack"]["type"], "building_placed");
+                assert_eq!(response["result"]["ack"]["id"], 11);
+            }
+            3 => assert_eq!(response["result"]["command"]["strength_milli"], -12_500),
+            4 => assert_eq!(response["result"]["ack"]["units"], 4),
+            7 => {
+                assert_eq!(
+                    response["result"]["command"]["strength_milli"], -1,
+                    "负半毫值须由Rust远离零量化，不能在JS中先舍入为零"
+                );
+                assert_eq!(
+                    response["result"]["command"]["modulators_milli"],
+                    json!([-1, 1, -1000, 1000])
+                );
+            }
+            _ => {}
+        }
+        assert_eq!(
+            live.world.state_root(),
+            replay.world.state_root(),
+            "第{i}项提交根必须一致"
+        );
+    }
+    let root = live.world.state_root();
+    let query = calls[0]["arguments"].clone();
+    assert_eq!(
+        tool(&mut live, "agent:x", token, "query_visible_clusters", query.clone())["error"]["code"],
+        0x8004,
+        "本地分组不应绕过30 Tick间隔"
+    );
+    assert_eq!(
+        tool(&mut live, "agent:x", token + 1, "query_visible_clusters", query)["error"]["code"],
+        0x8001,
+        "SDK不应绕过fencing"
+    );
+    assert_eq!(live.world.state_root(), root, "拒绝调用不能修改权威世界");
+}
+
+#[test]
+fn legacy_sdk_wire_payloads_are_rejected_without_mutation() {
+    let (mut session, token) = setup();
+    for (name, args) in [
+        ("query_world_observation", json!({"include_fields": true})),
+        (
+            "place_building",
+            json!({"building_kind": "bld.signal_beacon", "origin": [36,36]}),
+        ),
+        (
+            "issue_strategic_intent",
+            json!({"archetype":"all", "order_kind":"Move", "target":[40,40]}),
+        ),
+        (
+            "configure_signal_beacon",
+            json!({"beacon_id":"11", "channel":"field.signal_b", "signal_strength": 1, "neuromodulators":[0,0,0,0]}),
+        ),
+    ] {
+        advance(&mut session, "agent:x", 30);
+        let before = session.world.state_root();
+        assert_eq!(
+            tool(&mut session, "agent:x", token, name, args)["error"]["code"],
+            0x5001,
+            "旧SDK的{name}不是可接受协议"
+        );
+        assert_eq!(session.world.state_root(), before);
+    }
+}

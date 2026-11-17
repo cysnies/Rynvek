@@ -17,11 +17,13 @@
 
 pub mod api;
 pub mod app;
+pub mod browser;
 pub mod client;
 pub mod error;
 pub mod glicko2;
 pub mod host;
 pub mod ids;
+pub mod local;
 pub mod matchmaking;
 pub mod patch;
 pub mod replay;
@@ -34,3 +36,5 @@ pub mod verify;
 pub use app::{AppConfig, AppState};
 pub use error::{ApiError, ApiResult};
 pub use server::{RunningServer, ServerConfig, start};
+
+pub mod transactions;

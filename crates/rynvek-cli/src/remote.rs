@@ -56,6 +56,7 @@ pub async fn serve(a: ServerArgs) -> CliResult {
             tick_driver: TickDriver::RealTime { hz: a.tick_rate },
             blob_dir: a.blob_dir,
             lab_max_concurrent: a.lab_max_concurrent,
+            local_practice_origin: a.local_practice_origin,
             ..AppConfig::default()
         },
         store,

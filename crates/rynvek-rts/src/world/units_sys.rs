@@ -62,7 +62,6 @@ pub(super) struct Contact {
     pub id: EntitySerial,
     pub faction: FactionId,
     pub position: Vec2,
-    pub is_building: bool,
 }
 
 /// 8×8 Tile 空间分桶接触点索引：将 $O(N^2)$ 全表扫描降为局部邻域桶扫描，同时严格保持 `(距离², EntitySerial)` 全序平局决胜
@@ -111,7 +110,6 @@ impl ArenaWorld {
                 id: u.id,
                 faction: u.faction,
                 position: u.position,
-                is_building: false,
             };
             unit_buckets
                 .entry(ContactGrid::bucket_coords(u.position))
@@ -125,7 +123,6 @@ impl ArenaWorld {
                 id: b.id,
                 faction: b.faction,
                 position: b.center(),
-                is_building: true,
             })
             .collect();
         ContactGrid {
@@ -230,9 +227,35 @@ impl ArenaWorld {
             let plasticity = self
                 .faction(faction)
                 .is_some_and(|f| f.techs.contains(TechId::HebbianPlasticity));
+            let budgeted = self.has_neural_energy_budget(id);
+            let cost = self
+                .faction(faction)
+                .map_or(800, |f| f.modifiers().spike_cost_micro_energy) as u32;
             let u = self.units.get_mut(&id).expect("存在");
             u.modulators = m;
-            u.actions = u.brain.step_epoch(&x, m.0, plasticity);
+            if budgeted && u.defense.hp_milli <= 0 {
+                u.actions = [0; 6];
+                continue;
+            }
+            if budgeted {
+                let body = self
+                    .ecology
+                    .as_mut()
+                    .expect("预算世界有私有账本")
+                    .bodies
+                    .get_mut(&id)
+                    .expect("存活个体");
+                u.actions = u
+                    .brain
+                    .step_epoch_budgeted(&x, m.0, plasticity, &mut body.account, cost)
+                    .map_or([0; 6], |(actions, _)| actions);
+                continue;
+            }
+            let (actions, spikes) = u.brain.step_epoch_metered(&x, m.0, plasticity);
+            u.actions = actions;
+            if let Some(ecology) = &mut self.ecology {
+                ecology.bodies.get_mut(&id).expect("存活个体").pending_spikes = spikes;
+            }
         }
     }
 
@@ -449,12 +472,46 @@ impl ArenaWorld {
         }
     }
 
+    /// 出生结算及场推进后、首个脑Epoch前从所在格摄食；不依赖空池脑先产生Harvest。
+    /// 复用原采集速率与实体序号分摊；同一Tick后续Harvest不再重复领取。
+    pub(super) fn step_forager_uptake(&mut self) {
+        let ids: Vec<_> = self.units.keys().copied().collect();
+        for id in ids {
+            if !self.has_neural_energy_budget(id) || self.units[&id].defense.hp_milli <= 0 {
+                continue;
+            }
+            let u = &self.units[&id];
+            let rate = self
+                .faction(u.faction)
+                .expect("玩家阵营")
+                .modifiers()
+                .forager_harvest_milli_per_s;
+            let budget = fractional_share(rate * 256, 30_000, self.tick + u64::from(id.0)) as u32;
+            let (x, y) = u.tile();
+            let available = self.fields.get(FieldId::Nutrient, x as i64, y as i64) as u32;
+            let accepted = self
+                .ecology
+                .as_mut()
+                .expect("显式契约")
+                .bodies
+                .get_mut(&id)
+                .expect("出生同步建账")
+                .account
+                .receive_field_raw(available.min(budget));
+            let actual = self.fields.add(FieldId::Nutrient, x, y, -(accepted as i32));
+            assert_eq!(actual, -(accepted as i32), "同一权威步骤先收款后等额扣除实际营养");
+        }
+    }
+
     /// Forager 采集：采集指令或脑采集读出为正时，从所在格抽取营养直接入账
     pub(super) fn step_harvest(&mut self) {
         let ids: Vec<EntitySerial> = self.units.keys().copied().collect();
         for id in ids {
             let u = &self.units[&id];
             let spec = unit_spec(u.kind);
+            if self.has_neural_energy_budget(id) {
+                continue;
+            }
             if spec.harvest_milli_per_s == 0 || u.faction.is_wild() {
                 continue;
             }

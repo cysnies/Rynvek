@@ -75,7 +75,7 @@ impl RenderLayer {
         }
     }
 
-    /// 是否以全屏方式绘制（其余层为实例化图元）
+    /// 是否包含全屏底层通道（Terrain 另可叠加静态地图实例）
     pub const fn is_fullscreen(self) -> bool {
         matches!(self, Self::Terrain | Self::FieldHeatmap)
     }

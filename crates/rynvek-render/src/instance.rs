@@ -43,6 +43,8 @@ pub enum InstanceShape {
     Circle = 1,
     /// 空心环（同步脉冲环、拾取高亮）
     Ring = 2,
+    /// 轴对齐矩形轮廓；复用32字节标签记录，size为宽、rotation槽为高。
+    RectangleOutline = 3,
 }
 
 /// 实例记录（32 字节，`VertexStepMode::Instance`）
@@ -53,7 +55,7 @@ pub struct InstanceData {
     pub position: [f32; 2],
     /// 边长 / 直径（格）
     pub size: f32,
-    /// 旋转（弧度，朝向）
+    /// 旋转（弧度）；RectangleOutline 标签下为矩形高度（格）
     pub rotation: f32,
     /// `Rgba8::packed()`
     pub color: u32,
@@ -76,6 +78,19 @@ impl InstanceData {
             layer: u32::from(layer.index()),
             shape: shape as u32,
         }
+    }
+
+    /// 矩形轮廓采用带标签的宽/高记录，不改变实例ABI或新增渲染管线。
+    pub fn rectangle_outline(position: [f32; 2], extent: [f32; 2], color: Rgba8) -> Self {
+        let mut instance = Self::new(
+            RenderLayer::Overlay,
+            position,
+            extent[0].max(0.0),
+            color,
+            InstanceShape::RectangleOutline,
+        );
+        instance.rotation = extent[1].max(0.0);
+        instance
     }
 
     /// 附加拾取编号（不可拾取层忽略）
@@ -146,5 +161,14 @@ mod tests {
         )
         .with_pick(PickId(5));
         assert_eq!(org.pick_id, 5);
+    }
+    #[test]
+    fn rectangle_outline_keeps_tagged_32_byte_abi_and_zero_pick_id() {
+        let rect = InstanceData::rectangle_outline([3.0, 5.5], [2.0, 3.0], Rgba8::hex(0xEAD686));
+        assert_eq!(std::mem::size_of::<InstanceData>(), 32);
+        assert_eq!([rect.size, rect.rotation], [2.0, 3.0]);
+        assert_eq!(rect.shape, InstanceShape::RectangleOutline as u32);
+        assert_eq!(rect.pick_id, 0);
+        assert_eq!(rect.render_layer(), Some(RenderLayer::Overlay));
     }
 }

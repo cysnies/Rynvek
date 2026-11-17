@@ -26,7 +26,7 @@
 //! 5. 重新仿真：逐检查点比对状态根、终局状态根与胜负 → `0x3003 SimulationInvariantViolated`
 
 use rynvek_core::error::RynvekErrorCode;
-use rynvek_rts::{ArenaWorld, MatchConfig, MatchOutcome, RecordedCommand};
+use rynvek_rts::{ArenaRuntime, ArenaWorld, MatchConfig, MatchOutcome, RecordedCommand};
 use rynvek_security::{Keyring, League, ServerSigningKey};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,7 @@ pub const REPLAY_FLAG_ZSTD: u16 = 1;
 pub const REPLAY_TRAILER_LEN: usize = 112;
 /// 载荷格式标识
 pub const REPLAY_FORMAT: &str = "rynvek-replay/1";
+pub const REPLAY_RUNTIME_FORMAT: &str = "rynvek-replay/2";
 /// 回放等级（D197）
 pub const REPLAY_LEVEL_BIT_EXACT: u64 = 0;
 /// 状态根检查点间隔（Tick）
@@ -78,6 +79,76 @@ pub struct ReplayBody {
     pub final_tick: u64,
     pub final_state_root: String,
     pub outcome: Option<MatchOutcome>,
+    /// v2 显式携带起始检查点和每 Tick 有序输入；v1 保持原命令回放语义。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<RuntimeReplay>,
+}
+
+/// 容器仍为 RYRP v1，载荷显式升级为 rynvek-replay/2，旧解码器会拒绝而非误读。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeReplay {
+    pub world_id: [u8; 16],
+    pub initial_revision: u64,
+    pub initial_root: [u8; 32],
+    pub initial_snapshot: Vec<u8>,
+    pub ticks: Vec<crate::transactions::TickRecord>,
+}
+
+impl RuntimeReplay {
+    fn replay(&self) -> Result<ArenaRuntime, ReplayError> {
+        let mut runtime = ArenaRuntime::restore(
+            self.world_id,
+            self.initial_revision,
+            self.initial_root,
+            &self.initial_snapshot,
+        )
+        .map_err(|e| ReplayError::new(e, "回放初态检查点校验失败"))?;
+        runtime.enable_command_log();
+        for tick in &self.ticks {
+            runtime = tick
+                .replay(&runtime)
+                .map_err(|e| ReplayError::new(e, "有序 Tick 日志重放分歧"))?;
+        }
+        Ok(runtime)
+    }
+    fn checkpoints(&self) -> Vec<Checkpoint> {
+        self.ticks
+            .iter()
+            .filter(|t| t.tick % CHECKPOINT_INTERVAL_TICKS == 0)
+            .map(|t| Checkpoint {
+                tick: t.tick,
+                state_root: crate::ids::hex(&t.state_root),
+            })
+            .collect()
+    }
+}
+
+pub fn record_runtime(
+    world: &ArenaRuntime,
+    runtime: RuntimeReplay,
+    match_id: String,
+    world_id: String,
+    ruleset_hash: String,
+    participants: Vec<ReplayParticipant>,
+) -> Result<ReplayBody, ReplayError> {
+    let replayed = runtime.replay()?;
+    if replayed.state_root() != world.state_root() || replayed.command_log() != world.command_log() {
+        return Err(ReplayError::divergence("Tick 回放与权威世界不一致"));
+    }
+    Ok(ReplayBody {
+        format: REPLAY_RUNTIME_FORMAT.into(),
+        match_id,
+        world_id,
+        ruleset_hash,
+        config: world.config.clone(),
+        participants,
+        commands: world.command_log().to_vec(),
+        checkpoints: runtime.checkpoints(),
+        final_tick: world.tick,
+        final_state_root: crate::ids::hex(&world.state_root()),
+        outcome: world.outcome.clone(),
+        runtime: Some(runtime),
+    })
 }
 
 /// 文件头
@@ -204,6 +275,7 @@ pub fn record(
         final_tick: world.tick,
         final_state_root: world.state_hash().to_hex(),
         outcome: world.outcome.clone(),
+        runtime: None,
     })
 }
 
@@ -281,8 +353,12 @@ pub fn open(bytes: &[u8], keyring: Option<&Keyring>) -> Result<OpenedReplay, Rep
     let json = zstd::bulk::decompress(&bytes[REPLAY_HEADER_LEN..body_end], MAX_REPLAY_BODY_BYTES)
         .map_err(|e| bad(format!("Zstd 解压失败：{e}")))?;
     let body: ReplayBody = serde_json::from_slice(&json).map_err(|e| bad(format!("载荷 JSON 非法：{e}")))?;
-    if body.format != REPLAY_FORMAT {
-        return Err(bad(format!("未知载荷格式 `{}`", body.format)));
+    match (body.format.as_str(), &body.runtime) {
+        (REPLAY_FORMAT, None) => {}
+        (REPLAY_RUNTIME_FORMAT, Some(runtime))
+            if runtime.world_id == header.world_id
+                && body.world_id == rynvek_protocol::WireUuid(header.world_id).to_string() => {}
+        _ => return Err(bad(format!("未知或不一致的载荷格式 `{}`", body.format))),
     }
     if body.final_tick != header.tick {
         return Err(bad("文件头 tick 与载荷 final_tick 不一致".into()));
@@ -310,6 +386,27 @@ pub struct VerifyReport {
 pub fn verify(bytes: &[u8], keyring: &Keyring) -> Result<VerifyReport, ReplayError> {
     let opened = open(bytes, Some(keyring))?;
     let body = &opened.body;
+    if let Some(runtime) = &body.runtime {
+        let replayed = runtime.replay()?;
+        if replayed.config != body.config
+            || replayed.tick != body.final_tick
+            || replayed.outcome != body.outcome
+            || replayed.command_log() != body.commands
+            || crate::ids::hex(&replayed.state_root()) != body.final_state_root
+            || runtime.checkpoints() != body.checkpoints
+        {
+            return Err(ReplayError::divergence("v2 回放元数据、终局或检查点不一致"));
+        }
+        return Ok(VerifyReport {
+            match_id: body.match_id.clone(),
+            signer_key_id: opened.signer_key_id,
+            final_tick: body.final_tick,
+            final_state_root: body.final_state_root.clone(),
+            commands: body.commands.len(),
+            checkpoints_verified: body.checkpoints.len(),
+            outcome: body.outcome.clone(),
+        });
+    }
     let mut expected = body.checkpoints.iter().peekable();
     let mut verified = 0usize;
     let mut mismatch: Option<u64> = None;

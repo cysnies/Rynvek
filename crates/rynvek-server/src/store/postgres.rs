@@ -393,19 +393,45 @@ impl PostgresStore {
             .collect()
     }
 
+    pub async fn claim_world(&self, id: WireUuid, revision: u64, token: u64, holder: String) -> StoreResult<u64> {
+        if token >= i64::MAX as u64 {
+            return Err(ApiError::new(
+                RynvekErrorCode::StructuralMutationConflict,
+                "fencing 已耗尽",
+            ));
+        }
+        let client = self.client.lock().await;
+        let updated = client.execute("UPDATE worlds SET fencing_token = fencing_token + 1, lease_holder_node = $4, updated_at = NOW() WHERE world_id = $1::text::uuid AND latest_revision = $2 AND fencing_token = $3",
+            &[&uuid_text(&id), &i(revision), &i(token), &holder]).await.map_err(db_err)?;
+        if updated != 1 {
+            return Err(ApiError::new(
+                RynvekErrorCode::StructuralMutationConflict,
+                "宿主认领基线已过期",
+            ));
+        }
+        Ok(token + 1)
+    }
+
     pub async fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
+        if commit.parent_revision.and_then(|r| r.checked_add(1)) != Some(commit.world_revision) {
+            return Err(ApiError::new(
+                RynvekErrorCode::StructuralMutationConflict,
+                "提交修订必须紧接前驱",
+            ));
+        }
         let mut c = self.client.lock().await;
         let tx = c.transaction().await.map_err(db_err)?;
         let n = tx
             .execute(
                 "UPDATE worlds SET latest_revision = $3, latest_tick = $4, latest_state_root = $5, updated_at = NOW() \
-                 WHERE world_id = $1::text::uuid AND fencing_token = $2",
+                 WHERE world_id = $1::text::uuid AND fencing_token = $2 AND latest_revision = $6 AND latest_tick <= $4",
                 &[
                     &uuid_text(&commit.world_id),
                     &i(expected_fencing_token),
                     &i(commit.world_revision),
                     &i(commit.tick),
                     &commit.state_root_blake3.as_slice(),
+                    &i(commit.parent_revision.expect("已验证前驱")),
                 ],
             )
             .await
@@ -413,17 +439,17 @@ impl PostgresStore {
         if n == 0 {
             let exists = tx
                 .query_opt(
-                    "SELECT 1 FROM worlds WHERE world_id = $1::text::uuid",
+                    "SELECT fencing_token FROM worlds WHERE world_id = $1::text::uuid",
                     &[&uuid_text(&commit.world_id)],
                 )
                 .await
-                .map_err(db_err)?
-                .is_some();
-            return Err(if exists {
-                ApiError::new(
-                    RynvekErrorCode::StalePartitionFencingToken,
-                    "fencing_token 已过期：世界租约已被其他节点接管",
-                )
+                .map_err(db_err)?;
+            return Err(if let Some(row) = exists {
+                if u(row.get(0)) != expected_fencing_token {
+                    ApiError::new(RynvekErrorCode::StalePartitionFencingToken, "世界租约已被接管")
+                } else {
+                    ApiError::new(RynvekErrorCode::StructuralMutationConflict, "提交前驱或 Tick 已过期")
+                }
             } else {
                 ApiError::not_found("外键约束：world_id 不存在")
             });

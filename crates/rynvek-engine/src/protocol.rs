@@ -48,6 +48,9 @@ pub enum EngineCommand {
         world_id: Option<String>,
         #[serde(default)]
         gpu_mode: GpuMode,
+        /// 远程竞技场只读显示：绑定阵营，禁止推进本地演示世界。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arena_faction: Option<u8>,
     },
     Resize {
         width: u32,
@@ -87,7 +90,46 @@ pub enum EngineCommand {
     },
     /// 故障注入：主动销毁设备以演练 DeviceLost 恢复
     SimulateDeviceLost,
+    /// 已由 SDK 校验的服务端静态地图；Worker 再验哈希与绑定，不生成地图。
+    ArenaMap {
+        world_id: String,
+        map: Box<ArenaMapData>,
+    },
+    /// 仅表现层选择，不是游戏命令，也不接受前端实体坐标。
+    ArenaSelection {
+        world_id: String,
+        units: Vec<u32>,
+        building: Option<u32>,
+    },
+    /// 用户的拖框/建造落点意图；不携带服务端合法性判决。
+    ArenaOverlay {
+        world_id: String,
+        drag: Option<[[f32; 2]; 2]>,
+        placement: Option<ArenaPlacement>,
+    },
+    /// 服务器已经按阵营裁剪的观察；不是权威世界或本地仿真输入。
+    ArenaObservation {
+        world_id: String,
+        observation: Box<rynvek_rts::observation::FactionObservation>,
+    },
     Shutdown,
+}
+
+/// 建筑落点预览只提供类型和 Tile 原点，占地复用同一建筑规格。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArenaPlacement {
+    pub kind: rynvek_rts::ids::BuildingKind,
+    pub origin: [u32; 2],
+}
+
+/// 浏览器 SDK 解码后的权威静态地形；使用同一 BLAKE3 字节序列二次校验。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArenaMapData {
+    pub width: u32,
+    pub height: u32,
+    pub tiles: Vec<u8>,
+    pub tiles_hash: String,
 }
 
 fn default_dpr() -> f32 {
@@ -112,6 +154,9 @@ pub enum EngineEvent {
         profile: Option<String>,
         adapter: Option<String>,
         generation: u32,
+        /// 实际启用的远程只读阵营；省略表示本地仿真或旧版本，不证明竞技场显示能力。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arena_faction: Option<u8>,
     },
     TickCommitted {
         tick: u64,
@@ -200,6 +245,7 @@ mod tests {
                 device_pixel_ratio: 2.0,
                 world_id: None,
                 gpu_mode: GpuMode::Required,
+                arena_faction: None,
             }
         );
         let pick = EngineCommand::from_json(r#"{"type":"PICK_REQUEST","requestId":7,"x":1,"y":2}"#).unwrap();
@@ -230,6 +276,7 @@ mod tests {
             profile: None,
             adapter: None,
             generation: 0,
+            arena_faction: None,
         };
         assert_eq!(
             ready.to_json(),

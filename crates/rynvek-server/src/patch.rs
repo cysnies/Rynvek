@@ -1,74 +1,12 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 规范 10.2 `WorldPatch` 线上结构（服务端只读副本，与 `packages/studio` 的 TS 定义逐字节一致，ERRATA E-021）
+//! 复用领域 `WorldPatch`，避免服务器校验模型与真实执行模型分裂。
 //! 以及路由 `08` 的校验：安全分级映射、"声明不得低于所需"、生效时机。
 
-use rynvek_core::error::RynvekErrorCode;
-use serde::{Deserialize, Serialize};
-
 use crate::error::ApiError;
-
-/// 实时修改对运行中仿真的安全影响分级（规范 10.2；serde 派生按 E-021 补充）
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum LiveEditSafetyClass {
-    /// Class 0：任意渲染帧立即热生效，不影响权威状态哈希
-    HotSafePresentation = 0,
-    /// Class 1：下一 Tick Phase 01 生效
-    TickBoundarySafe = 1,
-    /// Class 2：下一个 Coupling Epoch（`tick % 4 == 0`）原子切换
-    EpochBoundarySafe = 2,
-    /// Class 3：必须创建新 WorldFork 分支重启
-    RequiresForkRestart = 3,
-}
-
-/// 混合逻辑时钟时间戳
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct HlcTimestamp {
-    pub wall_time_ms: u64,
-    pub logical_counter: u32,
-    pub author_node_id: u32,
-}
-
-/// 创作态补丁
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct WorldPatch {
-    pub patch_id: [u8; 16],
-    pub base_authoring_revision: u64,
-    pub hlc: HlcTimestamp,
-    pub safety_class: LiveEditSafetyClass,
-    pub operations: Vec<WorldPatchOp>,
-}
-
-/// 补丁操作
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum WorldPatchOp {
-    SetWorldParam {
-        key_path: String,
-        new_value_json: String,
-    },
-    PaintTerrainRect {
-        x0: i32,
-        y0: i32,
-        width: u32,
-        height: u32,
-        tile_kind: u8,
-    },
-    UpsertSeedGenome {
-        genome_slug: String,
-        genome_bytes_b64: String,
-    },
-    UpdateRuleModule {
-        module_id: String,
-        ts_source: String,
-        compiled_rir_blake3: [u8; 32],
-    },
-    RemoveEntityTemplate {
-        template_id: String,
-    },
-}
+use rynvek_core::error::RynvekErrorCode;
+pub use rynvek_world::{HlcTimestamp, LiveEditSafetyClass, WorldPatch, WorldPatchOp};
 
 /// 单个补丁的操作数上限
 pub const MAX_PATCH_OPERATIONS: usize = 4096;

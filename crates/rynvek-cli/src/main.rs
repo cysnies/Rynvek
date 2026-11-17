@@ -136,6 +136,9 @@ struct ServerArgs {
     /// Lab 实验最大并发执行数
     #[arg(long, default_value_t = 2)]
     lab_max_concurrent: usize,
+    /// 仅回环内存开发服：允许此精确 Web Origin 创建本地 PvE（不适用于公网）。
+    #[arg(long)]
+    local_practice_origin: Option<String>,
 }
 
 #[derive(Debug, Args)]

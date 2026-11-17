@@ -35,7 +35,8 @@ impl FrameScene {
     pub fn push(&mut self, instance: InstanceData) {
         let accepted = instance
             .render_layer()
-            .filter(|l| !l.is_fullscreen() && self.layers.contains(*l));
+            // 静态地图复用 L0 实例；L1 热力图仍只读取既有场缓冲。
+            .filter(|l| *l != RenderLayer::FieldHeatmap && self.layers.contains(*l));
         if let Some(layer) = accepted {
             self.instances[layer.index() as usize].push(instance);
         }
@@ -152,7 +153,7 @@ mod tests {
             c,
             InstanceShape::Square,
         ));
-        // 全屏层不接受实例
+        // L0 同时支持网格底色和真实地形实例，仍按层顺序绘制。
         scene.push(InstanceData::new(
             RenderLayer::Terrain,
             [0.0; 2],
@@ -161,6 +162,23 @@ mod tests {
             InstanceShape::Square,
         ));
         let layers: Vec<u32> = scene.ordered_instances().iter().map(|i| i.layer).collect();
-        assert_eq!(layers, [2, 7]);
+        assert_eq!(layers, [0, 2, 7]);
+        scene.push(InstanceData::new(
+            RenderLayer::FieldHeatmap,
+            [0.0; 2],
+            1.0,
+            c,
+            InstanceShape::Square,
+        ));
+        assert!(scene.layer_instances(RenderLayer::FieldHeatmap).is_empty());
+        let mut masked = FrameScene::new(0, RenderLayerMask::ALL.without(RenderLayer::Terrain));
+        masked.push(InstanceData::new(
+            RenderLayer::Terrain,
+            [0.0; 2],
+            1.0,
+            c,
+            InstanceShape::Square,
+        ));
+        assert!(masked.layer_instances(RenderLayer::Terrain).is_empty());
     }
 }

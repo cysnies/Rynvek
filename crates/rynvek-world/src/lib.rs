@@ -29,7 +29,5 @@ pub use package::{
     Package, PackageEntry, PackageError, PackageInput, PackageInputEntry, PackageKind, PackageManifest, read_package,
     write_package,
 };
-pub use partition::{
-    EntityHandoffCoordinator, EntityHandoffEnvelope, HandoffState, PartitionCoord, WorldProfile,
-};
+pub use partition::{EntityHandoffCoordinator, EntityHandoffEnvelope, HandoffState, PartitionCoord, WorldProfile};
 pub use rworld::{WorldBundle, WorldConfigFile};

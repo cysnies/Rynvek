@@ -29,7 +29,7 @@ use rynvek_agent::{
 use rynvek_rts::commands::{CommandAck, RtsCommand};
 use rynvek_rts::observation::FactionObservation;
 use rynvek_rts::world::{MATCH_TIME_LIMIT_TICKS, SUDDEN_DEATH_TICKS};
-use rynvek_rts::{ArenaMapSize, ArenaWorld, FactionId, MatchConfig, MatchMode, RtsEvent};
+use rynvek_rts::{ArenaMapSize, ArenaRuntime, ArenaWorld, FactionId, MatchConfig, MatchMode, RtsEvent};
 use serde::{Deserialize, Serialize};
 
 pub use tool_host::{ArenaPlan, ArenaToolHost};
@@ -211,7 +211,7 @@ fn event_visible_to(e: &RtsEvent, faction: FactionId) -> bool {
 /// 竞技场会话
 #[derive(Debug)]
 pub struct ArenaSession<C: MonotonicClock> {
-    pub world: ArenaWorld,
+    pub world: ArenaRuntime,
     broker: ToolBroker<C>,
     seats: BTreeMap<String, Seat>,
     /// 被人类接管的 Agent（阵营 → 原持有者与等级），人类交还后自动恢复
@@ -223,7 +223,17 @@ pub struct ArenaSession<C: MonotonicClock> {
 impl<C: MonotonicClock> ArenaSession<C> {
     pub fn new(config: MatchConfig, clock: C) -> Self {
         Self {
-            world: ArenaWorld::new(config),
+            world: ArenaRuntime::new([0; 16], ArenaWorld::new(config)),
+            broker: ToolBroker::new(clock),
+            seats: BTreeMap::new(),
+            standby: BTreeMap::new(),
+            pending_events: BTreeMap::new(),
+        }
+    }
+
+    pub fn from_runtime(world: ArenaRuntime, clock: C) -> Self {
+        Self {
+            world,
             broker: ToolBroker::new(clock),
             seats: BTreeMap::new(),
             standby: BTreeMap::new(),
@@ -449,7 +459,7 @@ impl<C: MonotonicClock> ArenaSession<C> {
         let ack = self
             .world
             .apply_command(FactionId(seat.faction as u8), cmd)
-            .map_err(|e| AgentError::new(e.code(), e.to_string()))?;
+            .map_err(|e| AgentError::new(e, "命令事务已拒绝"))?;
         self.broker.apm_mut(seat.faction).try_acquire(tick)?;
         Ok(ack)
     }
@@ -458,8 +468,14 @@ impl<C: MonotonicClock> ArenaSession<C> {
     ///
     /// 由 `advance` 消息（本地 / PvE / 测试）与 `rynvek-server` 的实时 Tick 驱动共用；
     /// 调用方负责把事件与观测按自己的线上格式下发。
-    pub fn step_world(&mut self, ticks: u32) -> BTreeMap<u32, Vec<RtsEvent>> {
-        self.world.run(ticks as u64);
+    pub fn step_world(&mut self, ticks: u32) -> Result<BTreeMap<u32, Vec<RtsEvent>>, AgentError> {
+        for _ in 0..ticks {
+            self.world.step().map_err(|e| AgentError::new(e, "权威 Tick 未推进"))?;
+        }
+        Ok(self.drain_visible_events())
+    }
+
+    pub fn drain_visible_events(&mut self) -> BTreeMap<u32, Vec<RtsEvent>> {
         let events = self.world.drain_events();
         (0..self.world.factions.len() as u32)
             .map(|f| {
@@ -484,7 +500,11 @@ impl<C: MonotonicClock> ArenaSession<C> {
     }
 
     fn advance(&mut self, ticks: u32) -> Vec<Envelope> {
-        for (f, events) in self.step_world(ticks) {
+        let events = match self.step_world(ticks) {
+            Ok(events) => events,
+            Err(e) => return Self::error("", e),
+        };
+        for (f, events) in events {
             self.pending_events.entry(f).or_default().extend(events);
         }
         let mut out = Vec::new();

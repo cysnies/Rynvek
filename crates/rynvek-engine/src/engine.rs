@@ -47,6 +47,8 @@ const PROBE_SAMPLES: usize = 64;
 pub struct EngineConfig {
     pub world_id: [u8; 16],
     pub gpu_mode: GpuMode,
+    /// Some 时仅呈现该阵营服务器观察，不运行本地仿真。
+    pub arena_faction: Option<u8>,
     /// DeviceLost 恢复最大失败次数（达到即降级）
     pub max_recovery_attempts: u32,
     /// 画布设备像素尺寸
@@ -58,6 +60,7 @@ impl Default for EngineConfig {
         Self {
             world_id: [0; 16],
             gpu_mode: GpuMode::Auto,
+            arena_faction: None,
             max_recovery_attempts: DeviceLostRecovery::DEFAULT_MAX_ATTEMPTS,
             viewport: [1280, 720],
         }
@@ -167,6 +170,9 @@ struct PendingVerification {
 pub struct Engine {
     config: EngineConfig,
     sim: SimulationEngine,
+    arena_observation: Option<Box<rynvek_rts::observation::FactionObservation>>,
+    arena_map: Option<Box<crate::protocol::ArenaMapData>>,
+    arena_selection: crate::observation::Selection,
     owner: Option<GpuDeviceOwner>,
     gpu: Option<GpuResources>,
     recovery: DeviceLostRecovery,
@@ -195,6 +201,9 @@ impl Engine {
         let camera = Camera2D::fit(TILE_DIM as f32, config.viewport);
         Self {
             sim: SimulationEngine::new(config.world_id),
+            arena_observation: None,
+            arena_map: None,
+            arena_selection: Default::default(),
             recovery: DeviceLostRecovery::new(config.max_recovery_attempts),
             config,
             owner: None,
@@ -264,6 +273,7 @@ impl Engine {
             profile,
             adapter,
             generation,
+            arena_faction: self.config.arena_faction,
         });
     }
 
@@ -407,6 +417,7 @@ impl Engine {
 
     /// 推进一个权威 Tick
     pub fn step(&mut self) -> Result<TickCommitManifest, EngineError> {
+        self.require_local_simulation()?;
         self.pump();
         let manifest = self.sim.tick()?;
         self.last_tick = manifest.tick;
@@ -753,8 +764,8 @@ impl Engine {
     /// 登记拾取请求（画布像素坐标）；无渲染资源时立即回复未命中
     pub fn request_pick(&mut self, request_id: u32, x: u32, y: u32) {
         match self.gpu.as_mut().and_then(|g| g.render.as_mut()) {
-            Some(render) => render.picker.request(request_id, x, y),
-            None => self.events.push_back(EngineEvent::PickResult {
+            Some(render) if self.config.arena_faction.is_none() => render.picker.request(request_id, x, y),
+            _ => self.events.push_back(EngineEvent::PickResult {
                 request_id,
                 dense_index: None,
             }),
@@ -771,11 +782,46 @@ impl Engine {
         }
     }
 
+    fn require_local_simulation(&self) -> Result<(), EngineError> {
+        if self.config.arena_faction.is_some() {
+            return Err(EngineError {
+                code: RynvekErrorCode::SimulationInvariantViolated,
+                message: "远程阵营显示禁止 STEP/START；命令必须提交服务器权威宿主".into(),
+            });
+        }
+        Ok(())
+    }
+
+    /// 与 GPU 上传共用的只读场景路径；远程模式初始化前为空，不显示四实体演示。
+    pub fn frame_scene(&self) -> rynvek_render::FrameScene {
+        if self.config.arena_faction.is_some() {
+            return self.arena_observation.as_ref().map_or_else(
+                || rynvek_render::FrameScene::new(0, rynvek_render::RenderLayerMask::NONE),
+                |obs| {
+                    crate::observation::presentation_scene(
+                        obs,
+                        self.layer_mask,
+                        self.arena_map.as_deref(),
+                        &self.arena_selection,
+                    )
+                },
+            );
+        }
+        collect_scene(
+            &self.sim,
+            self.last_tick,
+            self.camera.lod(),
+            self.layer_mask,
+            &[&EntityProvider::default()],
+        )
+    }
+
     /// 录制并提交一帧到 `color_view`（尺寸必须等于 `camera.viewport`）；设备不可用时返回 `false`
     pub fn render_frame(&mut self, color_view: &wgpu::TextureView) -> bool {
         if !self.recovery.can_submit_gpu_work() {
             return false;
         }
+        let scene = self.frame_scene();
         let (Some(owner), Some(gpu)) = (&self.owner, &mut self.gpu) else {
             return false;
         };
@@ -786,13 +832,6 @@ impl Engine {
             return false;
         };
         let (device, queue) = (owner.device(), owner.queue());
-        let scene = collect_scene(
-            &self.sim,
-            self.last_tick,
-            self.camera.lod(),
-            self.layer_mask,
-            &[&EntityProvider::default()],
-        );
         let field = FieldOverlay {
             buffer: gpu.mirror.channel_buffer(self.heatmap_channel),
             tile_dim: TILE_DIM as u32,
@@ -812,7 +851,7 @@ impl Engine {
             &render.pick_view,
             &scene,
             &self.camera,
-            Some(field),
+            self.config.arena_faction.is_none().then_some(field),
         );
         render.picker.encode(&mut enc, &render.pick_texture);
         queue.submit([enc.finish()]);
@@ -850,15 +889,30 @@ impl Engine {
         out
     }
 
+    fn require_arena_binding(&self, world_id: &str) -> Result<(), EngineError> {
+        if self.shutdown
+            || self.config.arena_faction.is_none()
+            || crate::protocol::parse_world_id(world_id) != Some(self.config.world_id)
+        {
+            return Err(EngineError {
+                code: RynvekErrorCode::SimulationInvariantViolated,
+                message: "表现消息与只读世界绑定不符".into(),
+            });
+        }
+        Ok(())
+    }
+
     /// 执行一条协议命令（`ENGINE_INIT` 由宿主处理）
     pub fn handle_command(&mut self, cmd: EngineCommand) -> Result<(), EngineError> {
         match cmd {
             EngineCommand::EngineInit { .. } => {}
             EngineCommand::Resize { width, height, .. } => self.resize(width, height),
             EngineCommand::Step { ticks } => {
+                self.require_local_simulation()?;
                 self.run_ticks(ticks)?;
             }
             EngineCommand::Start { tick_rate } => {
+                self.require_local_simulation()?;
                 self.running = true;
                 self.tick_rate = tick_rate.clamp(1, 240);
             }
@@ -881,11 +935,91 @@ impl Engine {
                         message: format!("未知场通道 {channel}"),
                     })?;
             }
+            EngineCommand::ArenaMap { world_id, map } => {
+                self.require_arena_binding(&world_id)?;
+                crate::observation::validate_map(&map)?;
+                if self.arena_map.as_ref().is_some_and(|old| old != &map)
+                    || self
+                        .arena_observation
+                        .as_ref()
+                        .is_some_and(|obs| !crate::observation::map_matches(&map, obs))
+                {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "地图不可替换，且必须匹配观察网格".into(),
+                    });
+                }
+                self.arena_map = Some(map);
+            }
+            EngineCommand::ArenaSelection {
+                world_id,
+                units,
+                building,
+            } => {
+                self.require_arena_binding(&world_id)?;
+                if units.len() > 65_536 {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "选择数量超过上限".into(),
+                    });
+                }
+                self.arena_selection.units = units.into_iter().collect();
+                self.arena_selection.building = building;
+            }
+            EngineCommand::ArenaOverlay {
+                world_id,
+                drag,
+                placement,
+            } => {
+                self.require_arena_binding(&world_id)?;
+                if drag
+                    .as_ref()
+                    .is_some_and(|points| points.iter().flatten().any(|v| !v.is_finite() || v.abs() > 1_048_576.0))
+                {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "拖框坐标不是有界有限值".into(),
+                    });
+                }
+                self.arena_selection.drag = drag;
+                self.arena_selection.placement = placement;
+            }
+            EngineCommand::ArenaObservation { world_id, observation } => {
+                if self.shutdown
+                    || crate::protocol::parse_world_id(&world_id) != Some(self.config.world_id)
+                    || self.config.arena_faction != Some(observation.faction.0)
+                    || self
+                        .arena_observation
+                        .as_ref()
+                        .is_some_and(|old| observation.tick < old.tick)
+                {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::SimulationInvariantViolated,
+                        message: "观察的世界/阵营/时序与只读宿主不符".into(),
+                    });
+                }
+                crate::observation::validate(&observation)?;
+                if self
+                    .arena_map
+                    .as_ref()
+                    .is_some_and(|map| !crate::observation::map_matches(map, &observation))
+                {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "观察与静态地图尺寸不符".into(),
+                    });
+                }
+                self.last_tick = observation.tick;
+                self.arena_observation = Some(observation);
+            }
             EngineCommand::SimulateDeviceLost => self.simulate_device_lost(),
             EngineCommand::Shutdown => {
                 self.running = false;
                 self.shutdown = true;
                 self.gpu = None;
+                self.arena_observation = None;
+                self.arena_map = None;
+                self.arena_selection = Default::default();
             }
         }
         Ok(())

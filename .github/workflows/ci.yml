@@ -11,6 +11,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
+  # 标准 Runner 在全工作区测试链接时耗尽磁盘；仅去除调试符号，不关闭断言或减少检查。
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "2"
 
 jobs:
   ci-full-gate:
@@ -31,6 +36,41 @@ jobs:
           toolchain: "1.87.0"
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown, wasm32-wasip2
+
+      # 44034688781已通过Rust测试/黄金向量/插件夹具，实际因缺cargo-deny失败。
+      # 固定工具版本并预取锁定依赖；保留后续离线安装与完整门禁，不跳过任何检查。
+      - name: Prepare full gate prerequisites
+        run: |
+          npm install --global pnpm@10.21.0
+          pnpm --version
+          pnpm fetch --frozen-lockfile
+          PYTOOLS="$RUNNER_TEMP/rynvek-python-tools"
+          python3 -m venv "$PYTOOLS"
+          "$PYTOOLS/bin/python" -m pip install uv==0.13.8
+          "$PYTOOLS/bin/uv" --version
+          echo "$PYTOOLS/bin" >> "$GITHUB_PATH"
+          TOOLS="$RUNNER_TEMP/rynvek-license-tools"
+          mkdir -p "$TOOLS"
+          curl --fail --location --max-time 90 --max-filesize 8000000 --output "$TOOLS/cli.tar.gz" https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  $TOOLS/cli.tar.gz" | sha256sum --check
+          tar -xzf "$TOOLS/cli.tar.gz" -C "$TOOLS" --strip-components=1
+          "$TOOLS/cargo-deny" --version
+          echo "$TOOLS" >> "$GITHUB_PATH"
+          cargo fetch --locked
+
+      # 先生成真实同版本 Worker ABI，后续 typecheck/build 不靠提交旧二进制过门禁。
+      - name: Build browser WASM and verify generated ABI
+        run: |
+          command -v clang
+          TOOLS="$RUNNER_TEMP/rynvek-wasm-tools"
+          mkdir -p "$TOOLS"
+          curl --fail --location --max-time 90 --max-filesize 16000000 --output "$TOOLS/cli.tar.gz" https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.130/wasm-bindgen-0.2.130-x86_64-unknown-linux-musl.tar.gz
+          echo "9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f  $TOOLS/cli.tar.gz" | sha256sum --check
+          tar -xzf "$TOOLS/cli.tar.gz" -C "$TOOLS"
+          export WASM_BINDGEN="$TOOLS/wasm-bindgen-0.2.130-x86_64-unknown-linux-musl/wasm-bindgen"
+          echo "WASM_BINDGEN=$WASM_BINDGEN" >> "$GITHUB_ENV"
+          node apps/web-platform/tools/build-wasm.mjs
+          node --test apps/web-platform/tools/wasm-abi.test.mjs
 
       - name: Run Rynvek CI Full Gate
         run: cargo xtask ci-full-gate --soak-duration 90s

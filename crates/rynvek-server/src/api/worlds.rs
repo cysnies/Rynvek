@@ -11,6 +11,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::{SinkExt, StreamExt};
 use rynvek_core::error::RynvekErrorCode;
+use rynvek_engine::ArenaRuntime;
 use rynvek_network::NetError;
 use rynvek_network::link::{Link, TransportKind};
 use rynvek_protocol::{CapabilityScope, WireUuid};
@@ -116,6 +117,9 @@ struct CreateWorld {
     visibility: Option<Visibility>,
     #[serde(default)]
     map_seed: Option<u64>,
+    /// 仅 PvE 新世界显式启用；既有世界和排位绝不自动改变规则。
+    #[serde(default)]
+    ecology: Option<rynvek_rts::world::ecology::ForagerEcologyContract>,
 }
 
 /// `.rworld` 上传时通过查询串传递的元数据（请求体是二进制包）
@@ -152,18 +156,23 @@ pub async fn create(
     let (title, org, visibility, config, mode, manifest) = if content_type.starts_with("application/json") {
         let req: CreateWorld = super::parse_json(&body)?;
         let seed = req.map_seed.unwrap_or(1);
-        let (config, mode) = match req.template.as_str() {
+        let (mut config, mode) = match req.template.as_str() {
             "arena_duel" => (MatchConfig::duel(seed), "PvP_Custom"),
             "arena_pve" => (MatchConfig::pve(seed, 1), "PvE_Survival"),
             other => return Err(ApiError::bad_request(format!("未知模板 `{other}`"))),
         };
+        if req.ecology.is_some() && config.mode != rynvek_rts::MatchMode::PveSurvival {
+            return Err(ApiError::bad_request("未认证的能量规则仅可用于PvE新世界"));
+        }
+        config.ecology = req.ecology;
+        config.validate_energy_contract().map_err(ApiError::bad_request)?;
         let manifest = serde_json::json!({ "template": req.template, "config": config });
         (req.title, req.org_id, req.visibility, config, mode, manifest)
     } else if content_type.starts_with(rynvek_world::rworld::RWORLD_MEDIA_TYPE)
         || content_type.starts_with("application/octet-stream")
     {
         let bundle = rynvek_world::WorldBundle::from_bytes(&body).map_err(|e| ApiError::new(e.code, e.detail))?;
-        let package_cid = app.inner.blobs.put(&body)?;
+        let package_cid = app.inner.world_snapshots.put(&body)?;
         let m = &bundle.package.manifest;
         let manifest = serde_json::json!({
             "template": bundle.config.template,
@@ -203,10 +212,18 @@ pub async fn create(
         None => subject.principal_id,
     };
     authorize(&subject, CapabilityScope::WorldCreate, &Resource::Org { org_id }).map_err(ApiError::from)?;
-    let root = *ArenaWorld::new(config.clone()).state_hash().as_bytes();
+    let initial_world = ArenaWorld::new(config.clone());
+    let mut manifest = manifest;
+    manifest["config"] = serde_json::to_value(&initial_world.config).expect("可序列化");
     let manifest = serde_json::to_vec(&manifest).expect("可序列化");
-    let genesis = app.inner.blobs.put(&manifest)?;
+    let genesis = app.inner.world_snapshots.put(&manifest)?;
     let world_id = new_uuid_v7();
+    let runtime = ArenaRuntime::new(world_id.0, initial_world);
+    let checkpoint = runtime
+        .checkpoint()
+        .map_err(|e| ApiError::new(e, "无法编码创世检查点"))?;
+    let root = checkpoint.state_root;
+    let snapshot = app.inner.world_snapshots.put(&checkpoint.bytes)?;
     let row = WorldRow {
         world_id,
         org_id,
@@ -234,7 +251,7 @@ pub async fn create(
                 parent_revision: None,
                 state_root_blake3: root,
                 journal_segment_cid: genesis.0,
-                snapshot_cid: None,
+                snapshot_cid: Some(snapshot.0),
             },
         )
         .await?;
@@ -270,7 +287,7 @@ pub async fn commits(State(app): State<AppState>, headers: HeaderMap, Path(id): 
     .into_response())
 }
 
-/// Copy-on-Write 分叉：新世界的创世提交复用源提交的全部 CID，归属调用者的个人组织
+/// 分叉保留来源记录，但完整检查点必须重新绑定新世界身份与创世修订。
 async fn fork_world(
     app: &AppState,
     subject: &Subject,
@@ -283,7 +300,18 @@ async fn fork_world(
         .iter()
         .find(|c| c.world_revision == revision)
         .ok_or_else(|| ApiError::not_found(format!("修订 {revision} 不存在")))?;
+    let mut source_revision = source.clone();
+    source_revision.latest_revision = base.world_revision;
+    source_revision.latest_tick = base.tick;
+    source_revision.latest_state_root = base.state_root_blake3;
+    let runtime = restore_runtime(app, &source_revision).await?;
     let world_id = new_uuid_v7();
+    let checkpoint = runtime
+        .fork(world_id.0)
+        .map_err(|e| ApiError::new(e, "未封口候选Tick不能普通分叉"))?
+        .checkpoint()
+        .map_err(|e| ApiError::new(e, "无法编码分叉检查点"))?;
+    let snapshot = app.inner.world_snapshots.put(&checkpoint.bytes)?;
     let row = WorldRow {
         world_id,
         org_id: subject.principal_id,
@@ -294,7 +322,7 @@ async fn fork_world(
         forked_at_revision: Some(revision),
         latest_tick: base.tick,
         latest_revision: 0,
-        latest_state_root: base.state_root_blake3,
+        latest_state_root: checkpoint.state_root,
         lease_holder_node: None,
         fencing_token: 1,
         ..source.clone()
@@ -307,9 +335,9 @@ async fn fork_world(
                 world_revision: 0,
                 tick: base.tick,
                 parent_revision: None,
-                state_root_blake3: base.state_root_blake3,
+                state_root_blake3: checkpoint.state_root,
                 journal_segment_cid: base.journal_segment_cid,
-                snapshot_cid: base.snapshot_cid,
+                snapshot_cid: Some(snapshot.0),
             },
         )
         .await?;
@@ -351,11 +379,14 @@ pub async fn fork(
     Ok((StatusCode::CREATED, Json(world_json(&row))).into_response())
 }
 
+pub(crate) async fn restore_runtime(app: &AppState, world: &WorldRow) -> ApiResult<ArenaRuntime> {
+    crate::transactions::restore_committed(app.store(), app.inner.world_snapshots.as_ref(), world).await
+}
+
 /// `08 POST /api/v1/worlds/{world_id}/patches`（`world.edit`）：请求体为规范 10.2 `WorldPatch`
 ///
-/// 校验（E-021）后补丁内容寻址入库，并作为新提交追加到提交链（`journal_segment_cid` 指向补丁，状态根暂不变；
-/// 执行后的状态根由运行中世界的执行器以新提交写入——执行器属于 Studio 里程碑）。
-/// `RequiresForkRestart` 补丁自动产生 WorldFork：先 Copy-on-Write 分叉，再把补丁提交到新世界（另需 `world.fork`）。
+/// 在私有检查点上运行真实领域事务，提交成功后才返回 applied。
+/// 活动宿主拥有编辑队列；只有缺失本地宿主却仍有租约时拒绝旁路，不能制造第二份权威。
 pub async fn patches(
     State(app): State<AppState>,
     headers: HeaderMap,
@@ -363,7 +394,7 @@ pub async fn patches(
     body: Bytes,
 ) -> ApiResult<Response> {
     let subject = app.require(&headers, CapabilityScope::WorldEdit).await?;
-    let mut world = load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
+    let world = load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
     if body.len() > MAX_PATCH_BYTES {
         return Err(ApiError::bad_request("WorldPatch 超过 1 MiB"));
     }
@@ -375,6 +406,26 @@ pub async fn patches(
         .with_status(StatusCode::UNPROCESSABLE_ENTITY)
     })?;
     let required = crate::patch::validate(&patch)?;
+    let active = app.registry().by_world(&world.world_id);
+    if let Some(host) = active {
+        let applied = host.apply_patch(patch.clone()).await?;
+        return Ok((
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "status": "applied", "state_root": crate::ids::hex(&applied.state_root),
+                "report": applied.report, "world_id": world.world_id.to_string(), "world_revision": applied.revision,
+                "patch_cid": crate::ids::hex(&applied.patch_cid), "required_class": required,
+                "scheduled_for": "applied_tick_boundary", "effective_tick": applied.effective_tick, "forked_from": null,
+            })),
+        )
+            .into_response());
+    }
+    if world.lease_holder_node.is_some() {
+        return Err(ApiError::new(
+            RynvekErrorCode::StructuralMutationConflict,
+            "宿主租约仍在，不允许恢复旁路权威",
+        ));
+    }
     if patch.base_authoring_revision != world.latest_revision {
         return Err(ApiError::new(
             RynvekErrorCode::StructuralMutationConflict,
@@ -384,30 +435,40 @@ pub async fn patches(
             ),
         ));
     }
-    let mut forked_from = None;
     if patch.safety_class == LiveEditSafetyClass::RequiresForkRestart {
-        authorize(&subject, CapabilityScope::WorldFork, &world_resource(&world)).map_err(ApiError::from)?;
-        let parent = world.clone();
-        world = fork_world(&app, &subject, &parent, parent.latest_revision, None).await?;
-        forked_from = Some(parent.world_id);
+        return Err(ApiError::new(
+            RynvekErrorCode::PluginCapabilityDenied,
+            "分叉重启操作尚未接通，不创建假成功分叉",
+        )
+        .with_status(StatusCode::UNPROCESSABLE_ENTITY));
     }
-    let cid = app.inner.blobs.put(&body)?;
-    let revision = world.latest_revision + 1;
+    let mut runtime = restore_runtime(&app, &world).await?;
+    let (_, scheduled_tick) = crate::patch::schedule(patch.safety_class, world.latest_tick);
+    let effective_tick = scheduled_tick.unwrap_or(world.latest_tick);
+    let report = runtime
+        .transact_at(effective_tick, |arena| patch.apply_at_boundary(arena, effective_tick))
+        .map_err(|e| ApiError::new(e, "补丁未应用：整包事务已拒绝").with_status(StatusCode::UNPROCESSABLE_ENTITY))?;
+    let checkpoint = runtime
+        .checkpoint()
+        .map_err(|e| ApiError::new(e, "无法编码事务检查点"))?;
+    let snapshot = app.inner.world_snapshots.put(&checkpoint.bytes)?;
+    let cid = app.inner.world_snapshots.put(&body)?;
+    let revision = checkpoint.revision;
+    // 持久化事务是唯一发布点；并发失败只留下不可达 CAS 对象，不更新任何运行中内存副本。
     app.store()
         .append_commit(
             CommitRow {
                 world_id: world.world_id,
                 world_revision: revision,
-                tick: world.latest_tick,
+                tick: checkpoint.tick,
                 parent_revision: Some(world.latest_revision),
-                state_root_blake3: world.latest_state_root,
+                state_root_blake3: checkpoint.state_root,
                 journal_segment_cid: cid.0,
-                snapshot_cid: None,
+                snapshot_cid: Some(snapshot.0),
             },
             world.fencing_token,
         )
         .await?;
-    let (scheduled_for, effective_tick) = crate::patch::schedule(patch.safety_class, world.latest_tick);
     app.audit(
         Some(subject.principal_id),
         "world.patch",
@@ -421,23 +482,45 @@ pub async fn patches(
     )
     .await;
     Ok((
-        StatusCode::ACCEPTED,
+        StatusCode::OK,
         Json(serde_json::json!({
+            "status": "applied",
+            "state_root": crate::ids::hex(&checkpoint.state_root),
+            "report": report,
             "world_id": world.world_id.to_string(),
             "world_revision": revision,
             "patch_cid": cid.to_hex(),
             "required_class": required,
-            "scheduled_for": scheduled_for,
+            "scheduled_for": "applied_tick_boundary",
             "effective_tick": effective_tick,
-            "forked_from": forked_from.map(|w| w.to_string()),
+            "forked_from": null,
         })),
     )
         .into_response())
 }
 
 /// `09 WS /api/v1/worlds/{world_id}/stream`（`world.connect`，令牌在首帧 ClientHello 中校验）
-pub async fn stream(State(app): State<AppState>, Path(id): Path<String>, ws: WebSocketUpgrade) -> ApiResult<Response> {
+#[derive(Debug, Default, Deserialize)]
+pub struct StreamFormat {
+    pub format: Option<String>,
+}
+
+pub async fn stream(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Query(format): Query<StreamFormat>,
+    ws: WebSocketUpgrade,
+) -> ApiResult<Response> {
     let world_id: WireUuid = parse_world_id(&id)?;
+    if let Some(format) = format.format {
+        if format != "arena-json" {
+            return Err(ApiError::bad_request("未知流格式"));
+        }
+        return Ok(ws
+            .max_message_size(64 * 1024)
+            .on_upgrade(move |socket| crate::browser::serve(app, world_id, socket))
+            .into_response());
+    }
     let max = rynvek_protocol::wire::WIRE_FRAME_HEADER_LEN + rynvek_protocol::wire::MAX_WIRE_PAYLOAD_LEN as usize;
     Ok(ws
         .max_message_size(max)

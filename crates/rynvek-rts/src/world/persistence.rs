@@ -125,6 +125,7 @@ struct RngsChunkDto {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct ConfChunkDto {
+    pub arena_format: String,
     pub config: MatchConfig,
     pub map_width: u32,
     pub map_height: u32,
@@ -155,6 +156,9 @@ impl ArenaWorld {
         world_revision: u64,
         parent_state_root: [u8; 32],
     ) -> Result<(Vec<u8>, SnapshotWriteOutput), RynvekErrorCode> {
+        if !self.validate_ecology() {
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+        }
         let mut reg = EntityRegistry::new(u16::from_le_bytes([world_id[0], world_id[1]]).into());
         for _ in 0..(self.buildings.len() + self.units.len()) {
             reg.spawn(1)?;
@@ -163,6 +167,7 @@ impl ArenaWorld {
         let canonical = self.canonical_state_with_parent(Blake3Hash(parent_state_root));
 
         let conf = ConfChunkDto {
+            arena_format: "rynvek-arena/4".into(),
             config: self.config.clone(),
             map_width: self.map.width,
             map_height: self.map.height,
@@ -239,7 +244,7 @@ impl ArenaWorld {
             outcome: self.outcome.clone(),
         };
 
-        let extra_chunks = vec![
+        let mut extra_chunks = vec![
             SnapshotCustomChunk {
                 tag: CMIT_TAG,
                 payload: self
@@ -265,6 +270,9 @@ impl ArenaWorld {
             to_chunk(ROOT_TAG, &canonical)?,
         ];
 
+        if let Some(ecology) = &self.ecology {
+            extra_chunks.push(to_chunk(super::ecology::ECOL_TAG, ecology)?);
+        }
         SnapshotWriter::write_bytes_with_chunks(
             world_id,
             self.tick,
@@ -316,6 +324,9 @@ impl ArenaWorld {
             read.find_chunk(CONF_TAG)
                 .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
+        if conf.arena_format != "rynvek-arena/4" {
+            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
+        }
         let comp: CompChunkDto = from_chunk(
             read.find_chunk(COMP_TAG)
                 .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
@@ -428,7 +439,9 @@ impl ArenaWorld {
             });
         }
 
+        let ecology = read.find_chunk(super::ecology::ECOL_TAG).map(from_chunk).transpose()?;
         let mut world = Self {
+            ecology,
             config: conf.config,
             map,
             nav,
@@ -449,6 +462,9 @@ impl ArenaWorld {
             command_log: None,
         };
 
+        if !world.validate_ecology() {
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+        }
         if let Some(neur) = &read.neur {
             world.restore_from_neur(neur)?;
         }

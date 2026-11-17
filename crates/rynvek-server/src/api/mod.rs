@@ -43,6 +43,7 @@ pub const ROUTES: [(&str, &str, &str); 20] = [
 /// 构建路由
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/api/v1/local/practice", post(crate::local::practice))
         .route("/api/v1/meta/health", get(meta::health))
         .route("/api/v1/meta/source-offer", get(meta::source_offer))
         .route(crate::source::SBOM_PATH, get(meta::sbom))

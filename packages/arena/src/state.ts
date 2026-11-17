@@ -26,6 +26,8 @@ export interface Camera {
   x: number;
   y: number;
   zoom: number;
+  /** WorldRenderer 使用 Y 向下；缺省保留临时 Canvas2D 的 Y 向上。 */
+  yDown?: boolean;
 }
 
 export const CAMERA_PAN_TILES = 8;

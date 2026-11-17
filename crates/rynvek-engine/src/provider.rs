@@ -126,7 +126,7 @@ impl VisualizationProvider<ArenaWorld> for ArenaVisualizationProvider {
 #[derive(Debug)]
 pub enum WorldRuntime {
     Simulation(Box<SimulationEngine>),
-    Arena(Box<ArenaWorld>),
+    Arena(Box<rynvek_rts::ArenaRuntime>),
 }
 
 impl WorldRuntime {
@@ -135,7 +135,10 @@ impl WorldRuntime {
     }
 
     pub fn new_arena(config: MatchConfig) -> Self {
-        Self::Arena(Box::new(ArenaWorld::new(config)))
+        Self::Arena(Box::new(rynvek_rts::ArenaRuntime::new(
+            [0; 16],
+            ArenaWorld::new(config),
+        )))
     }
 
     /// 推进一个权威 Tick 并返回最新 32 字节世界状态根
@@ -143,8 +146,8 @@ impl WorldRuntime {
         match self {
             Self::Simulation(sim) => Ok(sim.tick()?.state_root_hash),
             Self::Arena(arena) => {
-                arena.step();
-                Ok(arena.state_hash().0)
+                arena.step().map_err(SimulationError::Invariant)?;
+                Ok(arena.state_root())
             }
         }
     }
@@ -153,7 +156,7 @@ impl WorldRuntime {
     pub fn tick(&self) -> u64 {
         match self {
             Self::Simulation(sim) => sim.clock.tick,
-            Self::Arena(arena) => arena.tick,
+            Self::Arena(arena) => arena.world().tick,
         }
     }
 
@@ -165,7 +168,7 @@ impl WorldRuntime {
                 .as_ref()
                 .map(|m| m.state_root_hash)
                 .unwrap_or(sim.parent_commit_hash),
-            Self::Arena(arena) => arena.state_hash().0,
+            Self::Arena(arena) => arena.state_root(),
         }
     }
 
@@ -176,7 +179,7 @@ impl WorldRuntime {
                 EntityProvider::default().populate(sim, lod, scene);
             }
             Self::Arena(arena) => {
-                ArenaVisualizationProvider.populate(arena, lod, scene);
+                ArenaVisualizationProvider.populate(arena.world(), lod, scene);
             }
         }
     }

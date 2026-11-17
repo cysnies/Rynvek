@@ -77,10 +77,17 @@ export function runEngineWorker(
     if (engine.phase() === "shut-down") stopped = true;
   };
 
+  const fail = (error: unknown): void => {
+    if (stopped) return;
+    stopped = true;
+    scope.postMessage([{ type: "ENGINE_ERROR", code: 0x3003,
+      message: `Worker 调用失败：${error instanceof Error ? error.message : String(error)}` }]);
+  };
+
   const frame = (t: number): void => {
     if (stopped) return;
-    emit(scope, engine.frame(t));
-    checkStopped();
+    try { emit(scope, engine.frame(t)); checkStopped(); }
+    catch (error) { fail(error); }
   };
 
   const schedule = (): void => {
@@ -99,12 +106,22 @@ export function runEngineWorker(
   };
 
   scope.addEventListener("message", (ev) => {
-    const data = ev.data as { type?: unknown; canvas?: unknown } | null | undefined;
+    const data = ev.data as { type?: unknown; canvas?: unknown; arenaFaction?: unknown; gpuMode?: unknown } | null | undefined;
     queue = queue.then(async () => {
       if (stopped) return;
       if (data && data.type === "ENGINE_INIT") {
         const { canvas, ...rest } = data;
-        emit(scope, await engine.init(canvas, JSON.stringify(rest)));
+        const result = await engine.init(canvas, JSON.stringify(rest));
+        if (rest.arenaFaction !== undefined && engine.phase() !== "shut-down") {
+          // 旧 WASM 会忽略未知的 arenaFaction；必须在发布就绪和调度任何帧之前确认实际能力。
+          const { events, rejected } = parseEngineEvents(typeof result === "string" ? JSON.parse(result) : result);
+          const ready = events.filter((event) => event.type === "ENGINE_READY");
+          if (engine.phase() !== "ready" || rejected.length > 0 || ready.length !== 1 || ready[0]!.arenaFaction !== rest.arenaFaction
+              || (rest.gpuMode === "required" && ready[0]!.backend !== "webgpu")) {
+            throw new Error("WASM 未确认匹配的阵营只读显示能力或所需 WebGPU 后端；拒绝启动渲染");
+          }
+        }
+        emit(scope, result);
         checkStopped();
         if (!stopped && !looping && engine.phase() === "ready") {
           looping = true;
@@ -114,7 +131,7 @@ export function runEngineWorker(
         emit(scope, engine.post(JSON.stringify(data)));
         checkStopped();
       }
-    });
+    }).catch(fail);
   });
 
   return {
@@ -123,4 +140,27 @@ export function runEngineWorker(
     },
     frame,
   };
+}
+
+
+/** 先注册消息循环，再异步加载真实 WASM；加载期间的 INIT/观察不会因 await 丢失。 */
+export function bootstrapEngineWorker(
+  scope: WorkerScopeLike,
+  load: () => Promise<WasmEngineWorkerLike>,
+  options: RunEngineWorkerOptions = {},
+): EngineWorkerLoop {
+  let engine: WasmEngineWorkerLike | undefined;
+  const ready = (): WasmEngineWorkerLike => {
+    if (!engine) throw new Error("WASM 尚未初始化，首条消息必须为 ENGINE_INIT");
+    return engine;
+  };
+  return runEngineWorker(scope, {
+    async init(canvas, json) {
+      engine ??= await load();
+      return engine.init(canvas, json);
+    },
+    post: (json) => ready().post(json),
+    frame: (now) => ready().frame(now),
+    phase: () => engine?.phase() ?? "awaiting-init",
+  }, options);
 }

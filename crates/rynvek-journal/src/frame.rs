@@ -41,7 +41,7 @@ pub enum FrameKind {
 
 impl FrameKind {
     /// 与 `Commit` 等价的语义别名
-    pub const TickCommit: Self = Self::Commit;
+    pub const TICK_COMMIT: Self = Self::Commit;
 
     pub const fn from_u16(v: u16) -> Option<Self> {
         match v {
@@ -393,6 +393,8 @@ mod tests {
 
     #[test]
     fn frame_roundtrip() {
+        assert_eq!(FrameKind::TICK_COMMIT, FrameKind::Commit);
+        assert_eq!(FrameKind::TICK_COMMIT as u16, 1);
         let m = CommitManifest::new(
             [1; 16],
             3,

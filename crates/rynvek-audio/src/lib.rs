@@ -7,7 +7,7 @@
 //!
 //! 将 `ArenaWorld` 与神经生态群体的宏观/微观动态指标确定性映射为 `@rynvek/audio`（WebAudio 合成器）
 //! 消费的控制帧 [`AudioTelemetryFrame`]：
-//! - 群体脉冲活跃度与 Weaver 相位同步度 → 主谐波基频（Hz 毫单位）与泛音调制深度；
+//! - 群体发射输出一致性（非相位测量）与 Weaver 态势 → 主谐波基频（Hz 毫单位）与泛音调制深度；
 //! - 危害场浓度与突然死亡状态 → 低频次声脉冲与滤波器截止频率；
 //! - 战斗交火密度 → 颗粒合成器（Granular Synthesizer）触发率。
 
@@ -38,7 +38,7 @@ pub struct AudioTelemetryFrame {
     pub mood: SonificationMood,
     /// 基频（毫 Hz，范围 `55_000..=880_000` 即 `55 Hz..=880 Hz`）
     pub carrier_freq_mhz: u32,
-    /// 相位同步谐波增益（千分比 `0..=1_000`）
+    /// 发射输出一致性的谐波增益（不是 Kuramoto 相位序参量）（千分比 `0..=1_000`）
     pub sync_coherence_permille: u16,
     /// 脉冲颗粒触发密度（千分比 `0..=1_000`）
     pub combat_grain_density_permille: u16,
@@ -51,19 +51,12 @@ pub struct AudioTelemetryFrame {
 /// 从 `ArenaWorld` 提取当前 Tick 的确定性程序化声学遥测帧
 pub fn extract_arena_audio_telemetry(world: &ArenaWorld) -> AudioTelemetryFrame {
     let unit_count = world.units.len() as i64;
-    let firing_units = world
-        .units
-        .values()
-        .filter(|u| u.weapon_cooldown > 0)
-        .count() as i64;
-    let weaver_count = world
-        .units
-        .values()
-        .filter(|u| u.kind == UnitKind::Weaver)
-        .count() as i64;
+    let firing_units = world.units.values().filter(|u| u.weapon_cooldown > 0).count() as i64;
+    let weaver_count = world.units.values().filter(|u| u.kind == UnitKind::Weaver).count() as i64;
 
-    // 群体发射读出同步度（通道 5 a_emit）
-    let sync_permille = if unit_count == 0 {
+    // 群体发射输出一致性（通道 5 a_emit）；全静默不是同步发射。
+    let emitting = world.units.values().any(|u| u.actions[action::EMIT] != 0);
+    let sync_permille = if unit_count == 0 || !emitting {
         0u16
     } else {
         let mean_emit: i64 = world
@@ -118,9 +111,7 @@ pub fn extract_arena_audio_telemetry(world: &ArenaWorld) -> AudioTelemetryFrame 
         SonificationMood::Homeostasis
     };
 
-    let carrier_freq_mhz = 110_000
-        + (sync_permille as u32) * 110
-        + (combat_density as u32) * 220;
+    let carrier_freq_mhz = 110_000 + (sync_permille as u32) * 110 + (combat_density as u32) * 220;
 
     AudioTelemetryFrame {
         tick: world.tick,
@@ -144,10 +135,72 @@ mod tests {
         let frame0 = extract_arena_audio_telemetry(&world);
         assert_eq!(frame0.tick, 0);
         assert_eq!(frame0.mood, SonificationMood::Homeostasis);
+        assert_eq!(frame0.sync_coherence_permille, 0);
         assert!((55_000..=880_000).contains(&frame0.carrier_freq_mhz));
 
         world.sudden_death_until = Some(39_600);
         let frame_sd = extract_arena_audio_telemetry(&world);
         assert_eq!(frame_sd.mood, SonificationMood::CriticalAlert);
+    }
+
+    #[test]
+    fn silent_identical_active_and_divergent_outputs_are_distinguished() {
+        let mut world = ArenaWorld::new(MatchConfig::duel(42));
+        for unit in world.units.values_mut() {
+            unit.actions[action::EMIT] = 0;
+        }
+        assert_eq!(extract_arena_audio_telemetry(&world).sync_coherence_permille, 0);
+        for unit in world.units.values_mut() {
+            unit.actions[action::EMIT] = 256;
+        }
+        let active = extract_arena_audio_telemetry(&world);
+        assert_eq!(active.sync_coherence_permille, 1000);
+        assert_eq!(active.mood, SonificationMood::ChemotaxisSync);
+        assert_eq!(active, extract_arena_audio_telemetry(&world));
+        for (i, unit) in world.units.values_mut().enumerate() {
+            unit.actions[action::EMIT] = if i % 2 == 0 { -256 } else { 256 };
+        }
+        let diverse = extract_arena_audio_telemetry(&world);
+        assert_eq!(diverse.sync_coherence_permille, 0);
+        assert_eq!(diverse.mood, SonificationMood::Homeostasis);
+    }
+
+    #[test]
+    fn combat_alert_and_weaver_priorities_remain_intact() {
+        let mut world = ArenaWorld::new(MatchConfig::duel(42));
+        world.units.values_mut().next().unwrap().kind = UnitKind::Weaver;
+        assert_eq!(
+            extract_arena_audio_telemetry(&world).mood,
+            SonificationMood::ChemotaxisSync
+        );
+        for unit in world.units.values_mut() {
+            unit.weapon_cooldown = 1;
+        }
+        assert_eq!(
+            extract_arena_audio_telemetry(&world).mood,
+            SonificationMood::SynapticCombat
+        );
+        world.sudden_death_until = Some(39_600);
+        assert_eq!(
+            extract_arena_audio_telemetry(&world).mood,
+            SonificationMood::CriticalAlert
+        );
+        world.sudden_death_until = None;
+        let nexus = world.factions[0].nexus.unwrap();
+        world.buildings.get_mut(&nexus).unwrap().defense.hp_milli = 1;
+        assert_eq!(
+            extract_arena_audio_telemetry(&world).mood,
+            SonificationMood::CriticalAlert
+        );
+    }
+
+    #[test]
+    fn empty_world_has_no_coherence_or_combat_density() {
+        let mut world = ArenaWorld::new(MatchConfig::duel(42));
+        world.units.clear();
+        let frame = extract_arena_audio_telemetry(&world);
+        assert_eq!(frame.sync_coherence_permille, 0);
+        assert_eq!(frame.combat_grain_density_permille, 0);
+        assert_eq!(frame.mood, SonificationMood::Homeostasis);
     }
 }

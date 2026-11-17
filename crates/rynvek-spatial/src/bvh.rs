@@ -42,10 +42,26 @@ impl Aabb2d {
     #[inline]
     pub fn union(self, other: Self) -> Self {
         Self {
-            min_x: if self.min_x.0 <= other.min_x.0 { self.min_x } else { other.min_x },
-            min_y: if self.min_y.0 <= other.min_y.0 { self.min_y } else { other.min_y },
-            max_x: if self.max_x.0 >= other.max_x.0 { self.max_x } else { other.max_x },
-        max_y: if self.max_y.0 >= other.max_y.0 { self.max_y } else { other.max_y },
+            min_x: if self.min_x.0 <= other.min_x.0 {
+                self.min_x
+            } else {
+                other.min_x
+            },
+            min_y: if self.min_y.0 <= other.min_y.0 {
+                self.min_y
+            } else {
+                other.min_y
+            },
+            max_x: if self.max_x.0 >= other.max_x.0 {
+                self.max_x
+            } else {
+                other.max_x
+            },
+            max_y: if self.max_y.0 >= other.max_y.0 {
+                self.max_y
+            } else {
+                other.max_y
+            },
         }
     }
 
@@ -244,11 +260,7 @@ mod tests {
                 let y = (i / 8) as i32 * 10;
                 BvhPrimitive {
                     dense_index: i,
-                    bounds: Aabb2d::from_center_radius(
-                        Q32_32::from_int(x),
-                        Q32_32::from_int(y),
-                        Q32_32::from_int(3),
-                    ),
+                    bounds: Aabb2d::from_center_radius(Q32_32::from_int(x), Q32_32::from_int(y), Q32_32::from_int(3)),
                 }
             })
             .collect();

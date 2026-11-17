@@ -11,22 +11,31 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node tools/build-wasm.mjs && tsc -p tsconfig.build.json && vite build --config vite.config.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev": "node tools/build-wasm.mjs && vite --config vite.config.mjs",
+    "build:web": "node tools/build-wasm.mjs && vite build --config vite.config.mjs",
+    "build:wasm": "node tools/build-wasm.mjs",
+    "test:wasm": "node --test tools/wasm-abi.test.mjs"
   },
   "dependencies": {
     "@rynvek/arena": "workspace:*",
     "@rynvek/core": "workspace:*",
     "@rynvek/lab": "workspace:*",
     "@rynvek/studio": "workspace:*",
-    "@rynvek/ui": "workspace:*"
+    "@rynvek/ui": "workspace:*",
+    "@rynvek/client": "workspace:*",
+    "@rynvek/engine": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "typescript": "~5.8.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "vite": "^7.3.8"
   }
 }

@@ -4,7 +4,7 @@
 //! `rynvek-agent::ToolHost` 在 `ArenaWorld` 上的实现：把 6 个标准工具翻译为感知查询或 [`RtsCommand`]。
 //!
 //! - `plan` 阶段只读：解析文本 ID、检查实体归属与种类、预校验建筑落点；
-//! - `commit` 阶段调用 [`ArenaWorld::apply_command`]，权威层仍做完整校验（资源、人口、科技前置等），
+//! - `commit` 阶段调用 [`ArenaRuntime::apply_command`]，权威层仍做完整校验（资源、人口、科技前置等），
 //!   拒绝原因以 [`RtsError::code`] 原样透传。
 //! - `queue_vat_production` 的 "或发起建筑建造请求"（规范 9.1 描述）：当 `unit_archetype` 是 `bld.*` 时，
 //!   `vat_entity_id` 解释为占地左下角 Tile `"x,y"`，`count` 必须为 1，`genome_slug` 忽略（ERRATA E-035）。
@@ -12,7 +12,7 @@
 use rynvek_agent::{AgentError, CrucibleToolAction, ToolCall, ToolContext, ToolHost};
 use rynvek_rts::commands::{CrucibleAction, RtsCommand, RtsError, UnitSelector};
 use rynvek_rts::evolution::DEFAULT_MUTATION_RATE_PERMILLE;
-use rynvek_rts::{ArenaWorld, BuildingKind, EntitySerial, FactionId, FieldId, OrderKind, TechId, UnitKind, Vec2};
+use rynvek_rts::{ArenaRuntime, BuildingKind, EntitySerial, FactionId, FieldId, OrderKind, TechId, UnitKind, Vec2};
 use serde_json::{Value, json};
 
 /// 已通过只读校验的计划
@@ -27,7 +27,7 @@ pub enum ArenaPlan {
 /// `ArenaWorld` 工具宿主
 #[derive(Debug)]
 pub struct ArenaToolHost<'w> {
-    pub world: &'w mut ArenaWorld,
+    pub world: &'w mut ArenaRuntime,
 }
 
 fn rts_err(e: RtsError) -> AgentError {
@@ -198,7 +198,10 @@ impl ToolHost for ArenaToolHost<'_> {
         match plan {
             ArenaPlan::Report(v) => Ok(v),
             ArenaPlan::Command(cmd) => {
-                let ack = self.world.apply_command(faction_of(ctx)?, &cmd).map_err(rts_err)?;
+                let ack = self
+                    .world
+                    .apply_command(faction_of(ctx)?, &cmd)
+                    .map_err(|e| AgentError::new(e, "工具命令事务已拒绝"))?;
                 Ok(json!({ "command": cmd, "ack": ack }))
             }
         }

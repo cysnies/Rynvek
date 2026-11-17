@@ -63,3 +63,15 @@ describe("图层位集", () => {
     expect(layerMask(Object.values(RenderLayer))).toBe(ALL_LAYERS);
   });
 });
+
+
+it("只读阵营能力兼容旧本地就绪，并严格校验可选 u8，不能接受伪造类型或边界", () => {
+  const ready = { type: "ENGINE_READY", backend: "webgpu", profile: null, adapter: null, generation: 0 };
+  expect(parseEngineEvent(ready)).toEqual(ready);
+  for (const arenaFaction of [0, 255]) {
+    expect(parseEngineEvent({ ...ready, arenaFaction })).toEqual({ ...ready, arenaFaction });
+  }
+  for (const arenaFaction of [null, -1, 256, 0.5, "0", NaN]) {
+    expect(parseEngineEvent({ ...ready, arenaFaction })).toBeNull();
+  }
+});

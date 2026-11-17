@@ -71,6 +71,19 @@ pub fn stream_path_world(path: &str) -> Option<&str> {
 
 /// 绑定监听并开始服务
 pub async fn start(mut cfg: ServerConfig) -> ApiResult<RunningServer> {
+    if let Some(origin) = &cfg.app.local_practice_origin {
+        let uri: axum::http::Uri = origin.parse().map_err(|_| ApiError::bad_request("本地 Origin 无效"))?;
+        if !cfg.http_addr.ip().is_loopback()
+            || cfg.store.backend_name() != "memory"
+            || uri.scheme_str() != Some("http")
+            || !matches!(uri.host(), Some("127.0.0.1" | "[::1]" | "localhost"))
+            || uri.path_and_query().is_some_and(|p| p.as_str() != "/")
+        {
+            return Err(ApiError::forbidden(
+                "本地练习只允许回环 HTTP Origin、回环监听和内存 Store",
+            ));
+        }
+    }
     let listener = tokio::net::TcpListener::bind(cfg.http_addr)
         .await
         .map_err(|e| ApiError::internal(format!("HTTP 监听 {} 失败：{e}", cfg.http_addr)))?;

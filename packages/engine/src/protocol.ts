@@ -9,6 +9,8 @@
  * 跨语言一致性由共享夹具 `tests/engine/protocol_messages.json` 双端断言。
  */
 
+import type { BuildingKind, FactionObservation } from "@rynvek/client";
+
 /** GPU 使用策略 */
 export type GpuMode = "auto" | "disabled" | "required";
 
@@ -49,6 +51,8 @@ export interface EngineInitOptions {
   /** 32 位十六进制世界 ID（缺省全零） */
   worldId?: string | null;
   gpuMode: GpuMode;
+  /** 远程阵营只读显示，禁止本地 STEP/START。 */
+  arenaFaction?: number;
 }
 
 /** 主线程 → Worker 命令（不含 `ENGINE_INIT`，后者由宿主随画布一起发送） */
@@ -62,6 +66,10 @@ export type EngineCommand =
   | { type: "SET_LAYER_MASK"; mask: number }
   | { type: "SET_HEATMAP_CHANNEL"; channel: FieldChannel }
   | { type: "SIMULATE_DEVICE_LOST" }
+  | { type: "ARENA_MAP"; worldId: string; map: {width: number; height: number; tiles: number[]; tilesHash: string} }
+  | { type: "ARENA_SELECTION"; worldId: string; units: number[]; building: number | null }
+  | { type: "ARENA_OVERLAY"; worldId: string; drag: [[number, number], [number, number]] | null; placement: {kind: BuildingKind; origin: [number, number]} | null }
+  | { type: "ARENA_OBSERVATION"; worldId: string; observation: FactionObservation }
   | { type: "SHUTDOWN" };
 
 /** `ENGINE_INIT` 消息（`canvas` 为已转移的 OffscreenCanvas） */
@@ -82,6 +90,10 @@ export const ENGINE_COMMAND_TYPES = [
   "SET_LAYER_MASK",
   "SET_HEATMAP_CHANNEL",
   "SIMULATE_DEVICE_LOST",
+  "ARENA_MAP",
+  "ARENA_SELECTION",
+  "ARENA_OVERLAY",
+  "ARENA_OBSERVATION",
   "SHUTDOWN",
 ] as const;
 
@@ -94,6 +106,8 @@ export type EngineEvent =
       profile: string | null;
       adapter: string | null;
       generation: number;
+      /** 实际启用的只读竞技场阵营；旧版本/本地仿真不回显。 */
+      arenaFaction?: number;
     }
   | { type: "TICK_COMMITTED"; tick: number; stateRoot: string }
   | { type: "FRAME_RENDERED"; tick: number }
@@ -108,11 +122,11 @@ export type EngineEvent =
 export type EngineEventType = EngineEvent["type"];
 export type EngineEventOf<T extends EngineEventType> = Extract<EngineEvent, { type: T }>;
 
-type FieldKind = "u32" | "number" | "string" | "nullable-string" | "nullable-u32" | "backend" | "hex64";
+type FieldKind = "optional-u8" | "u32" | "number" | "string" | "nullable-string" | "nullable-u32" | "backend" | "hex64";
 
 /** 每种事件的字段模式（运行时校验 Worker 消息） */
 const EVENT_SCHEMA: { readonly [K in EngineEventType]: Readonly<Record<string, FieldKind>> } = {
-  ENGINE_READY: { backend: "backend", profile: "nullable-string", adapter: "nullable-string", generation: "u32" },
+  ENGINE_READY: { backend: "backend", profile: "nullable-string", adapter: "nullable-string", generation: "u32", arenaFaction: "optional-u8" },
   TICK_COMMITTED: { tick: "number", stateRoot: "hex64" },
   FRAME_RENDERED: { tick: "number" },
   PICK_RESULT: { requestId: "u32", denseIndex: "nullable-u32" },
@@ -130,6 +144,8 @@ const isU32 = (v: unknown): v is number => typeof v === "number" && Number.isInt
 
 function checkField(kind: FieldKind, v: unknown): boolean {
   switch (kind) {
+    case "optional-u8":
+      return v === undefined || (isU32(v) && v <= 255);
     case "u32":
       return isU32(v);
     case "number":
