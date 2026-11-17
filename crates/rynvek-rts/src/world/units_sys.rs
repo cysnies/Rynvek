@@ -62,7 +62,6 @@ pub(super) struct Contact {
     pub id: EntitySerial,
     pub faction: FactionId,
     pub position: Vec2,
-    pub is_building: bool,
 }
 
 /// 8×8 Tile 空间分桶接触点索引：将 $O(N^2)$ 全表扫描降为局部邻域桶扫描，同时严格保持 `(距离², EntitySerial)` 全序平局决胜
@@ -111,7 +110,6 @@ impl ArenaWorld {
                 id: u.id,
                 faction: u.faction,
                 position: u.position,
-                is_building: false,
             };
             unit_buckets
                 .entry(ContactGrid::bucket_coords(u.position))
@@ -125,7 +123,6 @@ impl ArenaWorld {
                 id: b.id,
                 faction: b.faction,
                 position: b.center(),
-                is_building: true,
             })
             .collect();
         ContactGrid {
