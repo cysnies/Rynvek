@@ -581,8 +581,11 @@ pub async fn authoring(State(app): State<AppState>, headers: HeaderMap, Path(id)
             }
         }
     }
-    let templates: Vec<_> = genomes.keys().map(|s| format!("genome/{s}")).collect();
+    let templates: Vec<_> = genomes.keys().map(|s| format!("genome/{s}")).chain(world.authoring.parameter_templates.keys().map(|s|format!("parameter/{s}"))).collect();
     let mut params = BTreeMap::new();
+    for(id,t)in &world.authoring.parameter_templates {params.insert(format!("rules.templates.{id}"),serde_json::to_string(t).unwrap());}
+    for(id,i)in &world.authoring.parameter_instances {params.insert(format!("rules.instances.{id}"),serde_json::to_string(i).unwrap());}
+    for(id,b)in &world.authoring.rule_bindings {params.insert(format!("rules.bindings.{id}"),serde_json::to_string(b).unwrap());}
     if let Some(ecology) = &world.config.ecology {
         params.insert(
             "ecology.roles".to_string(),
@@ -607,7 +610,7 @@ pub async fn authoring(State(app): State<AppState>, headers: HeaderMap, Path(id)
             )
         })
         .collect();
-    let mut response=Json(serde_json::json!({"world_id":row.world_id.to_string(),"revision":runtime.revision(),"tick":world.tick,"state_root":hex(&runtime.state_root()),"rule_fault":world.authoring.rule_fault,"baseline":{"width":world.map.width,"height":world.map.height,"terrain":world.map.tiles.iter().map(|t|*t as u8).collect::<Vec<_>>(),"params":params,"genomes":genomes,"rules":rules,"templates":templates}})).into_response();
+    let mut response=Json(serde_json::json!({"world_id":row.world_id.to_string(),"revision":runtime.revision(),"tick":world.tick,"state_root":hex(&runtime.state_root()),"rule_fault":world.authoring.rule_fault,"parameter_state":world.parameter_state,"baseline":{"width":world.map.width,"height":world.map.height,"terrain":world.map.tiles.iter().map(|t|*t as u8).collect::<Vec<_>>(),"params":params,"genomes":genomes,"rules":rules,"templates":templates}})).into_response();
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("private, no-store"),
@@ -627,10 +630,10 @@ pub async fn compile_authoring_rule(
 ) -> ApiResult<Response> {
     let subject = app.require(&headers, CapabilityScope::WorldEdit).await?;
     load_world(&app, &subject, &id, CapabilityScope::WorldEdit).await?;
-    let module = rynvek_rts::world::authoring::compile_action_rule_detailed(&body.rule_graph_json)
+    let module = rynvek_rts::world::authoring::compile_authored_rule_detailed(&body.rule_graph_json)
         .map_err(|e| ApiError::new(e.code, e.message))?;
     let hash = rynvek_core::Blake3Hash::of(&rynvek_rules::encode_rir(&module));
-    let mut response=Json(serde_json::json!({"compiled_rir_blake3":hash.0,"gas_estimate":module.gas_estimate,"bindings":rynvek_rts::world::authoring::ACTION_COMPONENTS})).into_response();
+    let mut response=Json(serde_json::json!({"compiled_rir_blake3":hash.0,"gas_estimate":module.gas_estimate,"profile":if rynvek_rts::world::parameter_rules::parameter_module(&module){"parameter-entities/1"}else{"unit-actions/1"},"components":module.components.iter().map(|c|serde_json::json!({"name":c.name,"ty":c.ty,"write":c.write})).collect::<Vec<_>>()})).into_response();
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("private, no-store"),

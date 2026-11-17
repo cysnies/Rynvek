@@ -24,7 +24,8 @@ pub fn required_class(op: &WorldPatchOp) -> LiveEditSafetyClass {
                 _ => C::RequiresForkRestart,
             }
         }
-        WorldPatchOp::PaintTerrainRect { .. } | WorldPatchOp::RemoveEntityTemplate { .. } => C::TickBoundarySafe,
+        WorldPatchOp::PaintTerrainRect { .. } => C::TickBoundarySafe,
+        WorldPatchOp::RemoveEntityTemplate { template_id } => if template_id.starts_with("parameter/"){C::EpochBoundarySafe}else{C::TickBoundarySafe},
         WorldPatchOp::UpsertSeedGenome { .. } | WorldPatchOp::UpdateRuleModule { .. } | WorldPatchOp::RemoveRuleModule { .. } => {
             C::EpochBoundarySafe
         }
