@@ -313,6 +313,15 @@ impl ArenaWorld {
 
     /// 从 `.rsnap` 字节流完整恢复 `ArenaWorld` 并强制核验 `CanonicalWorldState` 与 `state_hash()`
     pub fn decode_snapshot(bytes: &[u8]) -> Result<Self, RynvekErrorCode> {
+        Self::decode_snapshot_inner(bytes, None)
+    }
+
+    /// 历史纯模式根不能自证模式；调用者须提供独立可信创世契约，不能从待验CONF反推。
+    pub fn decode_snapshot_with_config(bytes: &[u8], expected: &MatchConfig) -> Result<Self, RynvekErrorCode> {
+        Self::decode_snapshot_inner(bytes, Some(expected))
+    }
+
+    fn decode_snapshot_inner(bytes: &[u8], expected: Option<&MatchConfig>) -> Result<Self, RynvekErrorCode> {
         let read = SnapshotReader::read_bytes(bytes)?;
         // 旧通用快照保留在低层读取器；Arena 不把缺失地形和规范根的 v1 解释成完整恢复。
         if read.header.format_version != 2 {
@@ -322,6 +331,13 @@ impl ArenaWorld {
             read.find_chunk(CONF_TAG)
                 .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
+        if let Some(expected) = expected {
+            if &conf.config != expected {
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+            }
+        } else if conf.config.has_unbound_ecology() {
+            return Err(RynvekErrorCode::SchemaMigrationPathNotFound);
+        }
         let comp: CompChunkDto = from_chunk(
             read.find_chunk(COMP_TAG)
                 .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,

@@ -13,6 +13,13 @@ use std::collections::BTreeMap;
 
 pub const ECOL_TAG: [u8; 4] = *b"ECOL";
 
+/// 根身份格式，不是另一套生态规则；缺失只表示历史编码，不猜测升级。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EcologyIdentity {
+    BoundV1,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EcologyVersion {

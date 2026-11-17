@@ -196,7 +196,10 @@ fn delivered_budget_v2_snapshot_and_following_roots_stay_frozen() {
         .chunks_exact(2)
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
         .collect();
-    let mut w = ArenaWorld::decode_snapshot(&bytes).unwrap();
+    let mut expected = MatchConfig::pve(57, 1);
+    expected.ecology = Some(EcologyVersion::ForagerBudgetV2);
+    assert!(ArenaWorld::decode_snapshot(&bytes).is_err(), "旧歧义格式须显式可信配置");
+    let mut w = ArenaWorld::decode_snapshot_with_config(&bytes, &expected).unwrap();
     assert_eq!(w.config.ecology, Some(EcologyVersion::ForagerBudgetV2));
     for root in f["next_roots"].as_array().unwrap() {
         w.step();

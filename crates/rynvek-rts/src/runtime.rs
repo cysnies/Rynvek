@@ -5,7 +5,7 @@
 //! 当前是检查点优先的正确性路径；Actor 负责输入与持久化，尚未认证热路径性能。
 
 use crate::commands::{CommandAck, RtsCommand};
-use crate::{ArenaWorld, FactionId};
+use crate::{ArenaWorld, FactionId, MatchConfig};
 use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use rynvek_journal::CommitManifest;
 use rynvek_snapshot::{CMIT_TAG, SnapshotReader};
@@ -69,6 +69,26 @@ impl ArenaRuntime {
 
     /// 不从模板猜测缺失状态；旧格式、跨世界和元数据不一致都显式拒绝。
     pub fn restore(world_id: [u8; 16], revision: u64, root: [u8; 32], bytes: &[u8]) -> Result<Self, RynvekErrorCode> {
+        Self::restore_inner(world_id, revision, root, bytes, None)
+    }
+
+    pub fn restore_with_config(
+        world_id: [u8; 16],
+        revision: u64,
+        root: [u8; 32],
+        bytes: &[u8],
+        expected: &MatchConfig,
+    ) -> Result<Self, RynvekErrorCode> {
+        Self::restore_inner(world_id, revision, root, bytes, Some(expected))
+    }
+
+    fn restore_inner(
+        world_id: [u8; 16],
+        revision: u64,
+        root: [u8; 32],
+        bytes: &[u8],
+        expected: Option<&MatchConfig>,
+    ) -> Result<Self, RynvekErrorCode> {
         let read = SnapshotReader::read_bytes(bytes)?;
         if read.header.world_id != world_id || read.header.world_revision != revision || read.state_root != root {
             return Err(RynvekErrorCode::Blake3ChecksumMismatch);
@@ -77,7 +97,10 @@ impl ArenaRuntime {
             read.find_chunk(CMIT_TAG)
                 .ok_or(RynvekErrorCode::InvalidFileMagicOrVersion)?,
         )?;
-        let world = ArenaWorld::decode_snapshot(bytes)?;
+        let world = match expected {
+            Some(config) => ArenaWorld::decode_snapshot_with_config(bytes, config)?,
+            None => ArenaWorld::decode_snapshot(bytes)?,
+        };
         Ok(Self {
             world,
             world_id,
@@ -104,6 +127,9 @@ impl ArenaRuntime {
         }
         let boundary_tick = candidate.world.tick;
         let result = apply(&mut candidate.world)?;
+        if candidate.world.config != self.world.config {
+            return Err(RynvekErrorCode::StructuralMutationConflict);
+        }
         if candidate.world.tick != boundary_tick {
             return Err(RynvekErrorCode::SimulationInvariantViolated);
         }
@@ -192,7 +218,33 @@ impl ArenaRuntime {
     }
 
     /// 分叉显式重新绑定身份与修订，不能直接重用旧世界文件头。
-    pub fn fork(mut self, world_id: [u8; 16]) -> Self {
+    pub fn fork(self, world_id: [u8; 16]) -> Result<Self, RynvekErrorCode> {
+        if self.config.has_unbound_ecology() {
+            return Err(RynvekErrorCode::SchemaMigrationPathNotFound);
+        }
+        Ok(self.fork_identity(world_id))
+    }
+
+    /// 显式新分支迁移：不推进仿真、不改生态规则，前驱指向真实历史根而不伪造旧哈希。
+    pub fn migrate_ecology_identity(
+        &self,
+        world_id: [u8; 16],
+        expected: &MatchConfig,
+    ) -> Result<Self, RynvekErrorCode> {
+        if self.staged_tick.is_some()
+            || &self.config != expected
+            || self.config.ecology.is_none()
+            || self.config.ecology_identity.is_some()
+            || world_id == self.world_id
+        {
+            return Err(RynvekErrorCode::StructuralMutationConflict);
+        }
+        let mut next = self.clone().fork_identity(world_id);
+        next.world.config.bind_ecology_identity();
+        Ok(next)
+    }
+
+    fn fork_identity(mut self, world_id: [u8; 16]) -> Self {
         self.parent_root = self.state_root();
         self.world_id = world_id;
         self.revision = 0;
@@ -267,7 +319,7 @@ mod tests {
             restored.step().unwrap();
             assert_eq!(first.state_root(), restored.state_root());
         }
-        let fork = restored.fork([3; 16]);
+        let fork = restored.fork([3; 16]).unwrap();
         let snapshot = fork.checkpoint().unwrap();
         assert!(ArenaRuntime::restore([3; 16], 0, snapshot.state_root, &snapshot.bytes).is_ok());
         assert!(ArenaRuntime::restore([1; 16], 0, snapshot.state_root, &snapshot.bytes).is_err());
