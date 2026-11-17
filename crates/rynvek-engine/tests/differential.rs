@@ -139,6 +139,8 @@ fn lif_batch_gpu_matches_cpu_bit_exact() {
         .collect();
     let batch = upload_lif_batch(device, &kernels, &cpu, true, &diag.buffer).unwrap();
     let mut gpu_view = cpu.clone();
+    let mut cpu_energy = vec![rynvek_neural::metabolism::EnergyAccount::default(); brain_count];
+    let mut gpu_energy = cpu_energy.clone();
     for step in 0..40 {
         let sensory: Vec<[Q8_8; LIF_INPUTS]> = (0..brain_count)
             .map(|_| std::array::from_fn(|_| Q8_8(rng.range(-512, 512) as i16)))
@@ -160,6 +162,20 @@ fn lif_batch_gpu_matches_cpu_bit_exact() {
         assert_eq!(got, want, "step {step} 读出不一致");
         unpack_into(&mut gpu_view, &batch.download_state_blocking(device, queue).unwrap());
         assert_eq!(gpu_view, cpu, "step {step} 神经状态不一致");
+        for i in 0..brain_count {
+            // 以真实下载的 GPU 发放环独立计量；两档冻结科技成本都必须逐位一致。
+            let cost = if step < 20 { 800 } else { 480 };
+            cpu_energy[i].receive_field_raw(1);
+            gpu_energy[i].receive_field_raw(1);
+            let a = cpu[i].spike_ring.iter().filter(|r| **r & 1 != 0).count() as u32;
+            let b = gpu_view[i].spike_ring.iter().filter(|r| **r & 1 != 0).count() as u32;
+            assert_eq!(
+                cpu_energy[i].charge_spikes(a, cost),
+                gpu_energy[i].charge_spikes(b, cost)
+            );
+            assert!(cpu_energy[i].is_conserved());
+        }
+        assert_eq!(cpu_energy, gpu_energy, "step {step} 实际发放的精确能量账本不一致");
     }
     assert!(
         cpu.iter().any(|b| b.weights_delta_q8.iter().any(|&d| d != 0)),

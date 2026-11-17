@@ -117,6 +117,9 @@ struct CreateWorld {
     visibility: Option<Visibility>,
     #[serde(default)]
     map_seed: Option<u64>,
+    /// 仅 PvE 新世界显式启用；既有世界和排位绝不自动改变规则。
+    #[serde(default)]
+    ecology: Option<rynvek_rts::world::ecology::EcologyVersion>,
 }
 
 /// `.rworld` 上传时通过查询串传递的元数据（请求体是二进制包）
@@ -153,11 +156,15 @@ pub async fn create(
     let (title, org, visibility, config, mode, manifest) = if content_type.starts_with("application/json") {
         let req: CreateWorld = super::parse_json(&body)?;
         let seed = req.map_seed.unwrap_or(1);
-        let (config, mode) = match req.template.as_str() {
+        let (mut config, mode) = match req.template.as_str() {
             "arena_duel" => (MatchConfig::duel(seed), "PvP_Custom"),
             "arena_pve" => (MatchConfig::pve(seed, 1), "PvE_Survival"),
             other => return Err(ApiError::bad_request(format!("未知模板 `{other}`"))),
         };
+        if req.ecology.is_some() && config.mode != rynvek_rts::MatchMode::PveSurvival {
+            return Err(ApiError::bad_request("未认证的能量规则仅可用于PvE新世界"));
+        }
+        config.ecology = req.ecology;
         let manifest = serde_json::json!({ "template": req.template, "config": config });
         (req.title, req.org_id, req.visibility, config, mode, manifest)
     } else if content_type.starts_with(rynvek_world::rworld::RWORLD_MEDIA_TYPE)
