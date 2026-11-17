@@ -11,6 +11,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: "1"
+  # 标准 Runner 在全工作区测试链接时耗尽磁盘；仅去除调试符号，不关闭断言或减少检查。
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "2"
 
 jobs:
   ci-full-gate:
