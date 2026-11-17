@@ -34,6 +34,11 @@ class RoleEnergyContract:
     birth_energy_milli: int
     movement_cost_micro_per_tile: int
     synapse_maintenance_micro_per_tick: int
+    attack_cost_micro_per_shot: int
+    repair_cost_micro_per_milli: int
+    secretion_cost_micro_per_field_raw: int
+    birth_synthesis_milli: int
+    activity_reserve_milli: int
     natural_reproduction: bool
     replication_mutation_rate_permille: int
 

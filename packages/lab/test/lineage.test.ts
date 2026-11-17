@@ -69,5 +69,5 @@ describe("谱系与指标分析", () => {
    expect(()=>lineageForest([child])).toThrow();
    expect(()=>lineageForest([root,{...child,parent_genome:"f".repeat(64)}])).toThrow();
    const n=9007199254740993n;
-   expect(energyBalance({enabled:true,run:0,tick:30n,received_q:n+4n,transferred_q:4n,external_received_q:n.toString(),stored_q:n-3n,dissipated_q:1n,exported_q:1n,returned_q:1n}).balanced).toBe(true);
+   expect(energyBalance({attack_q:0n,repair_q:0n,secretion_q:0n,synthesis_q:0n,enabled:true,run:0,tick:30n,received_q:n+4n,transferred_q:4n,external_received_q:n.toString(),stored_q:n-3n,dissipated_q:1n,exported_q:1n,returned_q:1n}).balanced).toBe(true);
  });

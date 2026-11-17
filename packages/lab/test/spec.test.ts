@@ -100,7 +100,7 @@ describe("planRuns / toRequestBody", () => {
 });
 
 it("生态扫描只接受完整显式PvE契约，不把缺省规则偷偷开启",()=>{
-  const role={basal_cost_micro_per_tick:1000,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:0,synapse_maintenance_micro_per_tick:0,natural_reproduction:true,replication_mutation_rate_permille:50};
+  const role={basal_cost_micro_per_tick:1000,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:0,synapse_maintenance_micro_per_tick:0,natural_reproduction:true,attack_cost_micro_per_shot:0,repair_cost_micro_per_milli:0,secretion_cost_micro_per_field_raw:0,birth_synthesis_milli:0,activity_reserve_milli:0,replication_mutation_rate_permille:50};
   const ecology={roles:{"unit.forager":role}};
   const spec={name:"生态",seeds:[57],ticks:60,variants:[{label:"x",policy:"ecology" as const,ecology}]};
   expect(toRequestBody(spec)).toMatchObject({variants:[{ecology}]});
@@ -110,9 +110,15 @@ it("生态扫描只接受完整显式PvE契约，不把缺省规则偷偷开启"
 });
 
 it("统一角色表保留非采集成本和自然繁殖许可，拒绝旧平铺或未知角色",()=>{
-  const role={basal_cost_micro_per_tick:100,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:100,synapse_maintenance_micro_per_tick:1,natural_reproduction:false,replication_mutation_rate_permille:50};
+  const role={basal_cost_micro_per_tick:100,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:100,synapse_maintenance_micro_per_tick:1,natural_reproduction:false,attack_cost_micro_per_shot:0,repair_cost_micro_per_milli:0,secretion_cost_micro_per_field_raw:0,birth_synthesis_milli:0,activity_reserve_milli:0,replication_mutation_rate_permille:50};
   const spec={name:"角色补给",seeds:[57],ticks:30,variants:[{label:"s",ecology:{roles:{"unit.striker":role}}}]};
   expect(toRequestBody(spec)).toMatchObject({variants:[{ecology:{roles:{"unit.striker":role}}}]});
+  for (const key of ["attack_cost_micro_per_shot","repair_cost_micro_per_milli","secretion_cost_micro_per_field_raw","birth_synthesis_milli","activity_reserve_milli"] as const) {
+    const incomplete:Record<string,unknown>={...role};delete incomplete[key];
+    for(const invalid of [incomplete,{...role,[key]:-1},{...role,[key]:0x1_0000_0000}]) {
+      expect(()=>validateSpec({...spec,variants:[{label:"bad",ecology:{roles:{"unit.striker":invalid as never}}}]})).toThrow();
+    }
+  }
   for(const ecology of [role,{roles:{}},{roles:{"unit.unknown":role}}]) {
     expect(()=>validateSpec({...spec,variants:[{label:"bad",ecology:ecology as never}]})).toThrow();
   }

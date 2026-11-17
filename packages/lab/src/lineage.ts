@@ -111,6 +111,11 @@ export interface EnergyRow {
   readonly received_q:bigint|string; readonly stored_q:bigint|string; readonly dissipated_q:bigint|string;
   readonly exported_q:bigint|string; readonly returned_q:bigint|string; readonly transferred_q:bigint|string;
   readonly external_received_q:bigint|string;
+  readonly attack_q:bigint|string;
+  readonly repair_q:bigint|string;
+  readonly secretion_q:bigint|string;
+  readonly synthesis_q:bigint|string;
+
 }
 const q=(v:bigint|string):bigint=>{
   if (typeof v!=="bigint" && typeof v!=="string") throw new Error("Decimal128禁止经number丢精度");
@@ -121,7 +126,8 @@ export function energyBalance(row:EnergyRow):{externalReceived:bigint;accounted:
   if(!row.enabled) throw new Error("此样本未启用生态，不能当作零能量验收");
   const externalReceived=q(row.received_q)-q(row.transferred_q);
   const accounted=q(row.stored_q)+q(row.dissipated_q)+q(row.exported_q)+q(row.returned_q);
-  return {externalReceived,accounted,balanced:externalReceived>=0n&&externalReceived===q(row.external_received_q)&&externalReceived===accounted};
+  const activity=q(row.attack_q)+q(row.repair_q)+q(row.secretion_q)+q(row.synthesis_q);
+  return {externalReceived,accounted,balanced:activity<=q(row.dissipated_q)&&externalReceived>=0n&&externalReceived===q(row.external_received_q)&&externalReceived===accounted};
 }
 
 /** 每个 run 的谱系摘要 */
@@ -278,5 +284,5 @@ export const TABLE_COLUMNS = {
     "parameter_value",
   ],
   lineage: ["run", "faction", "slug", "unit", "generation", "entity", "parent", "origin", "born_tick", "genome", "parent_genome", "allocated_q"],
-  energy: ["enabled","run","tick","live_bodies","remains","natural_births","max_generation","received_q","stored_q","dissipated_q","exported_q","returned_q","transferred_q","external_received_q","state_root"],
+  energy: ["enabled","run","tick","live_bodies","remains","natural_births","max_generation","received_q","stored_q","dissipated_q","exported_q","returned_q","transferred_q","external_received_q","state_root","attack_q","repair_q","secretion_q","synthesis_q"],
 } as const;

@@ -32,6 +32,12 @@ export interface RoleEnergyContract {
   readonly birth_energy_milli:number;
   readonly movement_cost_micro_per_tile:number;
   readonly synapse_maintenance_micro_per_tick:number;
+  readonly attack_cost_micro_per_shot:number;
+  readonly repair_cost_micro_per_milli:number;
+  readonly secretion_cost_micro_per_field_raw:number;
+  readonly birth_synthesis_milli:number;
+  readonly activity_reserve_milli:number;
+
   readonly natural_reproduction:boolean;
   readonly replication_mutation_rate_permille:number;
 }
@@ -124,7 +130,7 @@ export function validateSpec(spec: ExperimentSpec): void {
       const kinds=["unit.forager","unit.striker","unit.carapace","unit.spitter","unit.weaver","unit.leviathan"];
       for (const [kind,role] of Object.entries(c.roles)) {
         if(!kinds.includes(kind)||!role||typeof role!=="object"||Array.isArray(role)) throw new SpecError("未知角色或非法生命成本对象");
-        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction","replication_mutation_rate_permille"];
+        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction","attack_cost_micro_per_shot","repair_cost_micro_per_milli","secretion_cost_micro_per_field_raw","birth_synthesis_milli","activity_reserve_milli","replication_mutation_rate_permille"];
         if(keys.some(k=>!Object.prototype.hasOwnProperty.call(role,k))||Object.keys(role).some(k=>!keys.includes(k))) throw new SpecError("角色成本必须完整显式配置");
         if(!Number.isInteger(role.replication_mutation_rate_permille)||role.replication_mutation_rate_permille<0||role.replication_mutation_rate_permille>1000)throw new SpecError("复制突变率必须在0..=1000‰");
         if(typeof role.natural_reproduction!=="boolean") throw new SpecError("自然繁殖许可必须为boolean");
