@@ -11,7 +11,7 @@
 
 原始讨论`Rynvek_84cf0fa3d150.md` L54933–54948要求Energy Threshold、Genome Replication、Mutation During Replication、Parent Energy Splitting，并区分玩家生产、定向繁育与自然有丝分裂。项目文档v1.0 §1.1要求能量约束下自然存活/分裂、突触/拓扑复制突变，无人工显式适应度。
 
-本批不将原定向繁育的伤害/寿命适应度排序带入自然出生。只覆盖已有完整供能/基础代谢契约的**显式PvE玩家Forager**；不猜测其他角色、野生或开局贫营养条件的供能。
+本批不将原定向繁育的伤害/寿命适应度排序带入自然出生。第十八批只覆盖当时已有供能/基础代谢契约的**显式PvE玩家Forager**；第二十批现已扩展其他玩家配置角色的实际供能/运动/突触维护，见[持续开发记录](ACTIVE_DEVELOPMENT.md)。本节历史规则；不猜测其他角色、野生或开局贫营养条件的供能。
 
 没有新增平衡参数、繁殖模式或迁移开关。复用同一`ForagerEcologyContract.birth_energy_milli`：
 
@@ -38,7 +38,7 @@ HP/护盾按整数拆分，余数留亲本，二者总量不增加，不能从�
 
 ## 当前格式与验收边界
 
-按t15u不背旧兼容负担：第十八批交付时仅支持`rynvek-arena/5` / `CURRENT_5`；现已由下一批`rynvek-arena/6` / `CURRENT_6`取代以纳入不可变出生元数据（见[持续开发记录](ACTIVE_DEVELOPMENT.md)）。当前拒绝旧格式及旧能量对象；不添加自动补字段、历史根仿造或迁移路径。通用容器/TickRecord协议识别未机械删除。未删除原始附件、旧工作区、缓存数据或git历史。未增加crate依赖或改变原DAG方向，新代码保留SPDX/简体注释。
+按t15u不背旧兼容负担：第十八批交付时仅支持`rynvek-arena/5` / `CURRENT_5`；随后由第十九批/6纳入不可变出生元数据，现由第二十批`rynvek-arena/7` / `CURRENT_7`统一角色生命契约取代（见[持续开发记录](ACTIVE_DEVELOPMENT.md)）。当前拒绝旧格式及旧能量对象；不添加自动补字段、历史根仿造或迁移路径。通用容器/TickRecord协议识别未机械删除。未删除原始附件、旧工作区、缓存数据或git历史。未增加crate依赖或改变原DAG方向，新代码保留SPDX/简体注释。
 
 按t18u/t22u本批只有必要编译与少量定向快验，详见最终Page/交付消息。未跑workspace完整门禁、90秒soak、license/SBOM；没有反复查看CI或称新HEAD已全面验收。原始CI成功只属于c26526e，不冒充本批新提交。
 
