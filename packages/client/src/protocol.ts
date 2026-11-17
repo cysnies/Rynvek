@@ -184,9 +184,21 @@ export type MatchOutcome =
   | { readonly result: "draw"; readonly tick: number }
   | { readonly result: "defeat"; readonly tick: number; readonly waves_cleared: number };
 
+/** Only the viewer faction's living brains. Overlapping last-64 executed-substep rings,
+ * NOT per-tick spikes, wall-clock rate or Kuramoto coherence; MLP/CTRNN have no spikes. */
+export interface NeuralActivityView {
+  readonly sample_tick: number;
+  readonly spike_window_substeps: 64;
+  readonly spiking_neurons: number;
+  readonly continuous_neurons: number;
+  readonly spikes_in_window: number;
+  readonly continuous_abs_mean_q8: number;
+}
+
 export interface FactionObservation {
   readonly tick: number;
   readonly faction: number;
+  readonly neural: NeuralActivityView;
   readonly ledger: {
     readonly balance: ResourceAmounts;
     readonly capacity: ResourceAmounts;

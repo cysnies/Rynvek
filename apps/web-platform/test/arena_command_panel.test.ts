@@ -36,6 +36,7 @@ function building(partial: Partial<BuildingView> & Pick<BuildingView, "id" | "ki
 function observation(partial: Partial<FactionObservation> = {}): FactionObservation {
   return {
     tick: 8,
+    neural: {sample_tick:8,spike_window_substeps:64,spiking_neurons:0,continuous_neurons:0,spikes_in_window:0,continuous_abs_mean_q8:0},
     faction: 0,
     ledger: { balance: amounts(), capacity: amounts(2000, 1000, 500), biomass_harvested_total: 0 },
     supply: [1, 24],

@@ -70,12 +70,27 @@ pub struct LedgerView {
     pub biomass_harvested_total: i64,
 }
 
+/// 仅本阵营存活脑的实际状态聚合；不是全世界遥测、逐Tick发放事件或相位序参量。
+/// 脉冲数为各LIF/Izhikevich脑最近64个已执行神经子步的重叠环窗口；
+/// 出生/预算冻结会使不同脑的窗口不对齐墙钟。MLP/CTRNN只统计连续状态，绝不伪造spike。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeuralActivityView {
+    pub sample_tick: u64,
+    pub spike_window_substeps: u32,
+    pub spiking_neurons: u64,
+    pub continuous_neurons: u64,
+    pub spikes_in_window: u64,
+    /// 连续模型隐藏态的平均绝对Q8.8原始值；不是脉冲、相干度或动作覆盖后的读出。
+    pub continuous_abs_mean_q8: u16,
+}
+
 /// 一个阵营在某 Tick 的完整观测
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FactionObservation {
     pub tick: u64,
     pub faction: FactionId,
     pub ledger: LedgerView,
+    pub neural: NeuralActivityView,
     pub supply: (u32, u32),
     pub techs: Vec<TechId>,
     pub genomes: Vec<String>,
@@ -232,6 +247,7 @@ impl ArenaWorld {
         Some(FactionObservation {
             tick: self.tick,
             faction: viewer,
+            neural: self.observe_own_neural(viewer),
             ledger: LedgerView {
                 balance: f.ledger.balance,
                 capacity: f.ledger.capacity,
@@ -249,6 +265,43 @@ impl ArenaWorld {
             pve_wave: self.pve.as_ref().map(|d| d.wave),
             outcome: self.outcome.clone(),
         })
+    }
+
+    /// 原脑态的只读投影，不添加仿真状态/随机数，不读取敌方脑或全世界声学聚合。
+    fn observe_own_neural(&self, viewer: FactionId) -> NeuralActivityView {
+        use rynvek_neural::PopulationBrainSlot;
+        let mut view = NeuralActivityView {
+            sample_tick: self.tick,
+            spike_window_substeps: 64,
+            spiking_neurons: 0,
+            continuous_neurons: 0,
+            spikes_in_window: 0,
+            continuous_abs_mean_q8: 0,
+        };
+        let mut continuous_abs_sum = 0u64;
+        for unit in self.units.values().filter(|u| u.faction == viewer) {
+            let rings: &[u64] = match &unit.brain.0 {
+                PopulationBrainSlot::Lif(b) => &b.spike_ring,
+                PopulationBrainSlot::Izhikevich(b) => &b.spike_ring,
+                PopulationBrainSlot::GatedMlp(b) => {
+                    view.continuous_neurons += b.hidden_q8.len() as u64;
+                    continuous_abs_sum += b.hidden_q8.iter().map(|v| u64::from(v.unsigned_abs())).sum::<u64>();
+                    &[]
+                }
+                PopulationBrainSlot::Ctrnn(b) => {
+                    view.continuous_neurons += b.y_q8.len() as u64;
+                    continuous_abs_sum += b.y_q8.iter().map(|v| u64::from(v.unsigned_abs())).sum::<u64>();
+                    &[]
+                }
+            };
+            view.spiking_neurons += rings.len() as u64;
+            view.spikes_in_window += rings.iter().map(|v| u64::from(v.count_ones())).sum::<u64>();
+        }
+        if view.continuous_neurons != 0 {
+            view.continuous_abs_mean_q8 =
+                (continuous_abs_sum / view.continuous_neurons).min(u64::from(u16::MAX)) as u16;
+        }
+        view
     }
 
     /// `query_visible_clusters`：按 (阵营, 原型) 聚合可见单位；`region_chunk` 限定 256×256 Chunk

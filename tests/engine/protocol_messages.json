@@ -14,7 +14,8 @@
     {"type": "ARENA_MAP", "worldId": "00000000000000000000000000000000", "map": {"width": 1, "height": 1, "tiles": [2], "tilesHash": "0000000000000000000000000000000000000000000000000000000000000000"}},
     {"type": "ARENA_SELECTION", "worldId": "00000000000000000000000000000000", "units": [5], "building": null},
     {"type":"ARENA_OVERLAY","worldId":"00000000000000000000000000000000","drag":[[7.0,6.0],[2.0,3.0]],"placement":{"kind":"bld.signal_beacon","origin":[4,4]}},
-    {"type": "ARENA_OBSERVATION", "worldId": "00112233445566778899aabbccddeeff", "observation": {"tick": 42, "faction": 0, "ledger": {"balance": {"biomass": 0, "flux": 0, "neurogel": 0}, "capacity": {"biomass": 0, "flux": 0, "neurogel": 0}, "biomass_harvested_total": 0}, "supply": [0, 0], "techs": [], "genomes": [], "units": [], "buildings": [], "ghosts": [], "visibility": [1, 0, 2, 0], "visibility_width": 2, "score_milli": 0, "pve_wave": null, "outcome": null}},
+    {"type": "ARENA_OBSERVATION", "worldId": "00112233445566778899aabbccddeeff", "observation": {
+        "neural": {"sample_tick":42,"spike_window_substeps":64,"spiking_neurons":0,"continuous_neurons":0,"spikes_in_window":0,"continuous_abs_mean_q8":0},"tick": 42, "faction": 0, "ledger": {"balance": {"biomass": 0, "flux": 0, "neurogel": 0}, "capacity": {"biomass": 0, "flux": 0, "neurogel": 0}, "biomass_harvested_total": 0}, "supply": [0, 0], "techs": [], "genomes": [], "units": [], "buildings": [], "ghosts": [], "visibility": [1, 0, 2, 0], "visibility_width": 2, "score_milli": 0, "pve_wave": null, "outcome": null}},
     { "type": "SHUTDOWN" }
   ],
   "events": [
