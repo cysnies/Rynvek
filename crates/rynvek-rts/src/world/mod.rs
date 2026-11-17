@@ -711,7 +711,8 @@ impl ArenaWorld {
         }
     }
 
-    pub(crate) fn invalidate_flow(&mut self) {
+    /// 地形或占地变化后使派生流场缓存失效，不修改权威状态。
+    pub fn invalidate_flow(&mut self) {
         self.flow_cache.clear();
         self.flow_order.clear();
     }
