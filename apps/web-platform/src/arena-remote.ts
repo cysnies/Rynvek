@@ -17,6 +17,14 @@ export interface QueueContext {
   status:"idle"|"queued"|"matched"; active:RankedSeat|null;
 }
 export type QueueReply = RankedSeat | {status:"queued";position:number;rating:number} | {status:"cancelled"|"not_queued"};
+export interface ObserverGrant {principal_id:string;faction:number;grant_id:string;role:"observer"}
+export interface ObserverFrame extends ObserverGrant {
+  world_id:string;match_id:string;principal_kind:"Human"|"Agent"|"Service";
+  messages:{welcome:Extract<ArenaServerMessage,{type:"welcome"}>;observation:Extract<ArenaServerMessage,{type:"observation"}>};
+}
+function checkGrant(g:ObserverGrant):void{
+  uuid(g.grant_id);if(g.role!=="observer"||!Number.isSafeInteger(g.faction)||g.faction<0||g.faction>7||!/^[1-9]\d*$/.test(g.principal_id))throw new Error("观战准入回执非法");
+}
 export interface PlaybackFrame {
   match_id:string;world_id:string;faction:number;mode:MatchMode;initial_tick:number;final_tick:number;
   tick:number;revision:string;state_root:string;initial_revision:string;initial_state_root:string;target_tick:number;ready:boolean;
@@ -69,6 +77,32 @@ export class ArenaWorldClient {
     if(seat.principal_id!==principal||![0,1].includes(seat.faction)||!["PvP_Ranked","PvE_Survival"].includes(seat.mode)
       ||!Number.isSafeInteger(seat.tick)||seat.tick<0)throw new Error("真实身份/席位不匹配");
   }
+  async observerGrants(world:string,signal?:AbortSignal):Promise<ObserverGrant[]>{
+    const result=await this.request<{world_id:string;grants:ObserverGrant[]}>(`worlds/${uuid(world)}/observers`,"GET",undefined,signal);
+    if(result.world_id!==world||!Array.isArray(result.grants)||result.grants.length>32)throw new Error("观战清单世界/范围不一致");
+    result.grants.forEach(checkGrant);return result.grants;
+  }
+  async grantObserver(world:string,principal:string,faction:number,signal?:AbortSignal):Promise<ObserverGrant>{
+    if(!/^[1-9]\d*$/.test(principal))throw new Error("请输入正式主体ID，不是显示名/凭据");
+    const g=await this.request<ObserverGrant>(`worlds/${uuid(world)}/observers`,"POST",{principal_id:principal,faction},signal);
+    checkGrant(g);if(g.principal_id!==principal||g.faction!==faction)throw new Error("准入目标不一致");return g;
+  }
+  async revokeObserver(world:string,grant:ObserverGrant,signal?:AbortSignal):Promise<void>{
+    checkGrant(grant);const r=await this.request<{status:string}>(`worlds/${uuid(world)}/observers/${grant.principal_id}`,"DELETE",{grant_id:grant.grant_id},signal);
+    if(r.status!=="revoked")throw new Error("未确认撤销准入");
+  }
+  async observe(world:string,signal?:AbortSignal):Promise<ObserverFrame>{
+    const r=await this.request<ObserverFrame>(`worlds/${uuid(world)}/observation`,"GET",undefined,signal);checkGrant(r);uuid(r.match_id);
+    const w=r.messages?.welcome,o=r.messages?.observation;
+    if(r.world_id!==world||!["Human","Agent","Service"].includes(r.principal_kind)||w?.type!=="welcome"||w.protocol!=="rynvek-arena/1"||w.faction!==r.faction
+      ||!Array.isArray(w.tools)||w.tools.length!==0||o?.type!=="observation"||o.observation.faction!==r.faction
+      ||o.observation.tick!==w.tick||!Number.isSafeInteger(w.tick)||w.tick<0||!Array.isArray(o.events))throw new Error("观战世界/阵营/投影回执非法");
+    return r;
+  }
+  async leaveObserver(world:string,grant:ObserverGrant,signal?:AbortSignal):Promise<void>{
+    checkGrant(grant);const r=await this.request<{status:string}>(`worlds/${uuid(world)}/observation`,"DELETE",{grant_id:grant.grant_id},signal);
+    if(r.status!=="left")throw new Error("未确认离开准入");
+  }
   streamURL(world:string):string{const url=new URL(`/api/v1/worlds/${uuid(world)}/stream?format=arena-json`,this.origin);url.protocol=url.protocol==="https:"?"wss:":"ws:";return url.toString();}
   hello(message:ArenaClientMessage):object{if(!this.token)throw new Error("身份已断开");return message.type==="hello"?{...message,capability_token:this.token}:message;}
   async replay(match:string,signal?:AbortSignal):Promise<Blob>{
@@ -117,6 +151,25 @@ export class ReplayObservationTransport implements ArenaTransport {
     if(this.closed)return;this.frame=frame;
     for(const h of [...this.handlers])h({type:"welcome",protocol:"rynvek-arena/1",faction:frame.faction,mode:frame.mode,tick:frame.tick,map:frame.map,tools:[]});
     for(const h of [...this.handlers])h({type:"observation",observation:frame.observation,events:frame.events});
+  }
+  close():void{this.closed=true;this.handlers.clear();}
+}
+
+/** 唯一数据源为原Actor的真实阵营投影；无WS席位/租约，任何写命令在适配层拒绝。 */
+export class ObserverTransport implements ArenaTransport {
+  private readonly handlers=new Set<(message:ArenaServerMessage)=>void>();private closed=false;private ready=false;
+  constructor(private frame:ObserverFrame){}
+  onMessage(handler:(message:ArenaServerMessage)=>void):()=>void{this.handlers.add(handler);return ()=>this.handlers.delete(handler);}
+  send(message:ArenaClientMessage):void{
+    if(this.closed)throw new Error("观战已关闭");
+    if(message.type!=="hello")throw new Error("观察者没有控制席位/租约，禁止写命令");
+    this.ready=true;for(const h of [...this.handlers])h(this.frame.messages.welcome);this.publish(this.frame);
+  }
+  publish(frame:ObserverFrame):void{
+    if(this.closed)return;
+    if(frame.world_id!==this.frame.world_id||frame.match_id!==this.frame.match_id||frame.grant_id!==this.frame.grant_id
+      ||frame.principal_id!==this.frame.principal_id||frame.faction!==this.frame.faction||frame.messages.welcome.tick<this.frame.messages.welcome.tick)throw new Error("观战准入/席位已改变，须重新确认");
+    this.frame=frame;if(this.ready)for(const h of [...this.handlers])h(frame.messages.observation);
   }
   close():void{this.closed=true;this.handlers.clear();}
 }

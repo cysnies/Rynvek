@@ -9,7 +9,7 @@ import { WebSocketTransport, buildingSpec, rawToFloat, type BuildingKind, type A
 import { buildCommandPanelView, mountCommandPanel } from "./arena-command-panel.js";
 import { fogAt, project, unproject, viewScale, type Viewport } from "./arena-view.js";
 import { mountArenaRenderer } from "./arena-renderer.js";
-import { ArenaWorldClient, ReplayObservationTransport, type WorldRun, type PlaybackFrame, type QueueContext } from "./arena-remote.js";
+import { ArenaWorldClient, ReplayObservationTransport, ObserverTransport, type ObserverFrame, type ObserverGrant, type WorldRun, type PlaybackFrame, type QueueContext } from "./arena-remote.js";
 import "./browser.css";
 
 const gpuRequested = new URLSearchParams(location.search).get("renderer") === "webgpu";
@@ -17,6 +17,7 @@ const gpuRequested = new URLSearchParams(location.search).get("renderer") === "w
 const mount=document.querySelector<HTMLDivElement>("#app")!;
 mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</span></h1><span id="connection" class="chip">等待开始</span><span id="arena-mode" class="mode muted">已有世界 PvE / 正式人类排位</span><span id="renderer" class="chip">${gpuRequested?"WebGPU Worker 待连接":"临时 Canvas2D"}</span><a class="chip" href="/studio">Studio 创作</a><a class="chip" href="/lab">Lab 实验台</a><button id="start" class="primary">开始本地练习</button></header>
 <section class="panel arena-connect"><h2>运行 Studio 已有世界 / 原 Actor</h2><div class="buttons"><label>服务 origin <input id="api-origin" aria-label="Arena服务地址" autocomplete="off"></label><label>世界ID <input id="world-id" aria-label="Arena世界ID" autocomplete="off"></label><label>WorldEdit / MatchPlay 凭据 <input id="capability" aria-label="Arena令牌" type="password" autocomplete="off"></label><button id="connect-world" class="primary">运行/重连此世界</button><button id="disconnect">断开身份</button></div><p class="muted">只运行此ID的真实单人PvE世界，不另建演示。凭据只在内存与握手帧，绝不放URL/存储；请核对服务地址。刷新后重新输入同一身份重连。关闭页面不是暂停，终局世界不重置。</p></section>
+<section class="panel arena-connect"><h2>私有世界 · 定向阵营观战</h2><div class="buttons"><button id="observe-world">只读观战此世界 / 重新确认</button><button id="leave-observer" disabled>离开并撤销我的观战准入</button></div><p id="observer-status" role="status">观察者需正式WorldConnect身份，以及所有者针对该主体的准入；不是公开房间，也没有控制租约。</p><details><summary>所有者管理观战准入（先运行/重连自己的世界）</summary><label>观察者主体ID <input id="observer-principal" aria-label="观察者主体ID" autocomplete="off"></label><button id="grant-observer" disabled>授予当前所控阵营观战</button><button id="refresh-observers" disabled>刷新观战准入</button><div id="observer-grants"></div></details><p class="muted">只共享所有者当前所控阵营的原fog投影，不看未授权阵营，不授予源码、完整归档或CID下载。准入清单不是在线人数。观察者不计入准备/入座，不启动或恢复Actor。服务每次读取重新鉴权，UI以250ms间隔拉取原Actor事实；撤销/离开后不再读取。断开/离页仅停止显示，不等于撤销准入；重新连接须重新输入凭据。当前不提供事件历史或全知观战。</p></section>
 <section class="panel arena-connect"><h2>真实人类排位 / HUMAN RANKED</h2><div class="buttons"><button id="rank-auth">验证排位身份 / 找回席位</button><button id="rank-join" disabled>进入人类排位队列</button><button id="rank-refresh" disabled>刷新队列/席位</button><button id="rank-cancel" disabled>退出排队</button><button id="rank-enter" disabled>连接已匹配席位 / 重连</button></div><p id="rank-status" role="status">未验证；使用上方服务 origin 与正式凭据，不创建临时玩家。</p><p class="muted">显式入队才匹配真实已注册对手；无人则等待，不生成机器人。双方连接后原宿主自动开局，无伪准备按钮。排位按原服务规则公开对局元数据/签名归档，不把自创世界送入排位。断开身份/离页只停止本地追踪，不保证离队或暂停：请先按「退出排队」并等回执；已匹配须重连后完成对局/投降。队列/席位发现目前限本节点，未实现跨节点持久恢复。</p></section>
 <main class="layout"><section class="world"><div class="worldbar"><span>WORLD / <span id="clock">TICK —</span></span><span id="pointer">只读阵营视图</span></div><canvas id="world" tabindex="0" aria-label="Rynvek 战争迷雾地图，左键选择、右键命令"></canvas><div class="metrics"><span class="metric">生物质<b id="biomass">—</b></span><span class="metric">通量<b id="flux">—</b></span><span class="metric">神经胶<b id="neurogel">—</b></span><span class="metric">人口<b id="supply">—</b></span><span class="metric">波次<b id="wave">—</b></span></div></section>
 <aside class="sidebar"><section class="panel"><h2>指挥 / CONTROL</h2><div class="buttons"><button id="select" disabled>全选己方单位</button><button id="home" disabled>主脑居中</button><button id="release-control" disabled>交还控制租约</button><button id="claim-control" disabled>重新申请控制</button><button id="harvest" disabled>采集 → 点目标</button><button id="move" disabled>移动 → 点目标</button><button disabled title="当前权威协议不提供暂停">暂停未开放</button></div><p id="selection" class="muted">尚未选择</p><p id="intent">开始后，左键点选或拖框；右键移动。黄绿色为营养沼泽，工蜂右键自动采集。</p><p id="outcome" class="outcome"></p></section>
@@ -38,6 +39,9 @@ let session:Session|null=null;
 let generation=0,request:AbortController|null=null,disposed=false,animationFrame=0;
 interface Playing {cursor:string;frame:PlaybackFrame;source:ReplayObservationTransport;session:Session;own:number;busy:boolean;playing:boolean;stop:boolean;timer:ReturnType<typeof setTimeout>|null;request:AbortController|null}
 let playback:Playing|null=null;
+interface Watching {client:ArenaWorldClient;frame:ObserverFrame;source:ObserverTransport;timer:ReturnType<typeof setTimeout>|null;pending:AbortController|null;own:number;leaving:boolean}
+let watching:Watching|null=null,grantBusy=false,grantRequest:AbortController|null=null;
+let observerGrants:ObserverGrant[]=[];
 let rankClient:ArenaWorldClient|null=null,rankContext:QueueContext|null=null;
 let rankEpoch=0,rankBusy=false,rankRequest:AbortController|null=null,rankTimer:ReturnType<typeof setTimeout>|null=null;
 
@@ -74,6 +78,11 @@ function refreshPanel():void{
 
 function controls():void{
   const active=connected && !arena?.client.observation?.outcome;
+  button("observe-world").disabled=starting||connected||!!playback||!!watching||!!rankClient;
+  button("leave-observer").disabled=!watching||starting;
+  button("grant-observer").disabled=grantBusy||starting||!session||session.practice||!!playback;
+  button("refresh-observers").disabled=grantBusy||starting||!session||session.practice||!!playback;
+  for(const b of el("observer-grants").querySelectorAll<HTMLButtonElement>("button"))b.disabled=grantBusy||!session;
   for(const id of ["select","home","harvest","move","surrender"]) button(id).disabled=!active;
   for(const b of document.querySelectorAll<HTMLButtonElement>("[data-game]"))b.disabled=!active;
   button("release-control").disabled=!active||!arena?.client.lease;
@@ -81,8 +90,8 @@ function controls():void{
   const ended=!!arena?.client.observation?.outcome||session?.match_state==="Completed";
   button("replay").disabled=!ended||!session;
   button("watch-replay").disabled=!ended||!session||starting||!!playback;
-  button("start").disabled=starting || (connected && !ended) || !!rankClient || rankBusy;
-  button("connect-world").disabled=starting || (connected && !ended) || !!rankClient || rankBusy;
+  button("start").disabled=!!watching || starting || (connected && !ended) || !!rankClient || rankBusy;
+  button("connect-world").disabled=!!watching || starting || (connected && !ended) || !!rankClient || rankBusy;
   rankControls();
   refreshPanel();
   button("play-replay").disabled=!playback||playback.busy||playback.playing;
@@ -101,7 +110,7 @@ function display():void{
   const selected=obs.units.filter(u=>arena!.ui.selection.has(u.id));
   el("selection").textContent=`已选 ${selected.length} 单位${selected.length?` · ${selected.map(u=>`#${u.id}`).join(", ")}`:""}${arena.ui.selectedBuilding!==null?` / 建筑 #${arena.ui.selectedBuilding}`:""}`;
   el("outcome").textContent=obs.outcome?`终局：${JSON.stringify(obs.outcome)}`:"";
-  if(obs.outcome&&!playback){el("connection").textContent="已终局 / 可打开签名回放";if(session)session.match_state="Completed";}
+  if(obs.outcome&&!playback&&!watching){el("connection").textContent="已终局 / 可打开签名回放";if(session)session.match_state="Completed";}
   if(arena.ui.notices.length){const n=arena.ui.notices.at(-1)!;const text=`拒绝 ${n.code===null?"":`0x${n.code.toString(16)}`} ${n.text}`;if(lastNotice!==n){lastNotice=n;note(text);}}
   controls();
 }
@@ -112,6 +121,10 @@ async function deadline<T>(pending:Promise<T>,label:string):Promise<T>{
 }
 function clearRuntime():void{
   request?.abort();request=null;
+  grantRequest?.abort();grantRequest=null;grantBusy=false;observerGrants=[];el("observer-grants").replaceChildren();
+  const observer=watching;watching=null;
+  if(observer){observer.pending?.abort();if(observer.timer)clearTimeout(observer.timer);observer.source.close();observer.client.destroy();}
+  el("observer-status").textContent="未连接观战；断开不代表撤销准入";
   const old=playback;playback=null;
   if(old){old.stop=true;old.playing=false;old.request?.abort();if(old.timer)clearTimeout(old.timer);void old.session.client.closePlayback(old.session.match_id,old.cursor).catch(()=>{});}
   gpuRenderer?.dispose();gpuRenderer=null;arena?.dispose();arena=null;socket?.close();socket=null;
@@ -125,7 +138,7 @@ function disconnect():void{
   input("capability").value="";starting=false;logLines=[];el("log").textContent="身份已断开；未暂停服务器，也未把未确认命令算成功。";
   el("connection").textContent="身份已断开";controls();
 }
-function mountGpu(current:ArenaApp,info:WorldRun):void{
+function mountGpu(current:ArenaApp,info:Pick<WorldRun,"world_id"|"faction">):void{
   if(!gpuRequested)return;
   gpuRenderer?.dispose();gpuRenderer=null;
   const next=canvas.cloneNode(false) as HTMLCanvasElement;canvas.replaceWith(next);canvas=next;drag=null;bindCanvasInput();
@@ -194,8 +207,70 @@ async function start(authored=false):Promise<void>{
     note(`${String(error)}；已有世界开局可能已提交，请按同一世界重连，不重复创建世界。`);}}
   finally{if(previous&&session?.client!==previous.client)previous.client.destroy();if(own===generation){starting=false;request=null;controls();}}
 }
+function showObserverGrants():void{
+  const container=el("observer-grants");container.replaceChildren();
+  if(!observerGrants.length)container.textContent="当前没有已确认有效准入（不是在线人数）";
+  for(const grant of observerGrants){const row=document.createElement("p"),revoke=document.createElement("button");
+    row.textContent=`主体 ${grant.principal_id} · 阵营 ${grant.faction} · 只读准入 `;revoke.textContent=`撤销 ${grant.principal_id}`;
+    revoke.onclick=()=>void manageObservers("revoke",grant);row.append(revoke);container.append(row);}
+}
+async function manageObservers(action:"list"|"grant"|"revoke",grant?:ObserverGrant):Promise<void>{
+  const info=session,own=generation;if(!info||info.practice||grantBusy||starting)return;
+  grantBusy=true;const pending=new AbortController();grantRequest=pending;controls();const timer=setTimeout(()=>pending.abort(),4000);
+  try{
+    if(action==="grant")await info.client.grantObserver(info.world_id,input("observer-principal").value.trim(),info.faction,pending.signal);
+    if(action==="revoke"&&grant)await info.client.revokeObserver(info.world_id,grant,pending.signal);
+    const grants=await info.client.observerGrants(info.world_id,pending.signal);
+    if(own!==generation||session!==info)return;observerGrants=grants;showObserverGrants();
+    note(action==="list"?"已读取持久准入清单，不代表在线成员。":"授权操作已获服务器回执，清单已重新读取。");
+  }catch(error){if(own===generation){observerGrants=[];el("observer-grants").textContent="状态未确认，请显式刷新；不自动重试写入";note(String(error));}}
+  finally{clearTimeout(timer);if(own===generation){grantBusy=false;grantRequest=null;controls();}}
+}
+function stopObservation(state:Watching,message:string):void{
+  if(watching!==state)return;generation++;clearRuntime();starting=false;
+  el("connection").textContent="观战已停止 / 不保留私有画面";el("observer-status").textContent=message;note(message);controls();
+}
+async function pollObservation(state:Watching):Promise<void>{
+  if(watching!==state||state.own!==generation||state.leaving)return;
+  const pending=new AbortController();state.pending=pending;const timer=setTimeout(()=>pending.abort(),2500);
+  try{
+    const frame=await state.client.observe(state.frame.world_id,pending.signal);
+    if(watching!==state||state.own!==generation||state.leaving)return;
+    state.source.publish(frame);state.frame=frame;
+    el("observer-status").textContent=`真实只读观战 · 主体 ${frame.principal_id} · 授权阵营 ${frame.faction} · Tick ${frame.messages.welcome.tick}（无控制租约）`;
+    state.timer=setTimeout(()=>void pollObservation(state),250);
+  }catch(error){if(watching===state&&!state.leaving)stopObservation(state,`观战准入/连接未确认：${String(error)}。已停止拉取并清空；请重新确认，不自动重试。`);}
+  finally{clearTimeout(timer);state.pending=null;}
+}
+async function observeWorld():Promise<void>{
+  if(starting||connected||playback||watching||rankClient)return;
+  const own=++generation;const previous=session;clearRuntime();previous?.client.destroy();session=null;starting=true;controls();
+  const pending=new AbortController();request=pending;const timer=setTimeout(()=>pending.abort(),3000);let client:ArenaWorldClient|null=null;
+  try{
+    client=new ArenaWorldClient(input("api-origin").value.trim(),input("capability").value.trim());input("capability").value="";
+    const frame=await client.observe(input("world-id").value.trim().toLowerCase(),pending.signal);
+    if(own!==generation||pending.signal.aborted){client.destroy();return;}
+    const source=new ObserverTransport(frame),state:Watching={client,frame,source,own,timer:null,pending:null,leaving:false};watching=state;
+    const current=createArenaApp(source,{principalId:frame.principal_id,kind:frame.principal_kind==="Human"?"Human":frame.principal_kind==="Agent"?"Agent":"Script",faction:frame.faction});arena=current;current.ui.camera.yDown=gpuRequested;
+    current.client.on(event=>{if(watching===state&&arena===current&&event.type==="observation")display();});
+    await current.client.connect();if(own!==generation)return;current.controller.jumpToNexus();current.ui.camera.zoom=1.8;
+    el("connection").textContent="定向只读观战 / 无控制席位";el("arena-mode").textContent=`私有世界观战 · 仅阵营 ${frame.faction}`;
+    el("observer-status").textContent=`准入已确认 · 主体 ${frame.principal_id} · 阵营 ${frame.faction}`;
+    mountGpu(current,frame);
+    display();state.timer=setTimeout(()=>void pollObservation(state),250);
+  }catch(error){if(own===generation){clearRuntime();client?.destroy();note(`观战未确认：${String(error)}`);el("connection").textContent="观战被拒绝 / 未显示私有状态";}}
+  finally{clearTimeout(timer);if(own===generation){starting=false;request=null;controls();}}
+}
+button("observe-world").onclick=()=>void observeWorld();
+button("refresh-observers").onclick=()=>void manageObservers("list");
+button("grant-observer").onclick=()=>void manageObservers("grant");
+button("leave-observer").onclick=()=>{const state=watching;if(!state||starting)return;starting=true;state.leaving=true;if(state.timer)clearTimeout(state.timer);state.pending?.abort();controls();
+  const pending=new AbortController();request=pending;const timer=setTimeout(()=>pending.abort(),3000);
+  void state.client.leaveObserver(state.frame.world_id,state.frame,pending.signal).then(()=>stopObservation(state,"服务器已确认离开，原观战准入已撤销；重新加入须所有者再次授权。"))
+    .catch(error=>stopObservation(state,`离开未确认：${String(error)}。本地已清空；请让所有者刷新对账，不将超时当撤销成功。`)).finally(()=>clearTimeout(timer));
+};
 function rankControls():void{
-  const locked=rankBusy||starting||connected||!!playback;
+  const locked=rankBusy||starting||connected||!!playback||!!watching;
   button("rank-auth").disabled=locked||!!rankClient;
   button("rank-join").disabled=locked||!rankContext||rankContext.status!=="idle";
   button("rank-refresh").disabled=locked||!rankClient;
@@ -212,7 +287,7 @@ function showRank():void{
   el("rank-status").textContent=`已认证主体 ${c.principal_id} · human · ${c.status==="queued"?"真实排队中，等待另一注册玩家":c.active?`对局 ${c.active.match_id} / 世界 ${c.active.world_id} / 阵营 ${c.active.faction} / ${c.active.match_state}`:"未排队"} · ruleset ${c.ruleset_hash}`;
 }
 async function rankAction(action:"auth"|"join"|"refresh"|"cancel"):Promise<void>{
-  if(rankBusy||connected||starting||playback)return;
+  if(rankBusy||connected||starting||playback||watching)return;
   if(rankTimer)clearTimeout(rankTimer);rankTimer=null;
   const own=rankEpoch;rankBusy=true;const pending=new AbortController();rankRequest=pending;controls();
   // 请求有界；超时不能证明入队/取消未提交，停止追踪并用只读刷新对账。
@@ -238,7 +313,7 @@ async function rankAction(action:"auth"|"join"|"refresh"|"cancel"):Promise<void>
   }}finally{clearTimeout(timer);if(own===rankEpoch){rankBusy=false;rankRequest=null;controls();}}
 }
 async function enterRanked():Promise<void>{
-  if(rankBusy||starting||connected||playback||!rankClient||!rankContext?.active)return;
+  if(rankBusy||starting||connected||playback||watching||!rankClient||!rankContext?.active)return;
   const client=rankClient,identity=rankContext.principal_id;rankBusy=true;controls();
   const e=rankEpoch,pending=new AbortController();rankRequest=pending;
   const timer=setTimeout(()=>pending.abort(),8000);

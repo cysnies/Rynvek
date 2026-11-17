@@ -62,3 +62,42 @@ it("终局已有世界打开验签前缀播放器，只读控件不向运行Acto
  expect((field("move") as HTMLButtonElement).disabled).toBe(true);expect(document.getElementById("command-json")).toBeNull();expect([...document.querySelectorAll("#command-panel [data-action]")].filter((b)=> (b as HTMLButtonElement).dataset.action!=="select-building").every((b)=>(b as HTMLButtonElement).disabled)).toBe(true);expect(document.getElementById("replay-status")?.textContent).toContain("未验证后缀");
  (field("close-replay") as HTMLButtonElement).click();await vi.waitFor(()=>expect(fetcher.mock.calls.some(([,init])=>init?.method==="DELETE")).toBe(true));expect(document.getElementById("biomass")?.textContent).toBe("—");
 });
+
+const observerGrant={principal_id:"789",faction:0,grant_id:"10000000-0000-4000-8000-000000000004",role:"observer"};
+const observerFrame={...observerGrant,principal_kind:"Human",world_id:world,match_id:match,messages:{welcome:{...welcome,tick:observation.observation.tick,tools:[]},observation}};
+it("只读观战使用原Renderer，拒绝控制且撤销后清空画面，不创建WS或practice",async()=>{
+ let reads=0;const storage=vi.spyOn(Storage.prototype,"setItem");
+ const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>{expect(init?.method).toBe("GET");return ++reads===1?Response.json(observerFrame):Response.json({message:"准入不存在"},{status:404})});await mount(fetcher);
+ field("observe-world").click();await vi.waitFor(()=>expect(field("connection").textContent).toContain("定向只读观战"));
+ expect(field("biomass").textContent).not.toBe("—");expect(field("move").disabled).toBe(true);expect(field("claim-control").disabled).toBe(true);expect(Socket.all).toHaveLength(0);
+ expect(fetcher.mock.calls[0]?.[0]).toBe(`http://srv/api/v1/worlds/${world}/observation`);expect(field("capability").value).toBe("");
+ await vi.waitFor(()=>expect(field("connection").textContent).toContain("观战已停止"));expect(field("biomass").textContent).toBe("—");expect(storage).not.toHaveBeenCalled();
+ expect(fetcher.mock.calls.every(([url])=>!String(url).includes("secret"))).toBe(true);
+});
+it("离开先停拉取，按原准入版本撤销，主动取消的在途读取不冒充失败",async()=>{
+ let reads=0;
+ const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>{
+  if(init?.method==="DELETE")return Response.json({status:"left"});
+  if(++reads===1)return Response.json(observerFrame);
+  return new Promise<Response>((_resolve,reject)=>init?.signal?.addEventListener("abort",()=>reject(new DOMException("取消","AbortError")),{once:true}));
+ });await mount(fetcher);field("observe-world").click();await vi.waitFor(()=>expect(reads).toBe(2));field("leave-observer").click();
+ await vi.waitFor(()=>expect(field("observer-status").textContent).toContain("服务器已确认离开"));expect(field("biomass").textContent).toBe("—");
+ const leave=fetcher.mock.calls.find(([,init])=>init?.method==="DELETE")!;expect(JSON.parse(String(leave[1]?.body))).toEqual({grant_id:observerGrant.grant_id});expect(Socket.all).toHaveLength(0);
+});
+it("断开身份后的迟到观战响应不得恢复画面或安排轮询",async()=>{
+ let resolve!:(r:Response)=>void;const fetcher=vi.fn(()=>new Promise<Response>(r=>{resolve=r}));await mount(fetcher);
+ field("observe-world").click();await vi.waitFor(()=>expect(fetcher).toHaveBeenCalledTimes(1));field("disconnect").click();resolve(Response.json(observerFrame));
+ await new Promise(r=>setTimeout(r,0));expect(field("biomass").textContent).toBe("—");expect(field("connection").textContent).toBe("身份已断开");expect(Socket.all).toHaveLength(0);expect(fetcher).toHaveBeenCalledTimes(1);
+});
+it("所有者从真实席位授予当前阵营观战，清单回执后展示并版本化撤销",async()=>{
+ let active=false;const fetcher=vi.fn(async(url:unknown,init?:RequestInit)=>{
+  if(String(url).endsWith("/arena"))return Response.json(run);
+  if(init?.method==="POST"){active=true;return Response.json(observerGrant);}
+  if(init?.method==="DELETE"){active=false;return Response.json({status:"revoked"});}
+  return Response.json({world_id:world,grants:active?[observerGrant]:[]});
+ });await mount(fetcher);field("connect-world").click();await vi.waitFor(()=>expect(field("connection").textContent).toContain("已获控制租约"));
+ field("observer-principal").value="789";field("grant-observer").click();await vi.waitFor(()=>expect(field("observer-grants").textContent).toContain("主体 789"));
+ const posted=fetcher.mock.calls.find(([url,init])=>String(url).endsWith("/observers")&&init?.method==="POST")!;expect(JSON.parse(String(posted[1]?.body))).toEqual({principal_id:"789",faction:0});
+ (field("observer-grants").querySelector("button") as HTMLButtonElement).click();await vi.waitFor(()=>expect(field("observer-grants").textContent).toContain("当前没有"));
+ const revoked=fetcher.mock.calls.find(([,init])=>init?.method==="DELETE")!;expect(JSON.parse(String(revoked[1]?.body))).toEqual({grant_id:observerGrant.grant_id});
+});
