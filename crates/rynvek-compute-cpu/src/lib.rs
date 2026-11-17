@@ -79,8 +79,7 @@ impl CpuReferenceBackend {
         }
         self.dispatched_work_items
             .fetch_add(u64::from(work_items), Ordering::Relaxed);
-        self.executed_workgroups
-            .fetch_add(u64::from(groups), Ordering::Relaxed);
+        self.executed_workgroups.fetch_add(u64::from(groups), Ordering::Relaxed);
         Ok(groups)
     }
 }

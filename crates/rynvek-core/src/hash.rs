@@ -14,7 +14,20 @@ pub const BLAKE3_DIGEST_LEN: usize = 32;
 
 /// 32 字节 BLAKE3-256 摘要
 #[repr(transparent)]
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, bytemuck::Pod, bytemuck::Zeroable, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    bytemuck::Pod,
+    bytemuck::Zeroable,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct Blake3Hash(pub [u8; BLAKE3_DIGEST_LEN]);
 
 impl Blake3Hash {
