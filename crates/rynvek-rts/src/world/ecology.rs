@@ -164,17 +164,18 @@ impl ArenaWorld {
             } else {
                 b.account.charge_spikes(std::mem::take(&mut b.pending_spikes), cost);
             }
-            let starved = if let Some(contract) = survival.filter(|_| b.account.received_q > 0) {
+            let activated = survival.filter(|_| b.account.received_q > 0);
+            if let Some(contract) = activated {
                 b.account.dissipate_micro(contract.basal_cost_micro_per_tick);
-                b.account.stored_q == 0
-            } else {
-                false
-            };
-            let exported = if forager && !starved {
+            }
+            let exhausted_before_export = activated.is_some() && b.account.stored_q == 0;
+            let exported = if forager && !exhausted_before_export {
                 b.account.export_milli_retaining(room, reserve_q)
             } else {
                 0
             };
+            // 显式零预留允许余量恰好全部转出；仍须在同一稳定边界退役，不能留零能活体。
+            let starved = activated.is_some() && b.account.stored_q == 0;
             if starved {
                 // 在代谢边界通过同一死亡/遗骸路径退役，不能随后再攻击、治疗或重新采集。
                 self.units.get_mut(&id).expect("存活个体").defense.hp_milli = 0;

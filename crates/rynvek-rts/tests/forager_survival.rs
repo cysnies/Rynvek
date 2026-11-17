@@ -237,3 +237,27 @@ fn exhausted_activated_body_cannot_be_checkpointed_as_alive() {
         "稳定检查点不能把已激活耗尽个体保存成活体，待后续食物复活"
     );
 }
+
+#[test]
+fn zero_reserve_resource_export_cannot_leave_an_exhausted_live_body() {
+    let (mut w, id) = world(1000, 0);
+    let tile = w.units[&id].tile();
+    // 冻结采集率允许真实摄取32格量子；代谢后余量恰可全部转出，不是手工注资。
+    w.fields.set(FieldId::Nutrient, tile.0, tile.1, 32);
+    w.step();
+    assert!(
+        !w.units.contains_key(&id),
+        "零预留导出耗尽也必须在本Tick退役，不能留下可恢复的零能活体"
+    );
+    let a = &w.ecology.as_ref().unwrap().remains[&id].account;
+    assert_eq!(a.received_q, 500000);
+    assert_eq!(a.dissipated_q, 4000);
+    assert_eq!(a.exported_q, 496000);
+    assert_eq!((a.stored_q, a.returned_q), (0, 0));
+    assert!(a.is_conserved());
+    let runtime = ArenaRuntime::new([86; 16], w);
+    let cp = runtime.checkpoint().unwrap();
+    let restored = ArenaRuntime::restore([86; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
+    assert_eq!(runtime.state_root(), restored.state_root());
+    assert!(!restored.units.contains_key(&id));
+}
