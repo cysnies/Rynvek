@@ -26,7 +26,7 @@ import {
 import { isSafetyClassSufficient, requiredSafetyClass, safetyClassName } from "./safety.js";
 
 export interface RuleModuleSource {
-  readonly ts_source: string;
+  readonly rule_graph_json: string;
   readonly compiled_rir_blake3: readonly number[];
 }
 
@@ -105,10 +105,11 @@ export class AuthoringDocument {
   private readonly baseRules: ReadonlyMap<string, RuleModuleSource>;
   private readonly baseTemplates: ReadonlySet<string>;
 
+  private revisionOffset = 0;
+  private readonly catalogue = new Map<string, Write<string | undefined>[]>();
   private readonly patches = new Map<string, WorldPatch>();
   private readonly params = new Map<string, Write<string>[]>();
   private readonly tiles = new Map<number, Write<number>[]>();
-  private readonly genomes = new Map<string, Write<string>[]>();
   private readonly rules = new Map<string, Write<RuleModuleSource>[]>();
   private readonly removals = new Map<string, Write<true>[]>();
 
@@ -128,7 +129,13 @@ export class AuthoringDocument {
 
   /** 已整合补丁数（单调递增的创作修订号，写入新补丁的 `base_authoring_revision`） */
   public get revision(): number {
-    return this.patches.size;
+    return this.revisionOffset + this.patches.size;
+  }
+
+  /** 仅由真实服务器提交回执校准；Tick提交也占权威修订，不能用本地补丁数冒充。 */
+  public acknowledgeRevision(revision:number):void {
+    if(!Number.isSafeInteger(revision)||revision<this.revision)throw new RangeError("权威修订必须安全且单调");
+    this.revisionOffset=revision-this.patches.size;
   }
 
   public hasPatch(patchId: readonly number[] | string): boolean {
@@ -186,13 +193,14 @@ export class AuthoringDocument {
         }
       } else if ("UpsertSeedGenome" in op) {
         const { genome_slug, genome_bytes_b64 } = op.UpsertSeedGenome;
-        record(this.history(this.genomes, genome_slug), { stamp, value: genome_bytes_b64 }, { kind: "genome", slug: genome_slug });
+        record(this.history(this.catalogue, genome_slug), { stamp, value: genome_bytes_b64 }, { kind: "genome", slug: genome_slug });
       } else if ("UpdateRuleModule" in op) {
-        const { module_id, ts_source, compiled_rir_blake3 } = op.UpdateRuleModule;
-        record(this.history(this.rules, module_id), { stamp, value: { ts_source, compiled_rir_blake3 } }, { kind: "rule", moduleId: module_id });
+        const { module_id, rule_graph_json, compiled_rir_blake3 } = op.UpdateRuleModule;
+        record(this.history(this.rules, module_id), { stamp, value: { rule_graph_json, compiled_rir_blake3 } }, { kind: "rule", moduleId: module_id });
       } else {
         const { template_id } = op.RemoveEntityTemplate;
-        record(this.history(this.removals, template_id), { stamp, value: true }, { kind: "template", templateId: template_id });
+        if(template_id.startsWith("genome/"))record(this.history(this.catalogue,template_id.slice(7)),{stamp,value:undefined},{kind:"template",templateId:template_id});
+        if(!template_id.startsWith("genome/"))record(this.history(this.removals, template_id), { stamp, value: true }, { kind: "template", templateId: template_id });
       }
     });
     this.patches.set(id, patch);
@@ -221,7 +229,8 @@ export class AuthoringDocument {
   }
 
   public genome(slug: string): string | undefined {
-    return this.genomes.get(slug)?.at(-1)?.value ?? this.baseGenomes.get(slug);
+    const writes=this.catalogue.get(slug);
+    return writes?.length ? writes.at(-1)?.value : this.baseGenomes.get(slug);
   }
 
   public ruleModule(id: string): RuleModuleSource | undefined {
@@ -230,7 +239,7 @@ export class AuthoringDocument {
 
   /** 模板只能删除不能新建：存在于基线且没有删除记录 */
   public hasTemplate(id: string): boolean {
-    return this.baseTemplates.has(id) && !this.removals.has(id);
+    return id.startsWith("genome/") ? this.genome(id.slice(7))!==undefined : this.baseTemplates.has(id) && !this.removals.has(id);
   }
 
   /** 物化地形 */
@@ -248,9 +257,9 @@ export class AuthoringDocument {
     const params = keys(this.baseParams.keys(), this.params.keys())
       .map((k): [string, string | undefined] => [k, this.param(k)])
       .filter((e): e is [string, string] => e[1] !== undefined);
-    const genomes = keys(this.baseGenomes.keys(), this.genomes.keys()).map((k): [string, string] => [k, this.genome(k) as string]);
+    const genomes = keys(this.baseGenomes.keys(), this.catalogue.keys()).map((k): [string, string | undefined] => [k, this.genome(k)]).filter((e):e is [string,string]=>e[1]!==undefined);
     const rules = keys(this.baseRules.keys(), this.rules.keys()).map((k): [string, RuleModuleSource] => [k, this.ruleModule(k) as RuleModuleSource]);
-    const templates = [...this.baseTemplates].filter((t) => this.hasTemplate(t)).sort();
+    const templates = [...new Set([...this.baseTemplates,...keys(this.baseGenomes.keys(),this.catalogue.keys()).map(k=>`genome/${k}`)])].filter((t) => this.hasTemplate(t)).sort();
     return JSON.stringify({
       width: this.width,
       height: this.height,
@@ -281,16 +290,24 @@ export class AuthoringDocument {
     const skipped: { register: RegisterRef; reason: "superseded" | "not_invertible" }[] = [];
 
     /** 胜出者是本补丁时，返回其之前的写入值（不存在为 undefined）；否则返回 null */
-    const previous = <T>(history: Write<T>[] | undefined): { prev: T | undefined } | null => {
+    const previous = <T>(history: Write<T>[] | undefined): { prev: T | undefined; hadPrevious: boolean } | null => {
       if (history === undefined) return null;
       const last = history.at(-1);
       if (last === undefined || last.stamp.patch !== id) return null;
       // 同一补丁内多次写同一寄存器时，跳过本补丁的全部写入
       let j = history.length - 1;
       while (j >= 0 && (history[j] as Write<T>).stamp.patch === id) j--;
-      return { prev: j >= 0 ? (history[j] as Write<T>).value : undefined };
+      return { prev: j >= 0 ? (history[j] as Write<T>).value : undefined, hadPrevious:j>=0 };
     };
 
+    const seenCatalogue=new Set<string>();
+    const invertCatalogue=(slug:string)=>{
+      if(seenCatalogue.has(slug))return;seenCatalogue.add(slug);
+      const r=previous(this.catalogue.get(slug));const prev=r?.hadPrevious?r.prev:this.baseGenomes.get(slug);
+      if(r===null)skipped.push({register:{kind:"genome",slug},reason:"superseded"});
+      else if(prev!==undefined)ops.push({UpsertSeedGenome:{genome_slug:slug,genome_bytes_b64:prev}});
+      else if(this.genome(slug)!==undefined)ops.push({RemoveEntityTemplate:{template_id:`genome/${slug}`}});
+    };
     const seenParams = new Set<string>();
     const tileRows = new Map<number, Map<number, number>>(); // y → (x → 先前地形)
     for (const op of patch.operations) {
@@ -317,12 +334,7 @@ export class AuthoringDocument {
           }
         }
       } else if ("UpsertSeedGenome" in op) {
-        const slug = op.UpsertSeedGenome.genome_slug;
-        const r = previous(this.genomes.get(slug));
-        const prev = r?.prev ?? this.baseGenomes.get(slug);
-        if (r === null) skipped.push({ register: { kind: "genome", slug }, reason: "superseded" });
-        else if (prev === undefined) skipped.push({ register: { kind: "genome", slug }, reason: "not_invertible" });
-        else ops.push({ UpsertSeedGenome: { genome_slug: slug, genome_bytes_b64: prev } });
+        invertCatalogue(op.UpsertSeedGenome.genome_slug);
       } else if ("UpdateRuleModule" in op) {
         const moduleId = op.UpdateRuleModule.module_id;
         const r = previous(this.rules.get(moduleId));
@@ -331,7 +343,8 @@ export class AuthoringDocument {
         else if (prev === undefined) skipped.push({ register: { kind: "rule", moduleId }, reason: "not_invertible" });
         else ops.push({ UpdateRuleModule: { module_id: moduleId, ...prev } });
       } else {
-        // 规范操作集没有“恢复模板”，删除不可逆
+        if(op.RemoveEntityTemplate.template_id.startsWith("genome/")){invertCatalogue(op.RemoveEntityTemplate.template_id.slice(7));continue;}
+        // 非基因目录模板没有恢复操作。
         skipped.push({ register: { kind: "template", templateId: op.RemoveEntityTemplate.template_id }, reason: "not_invertible" });
       }
     }

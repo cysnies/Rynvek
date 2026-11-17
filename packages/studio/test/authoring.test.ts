@@ -33,7 +33,7 @@ function concurrentPatches(): WorldPatch[] {
     [set("field.nutrient.diffusion", 0.3), paint(2, 1, 4, 3, 3), { RemoveEntityTemplate: { template_id: "spore-pod" } }],
     [paint(1, 1, 2, 2, 4), { UpsertSeedGenome: { genome_slug: "amoeba-basic", genome_bytes_b64: "AQID" } }],
     [set("presentation.grid_alpha", 0.8)],
-    [{ UpdateRuleModule: { module_id: "rts.economy", ts_source: "v2", compiled_rir_blake3: new Array(32).fill(2) } }],
+    [{ UpdateRuleModule: { module_id: "rts.economy", rule_graph_json: "v2", compiled_rir_blake3: new Array(32).fill(2) } }],
     [set("field.nutrient.diffusion", 0.4)],
   ];
   ops.forEach((o, i) => {
@@ -62,9 +62,9 @@ describe("AuthoringDocument CRDT 合并", () => {
     const state = JSON.parse(reference);
     // 参数：HLC 最大者胜出
     expect(state.params["field.nutrient.diffusion"]).toBe("0.4");
-    expect(state.templates).toEqual(["legacy-turret"]);
+    expect(state.templates).toEqual(["genome/amoeba-basic", "legacy-turret"]);
     expect(state.genomes["amoeba-basic"]).toBe("AQID");
-    expect(state.rules["rts.economy"].ts_source).toBe("v2");
+    expect(state.rules["rts.economy"].rule_graph_json).toBe("v2");
   });
 
   it("幂等与结合律：重复投递、分批合并与一次性合并结果一致", () => {
@@ -149,7 +149,7 @@ describe("AuthoringDocument CRDT 合并", () => {
     expect(() => doc.integrate(oob)).toThrow(RynvekError);
     expect(doc.param("field.a")).toBeUndefined();
     expect(doc.revision).toBe(0);
-    const under = { ...doc.createPatch(clock, [{ UpdateRuleModule: { module_id: "m", ts_source: "", compiled_rir_blake3: new Array(32).fill(0) } }], ids()), safety_class: "TickBoundarySafe" as const };
+    const under = { ...doc.createPatch(clock, [{ UpdateRuleModule: { module_id: "m", rule_graph_json: "", compiled_rir_blake3: new Array(32).fill(0) } }], ids()), safety_class: "TickBoundarySafe" as const };
     expect(() => doc.integrate(under)).toThrow(/低于所需/);
     // 声明更保守的分级是允许的
     const over = { ...doc.createPatch(clock, [set("presentation.x", 1)], ids()), safety_class: "RequiresForkRestart" as const };
@@ -213,7 +213,7 @@ describe("选择性撤销 / 重做", () => {
     expect(undo.canUndo).toBe(true);
   });
 
-  it("新参数撤销为 null；新增基因组与删除模板不可逆", () => {
+  it("新参数撤销为 null；新增基因组可目录删除，非基因模板仍不可逆", () => {
     const { mine, undo } = setup();
     undo.commit([
       set("field.fresh", 1),
@@ -221,8 +221,9 @@ describe("选择性撤销 / 重做", () => {
       { RemoveEntityTemplate: { template_id: "spore-pod" } },
     ]);
     const u = undo.undo()!;
-    expect(u.patch.operations).toEqual([{ SetWorldParam: { key_path: "field.fresh", new_value_json: "null" } }]);
-    expect(u.skipped.map((s) => s.reason)).toEqual(["not_invertible", "not_invertible"]);
+    expect(u.patch.operations).toEqual([{ SetWorldParam: { key_path: "field.fresh", new_value_json: "null" } },{RemoveEntityTemplate:{template_id:"genome/brand-new"}}]);
+    expect(mine.genome("brand-new")).toBeUndefined();
+    expect(u.skipped.map((s) => s.reason)).toEqual(["not_invertible"]);
     expect(mine.param("field.fresh")).toBeUndefined();
   });
 

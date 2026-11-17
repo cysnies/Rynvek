@@ -16,3 +16,5 @@ export * from "./components/DockWorkspace.js";
 export * from "./components/StudioWorkspace.js";
 export * from "./components/RviewPreview.js";
 export { DOCK_STYLESHEET } from "./components/styles.js";
+
+export * from "./remote.js";

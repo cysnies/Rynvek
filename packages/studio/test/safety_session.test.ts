@@ -16,7 +16,7 @@ import {
 import { baseline, idGen, manualClock } from "./helpers.js";
 
 const set = (key_path: string): WorldPatchOp => ({ SetWorldParam: { key_path, new_value_json: "1" } });
-const rule: WorldPatchOp = { UpdateRuleModule: { module_id: "m", ts_source: "", compiled_rir_blake3: new Array(32).fill(0) } };
+const rule: WorldPatchOp = { UpdateRuleModule: { module_id: "m", rule_graph_json: "", compiled_rir_blake3: new Array(32).fill(0) } };
 
 describe("LiveEditSafetyClass 判定与调度", () => {
   it("操作分级", () => {

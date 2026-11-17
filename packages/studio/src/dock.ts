@@ -20,7 +20,7 @@ export type StudioPanelId = (typeof STUDIO_PANELS)[number];
 export const STUDIO_PANEL_TITLES: Readonly<Record<StudioPanelId, string>> = {
   world_editor: "世界地形与场编辑器",
   neural_inspector: "神经拓扑与脉冲检视器",
-  rule_editor: "TypeScript 规则编辑器",
+  rule_editor: "RuleGraph 规则编辑器",
   timeline: "时间线单步调试器",
   rview_preview: ".rview 视觉包预览",
 };

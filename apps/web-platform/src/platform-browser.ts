@@ -4,6 +4,7 @@ import { resolvePlatformSurface } from "./index.js";
 // Lab真实挂载而不是只返回路由描述；不初始化Arena画布/练习身份或加载其WASM。
 const route=resolvePlatformSurface(location.pathname);
 if(route.surface==="lab")void import("./lab-browser.js");
+else if(route.surface==="studio")void import("./studio-browser.js");
 else if(route.surface==="arena")void import("./browser.js");
 else {
   const app=document.querySelector("#app")!;const text=document.createElement("p");

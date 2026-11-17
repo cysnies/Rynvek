@@ -26,7 +26,7 @@ function specBlock(start: string): string {
   return SPEC.slice(i, SPEC.indexOf("\n}", i));
 }
 
-describe("WorldPatch 与规范 10.2 一致", () => {
+describe("WorldPatch当前Rust镜像与规范10.2骨架", () => {
   it("安全分级名称与数值逐项对应 Rust 枚举", () => {
     const block = specBlock("pub enum LiveEditSafetyClass");
     const variants = [...block.matchAll(/^\s+(\w+) = (\d),$/gm)].map(([, n, v]) => [n, Number(v)]);
@@ -34,11 +34,10 @@ describe("WorldPatch 与规范 10.2 一致", () => {
   });
 
   it("操作种类与字段名逐项对应 WorldPatchOp", () => {
-    const block = specBlock("pub enum WorldPatchOp");
-    const ops = [...block.matchAll(/^\s+(\w+) \{ (.+) \},$/gm)].map(([, name, fields]) => [
-      name,
-      [...(fields ?? "").matchAll(/(\w+):/g)].map((m) => m[1]),
-    ]);
+    // 原规范附件不重写；当前协议显式改为RuleGraph输入，与生产Rust逐字段核对。
+    const current=readFileSync(new URL("../../../crates/rynvek-world/src/authoring.rs",import.meta.url),"utf8");
+    const block=current.match(/pub enum WorldPatchOp \{([\s\S]*?)\n\}/)![1]!;
+    const ops=[...block.matchAll(/^    (\w+) \{([\s\S]*?)^    \},/gm)].map(([,name,fields])=>[name,[...(fields??"").matchAll(/^\s+(\w+):/gm)].map(m=>m[1])]);
     expect(ops.map(([n]) => n)).toEqual(WORLD_PATCH_OP_KINDS);
     const fixture = JSON.parse(FIXTURE);
     for (const [name, fields] of ops) {

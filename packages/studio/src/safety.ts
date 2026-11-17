@@ -32,6 +32,7 @@ export const WORLD_PARAM_NAMESPACE_CLASS: Readonly<Record<string, LiveEditSafety
   buildings: LiveEditSafetyClass.TickBoundarySafe,
   units: LiveEditSafetyClass.TickBoundarySafe,
   // Class 2：神经网络拓扑规则、规则模块
+  ecology: LiveEditSafetyClass.EpochBoundarySafe,
   neural: LiveEditSafetyClass.EpochBoundarySafe,
   rules: LiveEditSafetyClass.EpochBoundarySafe,
   // Class 3：Chunk 尺寸、空间维度、数值 Profile 等世界结构参数

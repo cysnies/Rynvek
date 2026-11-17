@@ -55,7 +55,7 @@ export type WorldPatchOp =
   | {
       readonly UpdateRuleModule: {
         readonly module_id: string;
-        readonly ts_source: string;
+        readonly rule_graph_json: string;
         readonly compiled_rir_blake3: readonly number[];
       };
     }
@@ -206,21 +206,21 @@ export function parseWorldPatchOp(v: unknown, where = "op"): WorldPatchOp {
       return { UpsertSeedGenome: { genome_slug, genome_bytes_b64 } };
     }
     case "UpdateRuleModule": {
-      exactKeys(body, ["module_id", "ts_source", "compiled_rir_blake3"], w);
+      exactKeys(body, ["module_id", "rule_graph_json", "compiled_rir_blake3"], w);
       const module_id = string(body["module_id"], `${w}.module_id`, 128);
       if (!SLUG_PATTERN.test(module_id)) invalid(`${w}.module_id 格式非法`);
       return {
         UpdateRuleModule: {
           module_id,
-          ts_source: string(body["ts_source"], `${w}.ts_source`),
+          rule_graph_json: string(body["rule_graph_json"], `${w}.rule_graph_json`),
           compiled_rir_blake3: bytes(body["compiled_rir_blake3"], 32, `${w}.compiled_rir_blake3`),
         },
       };
     }
     case "RemoveEntityTemplate": {
       exactKeys(body, ["template_id"], w);
-      const template_id = string(body["template_id"], `${w}.template_id`, 128);
-      if (!SLUG_PATTERN.test(template_id)) invalid(`${w}.template_id 格式非法`);
+      const template_id = string(body["template_id"], `${w}.template_id`, 135);
+      if (!SLUG_PATTERN.test(template_id.startsWith("genome/")?template_id.slice(7):template_id)) invalid(`${w}.template_id 格式非法`);
       return { RemoveEntityTemplate: { template_id } };
     }
     default:

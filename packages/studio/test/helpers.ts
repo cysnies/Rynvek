@@ -42,7 +42,7 @@ export function baseline(): AuthoringBaseline {
     terrain: new Uint8Array(48),
     params: { "field.nutrient.diffusion": "0.1", "presentation.grid_alpha": "0.5" },
     genomes: { "amoeba-basic": "AA==" },
-    rules: { "rts.economy": { ts_source: "v1", compiled_rir_blake3: new Array(32).fill(1) } },
+    rules: { "rts.economy": { rule_graph_json: "v1", compiled_rir_blake3: new Array(32).fill(1) } },
     templates: ["legacy-turret", "spore-pod"],
   };
 }
