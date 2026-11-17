@@ -20,7 +20,8 @@ use crate::error::ApiError;
 struct Tables {
     agent_runs: BTreeMap<String, crate::agent_runs::AgentRun>,
     lab_jobs: BTreeMap<String, crate::lab_jobs::LabJob>,
-    private_agents: BTreeMap<(u64, String, String), super::PrivateAgentRow>,
+    private_audios: BTreeMap<(u64, String, String), super::PrivateArtifactRow>,
+    private_agents: BTreeMap<(u64, String, String), super::PrivateArtifactRow>,
     ranked_deadlines: BTreeMap<WireUuid, u64>,
     ranked_tickets: Vec<crate::ranked::QueueTicket>,
     ranked_hosts: BTreeMap<WireUuid, crate::ranked::HostLease>,
@@ -261,7 +262,7 @@ impl MemoryStore {
         Ok(job)
     }
 
-    pub fn put_private_agent(&self, row: super::PrivateAgentRow) -> StoreResult<()> {
+    pub fn put_private_agent(&self, row: super::PrivateArtifactRow) -> StoreResult<()> {
         let mut t = self.lock();
         let key = (row.owner_id, row.package_id.clone(), row.version.clone());
         if !t
@@ -294,10 +295,10 @@ impl MemoryStore {
         owner: u64,
         id: String,
         version: String,
-    ) -> StoreResult<Option<super::PrivateAgentRow>> {
+    ) -> StoreResult<Option<super::PrivateArtifactRow>> {
         Ok(self.lock().private_agents.get(&(owner, id, version)).cloned())
     }
-    pub fn private_agents(&self, owner: u64) -> StoreResult<Vec<super::PrivateAgentRow>> {
+    pub fn private_agents(&self, owner: u64) -> StoreResult<Vec<super::PrivateArtifactRow>> {
         Ok(self
             .lock()
             .private_agents
@@ -309,6 +310,60 @@ impl MemoryStore {
     pub fn revoke_private_agent(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {
         let mut t = self.lock();
         let Some(row) = t.private_agents.get_mut(&(owner, id, version)) else {
+            return Ok(false);
+        };
+        row.revoked = true;
+        Ok(true)
+    }
+
+    pub fn put_private_audio(&self, row: super::PrivateArtifactRow) -> StoreResult<()> {
+        let mut t = self.lock();
+        let key = (row.owner_id, row.package_id.clone(), row.version.clone());
+        if !t
+            .principals
+            .get(&row.owner_id)
+            .is_some_and(|p| p.status == PrincipalStatus::Active && p.ed25519_pubkey == row.publisher_key)
+        {
+            return Err(conflict("发布者已失效"));
+        }
+        if t.private_audios.contains_key(&key) {
+            return Err(conflict("私有版本不可覆盖，包括已撤销版本"));
+        }
+        if t.private_audios.keys().filter(|(o, _, _)| *o == row.owner_id).count() >= 256 {
+            return Err(conflict("当前私有registry每主体最多256个不可变版本"));
+        }
+        for d in &row.dependencies {
+            if !t
+                .private_audios
+                .get(&(row.owner_id, d.id.clone(), d.version.clone()))
+                .is_some_and(|p| !p.revoked && crate::ids::hex(&p.cid) == d.blake3_256)
+            {
+                return Err(conflict("私有依赖已改变/撤销"));
+            }
+        }
+        t.private_audios.insert(key, row);
+        Ok(())
+    }
+    pub fn private_audio(
+        &self,
+        owner: u64,
+        id: String,
+        version: String,
+    ) -> StoreResult<Option<super::PrivateArtifactRow>> {
+        Ok(self.lock().private_audios.get(&(owner, id, version)).cloned())
+    }
+    pub fn private_audios(&self, owner: u64) -> StoreResult<Vec<super::PrivateArtifactRow>> {
+        Ok(self
+            .lock()
+            .private_audios
+            .values()
+            .filter(|p| p.owner_id == owner)
+            .cloned()
+            .collect())
+    }
+    pub fn revoke_private_audio(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {
+        let mut t = self.lock();
+        let Some(row) = t.private_audios.get_mut(&(owner, id, version)) else {
             return Ok(false);
         };
         row.revoked = true;

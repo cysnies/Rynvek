@@ -13,6 +13,7 @@ pub mod meta;
 pub mod multiplayer;
 pub mod observers;
 pub mod private_agents;
+pub mod private_audio;
 pub mod user;
 pub mod worlds;
 
@@ -48,6 +49,10 @@ pub const ROUTES: [(&str, &str, &str); 20] = [
 /// 构建路由
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/api/v1/private-hub/audio", get(private_audio::list))
+        .route("/api/v1/private-hub/audio/{id}/{version}", get(private_audio::get).put(private_audio::publish).delete(private_audio::revoke))
+        .route("/api/v1/private-hub/audio/{id}/{version}/artifact", get(private_audio::artifact))
+        .route("/api/v1/private-hub/audio/{id}/{version}/resolved", get(private_audio::resolved))
         .route("/api/v1/private-hub/agents", get(private_agents::list))
         .route(
             "/api/v1/private-hub/agents/{id}/{version}",

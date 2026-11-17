@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 use super::*;
-fn agent_of(r: &Row) -> StoreResult<super::super::PrivateAgentRow> {
-    let mut row: super::super::PrivateAgentRow =
+fn agent_of(r: &Row) -> StoreResult<super::super::PrivateArtifactRow> {
+    let mut row: super::super::PrivateArtifactRow =
         serde_json::from_str(&r.get::<_, String>(0)).map_err(|_| corrupt("私有Agent版本"))?;
     row.revoked = r.get(1);
     Ok(row)
 }
 impl PostgresStore {
-    pub async fn put_private_agent(&self, row: super::super::PrivateAgentRow) -> StoreResult<()> {
+    pub async fn put_private_agent(&self, row: super::super::PrivateArtifactRow) -> StoreResult<()> {
         let mut c = self.client.lock().await;
         let tx = c.transaction().await.map_err(db_err)?;
         // 同主体行锁串行化配额与发布，固定顺序锁依赖防并发撤销覆盖已校验事实。
@@ -59,10 +59,10 @@ impl PostgresStore {
         owner: u64,
         id: String,
         version: String,
-    ) -> StoreResult<Option<super::super::PrivateAgentRow>> {
+    ) -> StoreResult<Option<super::super::PrivateArtifactRow>> {
         self.client.lock().await.query_opt("SELECT row_json::text,revoked FROM private_agent_versions WHERE owner_id=$1 AND package_id=$2 AND semver=$3",&[&i(owner),&id,&version]).await.map_err(db_err)?.as_ref().map(agent_of).transpose()
     }
-    pub async fn private_agents(&self, owner: u64) -> StoreResult<Vec<super::super::PrivateAgentRow>> {
+    pub async fn private_agents(&self, owner: u64) -> StoreResult<Vec<super::super::PrivateArtifactRow>> {
         self.client.lock().await.query("SELECT row_json::text,revoked FROM private_agent_versions WHERE owner_id=$1 ORDER BY package_id,semver LIMIT 256",&[&i(owner)]).await.map_err(db_err)?.iter().map(agent_of).collect()
     }
     pub async fn revoke_private_agent(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {

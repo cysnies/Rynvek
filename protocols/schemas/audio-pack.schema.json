@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rynvek.org/schemas/audio-pack.schema.json",
+  "title": "Private procedural audio pack profile / audio.json",
+  "description": "RYPK engine_compat=rynvek-audio-recipes/1. Four JSON files only: audio.json (root schema), manifest.json (audio-manifest schema with profile restrictions), recipes.json (#/$defs/recipes), dependencies.lock (exact private libraries). No media/source/URLs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "runtime",
+    "role"
+  ],
+  "properties": {
+    "schema": {
+      "const": "rynvek.audio-pack.v1"
+    },
+    "runtime": {
+      "const": "procedural-recipes/1"
+    },
+    "role": {
+      "enum": [
+        "soundpack",
+        "library"
+      ]
+    }
+  },
+  "$defs": {
+    "recipes": {
+      "type": "object",
+      "maxProperties": 24,
+      "propertyNames": {
+        "enum": [
+          "ui.hover",
+          "ui.click",
+          "ui.confirm",
+          "ui.cancel",
+          "ui.error",
+          "ui.panel_toggle",
+          "building.placed",
+          "building.completed",
+          "building.destroyed",
+          "building.extractor_cycle",
+          "unit.spawned",
+          "unit.selected",
+          "unit.order_move",
+          "unit.order_attack",
+          "combat.weapon_pulse",
+          "combat.spore_launch",
+          "combat.impact_kinetic",
+          "combat.shield_hit",
+          "combat.explosion_large",
+          "neural.spike_cluster",
+          "neural.sync_lock",
+          "neural.mutation_epoch",
+          "field.beacon_pulse",
+          "alert.nexus_under_attack"
+        ]
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "freqStart": {
+            "type": "number",
+            "minimum": 20,
+            "maximum": 8000
+          },
+          "freqEnd": {
+            "type": "number",
+            "minimum": 20,
+            "maximum": 8000
+          },
+          "filterFreq": {
+            "type": "number",
+            "minimum": 20,
+            "maximum": 8000
+          },
+          "attackMs": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "decayMs": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "releaseMs": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "sustainLevel": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "filterQ": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 5
+          },
+          "noiseMix": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 0.8
+          },
+          "oscType": {
+            "enum": [
+              "sine",
+              "square",
+              "sawtooth",
+              "triangle"
+            ]
+          },
+          "filterType": {
+            "enum": [
+              "lowpass",
+              "highpass",
+              "bandpass"
+            ]
+          }
+        }
+      }
+    },
+    "manifestPatch": {
+      "allOf": [
+        {
+          "$ref": "audio-manifest.schema.json"
+        },
+        {
+          "properties": {
+            "events": {
+              "maxProperties": 24,
+              "propertyNames": {
+                "enum": [
+                  "ui.hover",
+                  "ui.click",
+                  "ui.confirm",
+                  "ui.cancel",
+                  "ui.error",
+                  "ui.panel_toggle",
+                  "building.placed",
+                  "building.completed",
+                  "building.destroyed",
+                  "building.extractor_cycle",
+                  "unit.spawned",
+                  "unit.selected",
+                  "unit.order_move",
+                  "unit.order_attack",
+                  "combat.weapon_pulse",
+                  "combat.spore_launch",
+                  "combat.impact_kinetic",
+                  "combat.shield_hit",
+                  "combat.explosion_large",
+                  "neural.spike_cluster",
+                  "neural.sync_lock",
+                  "neural.mutation_epoch",
+                  "field.beacon_pulse",
+                  "alert.nexus_under_attack"
+                ]
+              },
+              "additionalProperties": {
+                "properties": {
+                  "status": {
+                    "const": "placeholder"
+                  },
+                  "max_voices": {
+                    "maximum": 16
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

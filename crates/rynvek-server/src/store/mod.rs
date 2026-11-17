@@ -290,9 +290,9 @@ pub struct CustomRoom {
     pub closed: bool,
 }
 
-/// 私有Agent不可变版本；与公共Hub和公共Blob索引隔离，owner为唯一读取/撤销者。
+/// 私有不可变制品版本；与公共Hub和公共Blob索引隔离，owner为唯一读取/撤销者。
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PrivateAgentRow {
+pub struct PrivateArtifactRow {
     pub owner_id: u64,
     pub package_id: String,
     pub version: String,
@@ -368,17 +368,29 @@ impl Store {
         dispatch!(self.lab_worker(claim, action))
     }
 
-    pub async fn put_private_agent(&self, row: PrivateAgentRow) -> StoreResult<()> {
+    pub async fn put_private_agent(&self, row: PrivateArtifactRow) -> StoreResult<()> {
         dispatch!(self.put_private_agent(row))
     }
-    pub async fn private_agent(&self, owner: u64, id: String, version: String) -> StoreResult<Option<PrivateAgentRow>> {
+    pub async fn private_agent(&self, owner: u64, id: String, version: String) -> StoreResult<Option<PrivateArtifactRow>> {
         dispatch!(self.private_agent(owner, id, version))
     }
-    pub async fn private_agents(&self, owner: u64) -> StoreResult<Vec<PrivateAgentRow>> {
+    pub async fn private_agents(&self, owner: u64) -> StoreResult<Vec<PrivateArtifactRow>> {
         dispatch!(self.private_agents(owner))
     }
     pub async fn revoke_private_agent(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {
         dispatch!(self.revoke_private_agent(owner, id, version))
+    }
+    pub async fn put_private_audio(&self, row: PrivateArtifactRow) -> StoreResult<()> {
+        dispatch!(self.put_private_audio(row))
+    }
+    pub async fn private_audio(&self, owner: u64, id: String, version: String) -> StoreResult<Option<PrivateArtifactRow>> {
+        dispatch!(self.private_audio(owner, id, version))
+    }
+    pub async fn private_audios(&self, owner: u64) -> StoreResult<Vec<PrivateArtifactRow>> {
+        dispatch!(self.private_audios(owner))
+    }
+    pub async fn revoke_private_audio(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {
+        dispatch!(self.revoke_private_audio(owner, id, version))
     }
 
     pub async fn settle_ranked(&self, row: MatchRow, fence: u64, parts: Vec<ParticipantRow>) -> StoreResult<()> {

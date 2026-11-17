@@ -214,6 +214,7 @@ impl PostgresStore {
         ))
         .await
         .map_err(db_err)?;
+        c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0008_private_audio.sql")).await.map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -1051,3 +1052,6 @@ mod lab;
 
 #[path = "postgres_agent_runs.rs"]
 mod agent_runs;
+
+#[path = "postgres_audio.rs"]
+mod audio_versions;

@@ -70,6 +70,7 @@ pub async fn data_export(State(app): State<AppState>, headers: HeaderMap) -> Api
     }
     let audit = store.audit_of(pid).await?;
     let experiments = app.store().lab_list(pid, 512, 0).await?;
+    let private_audio = app.store().private_audios(pid).await?;
     let agent_runs = app.store().agent_run_list(pid).await?;
     let archive = serde_json::json!({
         "format": "rynvek-data-export/1",
@@ -88,6 +89,7 @@ pub async fn data_export(State(app): State<AppState>, headers: HeaderMap) -> Api
         "packages": packages,
         "experiments": experiments,
         "agent_runs": agent_runs,
+        "private_audio": private_audio.into_iter().map(|r|serde_json::json!({"package_id":r.package_id,"version":r.version,"artifact_cid":hex(&r.cid),"profile":r.profile,"dependencies":r.dependencies,"revoked":r.revoked})).collect::<Vec<_>>(),
         "audit_logs": audit,
     });
     app.audit(

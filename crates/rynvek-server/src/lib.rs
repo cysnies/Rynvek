@@ -16,6 +16,7 @@
 #![deny(unsafe_code)]
 
 pub mod agent_package;
+pub mod audio_package;
 pub mod agent_runs;
 pub mod api;
 pub mod app;

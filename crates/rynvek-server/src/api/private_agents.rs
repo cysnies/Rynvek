@@ -6,7 +6,7 @@ use crate::{
     app::AppState,
     error::{ApiError, ApiResult},
     ids::{hex, parse_hex},
-    store::PrivateAgentRow,
+    store::PrivateArtifactRow,
     transactions::conflict,
 };
 use axum::{
@@ -31,16 +31,16 @@ fn private(value: Value) -> Response {
     )
         .into_response()
 }
-fn metadata(row: &PrivateAgentRow) -> Value {
+fn metadata(row: &PrivateArtifactRow) -> Value {
     json!({"owner_id":row.owner_id.to_string(),"package_id":row.package_id,"version":row.version,"artifact_cid":hex(&row.cid),"publisher_key":hex(&row.publisher_key),"signature":hex(&row.signature),"profile":row.profile,"dependencies":row.dependencies,"verification":row.verification,"revoked":row.revoked,"visibility":"Private"})
 }
-async fn row(app: &AppState, pid: u64, id: String, version: String) -> ApiResult<PrivateAgentRow> {
+async fn row(app: &AppState, pid: u64, id: String, version: String) -> ApiResult<PrivateArtifactRow> {
     app.store()
         .private_agent(pid, id, version)
         .await?
         .ok_or_else(|| ApiError::not_found("私有Agent版本不存在"))
 }
-async fn unchanged(app: &AppState, root: &PrivateAgentRow, pins: &[PrivateAgentRow]) -> ApiResult<()> {
+async fn unchanged(app: &AppState, root: &PrivateArtifactRow, pins: &[PrivateArtifactRow]) -> ApiResult<()> {
     for old in std::iter::once(root).chain(pins) {
         let current = row(app, old.owner_id, old.package_id.clone(), old.version.clone()).await?;
         if current.revoked || current.cid != old.cid {
@@ -128,7 +128,7 @@ pub async fn publish(
     .map_err(|_| ApiError::internal("Agent扫描任务失败"))??;
     app.require(&headers, CapabilityScope::HubPublish).await?;
     let cid = app.inner.world_snapshots.put(&bytes)?;
-    let row = PrivateAgentRow {
+    let row = PrivateArtifactRow {
         owner_id: subject.principal_id,
         package_id: id.clone(),
         version: version.clone(),

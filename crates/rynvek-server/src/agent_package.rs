@@ -5,7 +5,7 @@ use crate::{
     app::AppState,
     error::{ApiError, ApiResult},
     ids::{hex, parse_hex},
-    store::PrivateAgentRow,
+    store::PrivateArtifactRow,
 };
 use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use rynvek_rules::sandbox::{QuickJsSandbox, QuickJsSandboxConfig};
@@ -173,7 +173,7 @@ pub fn parse(bytes: &[u8]) -> ApiResult<AgentPackage> {
 pub struct ResolvedAgent {
     pub package: AgentPackage,
     pub source: String,
-    pub pins: Vec<PrivateAgentRow>,
+    pub pins: Vec<PrivateArtifactRow>,
 }
 fn key(id: &str, ver: &str) -> String {
     format!("{id}@{ver}")
@@ -230,7 +230,7 @@ pub async fn resolve(app: &AppState, owner: u64, root: AgentPackage) -> ApiResul
     while let Some(dep) = todo.pop_front() {
         if let Some(existing) = pins
             .iter()
-            .find(|p: &&PrivateAgentRow| p.package_id == dep.id && p.version == dep.version)
+            .find(|p: &&PrivateArtifactRow| p.package_id == dep.id && p.version == dep.version)
         {
             if hex(&existing.cid) != dep.blake3_256 {
                 return Err(reject("图内依赖摘要冲突"));
@@ -264,7 +264,7 @@ pub async fn resolve(app: &AppState, owner: u64, root: AgentPackage) -> ApiResul
         pins,
     })
 }
-pub fn load_artifact(app: &AppState, row: &PrivateAgentRow) -> ApiResult<Vec<u8>> {
+pub fn load_artifact(app: &AppState, row: &PrivateArtifactRow) -> ApiResult<Vec<u8>> {
     if row.revoked {
         return Err(reject("私有Agent版本已撤销"));
     }
