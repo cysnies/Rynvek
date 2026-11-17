@@ -3196,6 +3196,7 @@ dependencies = [
  "rynvek-field",
  "rynvek-journal",
  "rynvek-neural",
+ "rynvek-rules",
  "rynvek-snapshot",
  "serde",
  "serde_json",
@@ -3344,11 +3345,13 @@ dependencies = [
 name = "rynvek-world"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "blake3",
  "naga",
  "rynvek-core",
  "rynvek-ecs",
  "rynvek-rts",
+ "rynvek-rules",
  "serde",
  "serde_json",
 ]

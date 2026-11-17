@@ -55,7 +55,7 @@ pub enum WorldPatchOp {
     },
     UpdateRuleModule {
         module_id: String,
-        ts_source: String,
+        rule_graph_json: String,
         compiled_rir_blake3: [u8; 32],
     },
     RemoveEntityTemplate {
@@ -72,7 +72,7 @@ impl WorldPatchOp {
                 match ns {
                     "presentation" | "visual" | "ui" | "audio" => LiveEditSafetyClass::HotSafePresentation,
                     "field" | "economy" | "buildings" | "units" => LiveEditSafetyClass::TickBoundarySafe,
-                    "neural" | "rules" => LiveEditSafetyClass::EpochBoundarySafe,
+                    "neural" | "rules" | "ecology" => LiveEditSafetyClass::EpochBoundarySafe,
                     _ => LiveEditSafetyClass::RequiresForkRestart,
                 }
             }
@@ -121,8 +121,8 @@ impl WorldPatch {
         Ok(())
     }
 
-    /// 将已支持的操作原子应用到 Arena：地形涂刷和正整数生物质发放。
-    /// 基因、规则、模板及其他参数尚未接通，返回 `PluginCapabilityDenied`，不伪报成功。
+    /// 原子创作：地形、显式生态角色参数、种子目录、受限动作RuleGraph与目录模板删除。
+    /// 未绑定参数/组件仍拒绝，不把元数据存储冒充权威消费。
     /// 此入口不会替代服务器的排队、权限、修订与 Tick 边界调度。
     pub fn apply_to_arena(&self, world: &mut ArenaWorld) -> Result<PatchApplyReport, RynvekErrorCode> {
         self.apply_at_boundary(world, world.tick)
@@ -151,10 +151,49 @@ impl WorldPatch {
             return Ok(report);
         }
 
-        // 预检整包：所有会失败的输入检查必须先于任何权威状态修改。
+        // 先把整包编译成无失败提交计划；不能先改地形后在基因/规则处失败。
+        use base64::Engine as _;
+        use rynvek_rts::{
+            brain::UnitBrain,
+            genome::Genome,
+            world::{
+                authoring::{AuthoredRule, checked_rule},
+                ecology::EcologyContract,
+            },
+        };
+        enum Prepared {
+            Paint {
+                x0: i32,
+                y0: i32,
+                width: u32,
+                height: u32,
+                tile_kind: u8,
+            },
+            Grant(i64),
+            Ecology(EcologyContract),
+            Genome(Genome),
+            Rule(String, AuthoredRule),
+            Remove(String),
+        }
+        let invalid = RynvekErrorCode::InvalidFileMagicOrVersion;
+        let mut plan = Vec::new();
+        let mut config = world.config.clone();
+        let mut catalogue: std::collections::BTreeSet<_> =
+            world.factions.iter().flat_map(|f| f.genomes.keys().cloned()).collect();
+        let ambiguous: std::collections::BTreeSet<_> = catalogue
+            .iter()
+            .filter(|slug| {
+                world
+                    .factions
+                    .iter()
+                    .any(|f| f.genomes.get(*slug) != world.factions[0].genomes.get(*slug))
+            })
+            .cloned()
+            .collect();
         let mut total_tiles = 0u32;
+        let mut rule_ids: std::collections::BTreeSet<_> = world.authoring.rules.keys().cloned().collect();
         for op in &self.operations {
-            match op {
+            plan.push(match op {
                 WorldPatchOp::PaintTerrainRect {
                     x0,
                     y0,
@@ -166,35 +205,110 @@ impl WorldPatch {
                         || *y0 < 0
                         || *width == 0
                         || *height == 0
-                        || (*x0 as u32).checked_add(*width).is_none_or(|x| x > world.map.width)
-                        || (*y0 as u32).checked_add(*height).is_none_or(|y| y > world.map.height)
+                        || (*x0 as u32).checked_add(*width).is_none_or(|v| v > world.map.width)
+                        || (*y0 as u32).checked_add(*height).is_none_or(|v| v > world.map.height)
+                        || *tile_kind > 4
                     {
                         return Err(RynvekErrorCode::DimensionMismatch);
-                    }
-                    if *tile_kind > 4 {
-                        return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
                     }
                     total_tiles = total_tiles
                         .checked_add(width.checked_mul(*height).ok_or(RynvekErrorCode::DimensionMismatch)?)
                         .ok_or(RynvekErrorCode::DimensionMismatch)?;
+                    Prepared::Paint {
+                        x0: *x0,
+                        y0: *y0,
+                        width: *width,
+                        height: *height,
+                        tile_kind: *tile_kind,
+                    }
                 }
                 WorldPatchOp::SetWorldParam {
                     key_path,
                     new_value_json,
-                } if key_path == "economy.grant_biomass_milli" => {
-                    let amount: i64 =
-                        serde_json::from_str(new_value_json).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?;
-                    if amount <= 0 {
-                        return Err(RynvekErrorCode::DimensionMismatch);
+                } => {
+                    if key_path == "economy.grant_biomass_milli" {
+                        let amount: i64 = serde_json::from_str(new_value_json).map_err(|_| invalid)?;
+                        if amount <= 0 {
+                            return Err(RynvekErrorCode::DimensionMismatch);
+                        }
+                        Prepared::Grant(amount)
+                    } else if key_path == "ecology.roles" || key_path.starts_with("ecology.roles.") {
+                        let ecology = config.ecology.as_mut().ok_or(RynvekErrorCode::PluginCapabilityDenied)?;
+                        let keys: Vec<_> = ecology.roles.keys().copied().collect();
+                        if key_path == "ecology.roles" {
+                            ecology.roles = serde_json::from_str(new_value_json).map_err(|_| invalid)?;
+                        } else {
+                            let kind = serde_json::from_value(serde_json::Value::String(key_path[14..].into()))
+                                .map_err(|_| invalid)?;
+                            let value = serde_json::from_str(new_value_json).map_err(|_| invalid)?;
+                            *ecology
+                                .roles
+                                .get_mut(&kind)
+                                .ok_or(RynvekErrorCode::PluginCapabilityDenied)? = value;
+                        }
+                        // 不把旧诊断欠费伪装成已支付预算；当前只修改已启用的同一组角色。
+                        if keys != ecology.roles.keys().copied().collect::<Vec<_>>() {
+                            return Err(RynvekErrorCode::PluginCapabilityDenied);
+                        }
+                        let result = ecology.clone();
+                        config.validate_energy_contract().map_err(|_| invalid)?;
+                        Prepared::Ecology(result)
+                    } else {
+                        return Err(RynvekErrorCode::PluginCapabilityDenied);
                     }
                 }
-                _ => return Err(RynvekErrorCode::PluginCapabilityDenied),
-            }
+                WorldPatchOp::UpsertSeedGenome {
+                    genome_slug,
+                    genome_bytes_b64,
+                } => {
+                    if genome_bytes_b64.len() > 2 * 1024 * 1024 {
+                        return Err(RynvekErrorCode::DimensionMismatch);
+                    }
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(genome_bytes_b64)
+                        .map_err(|_| invalid)?;
+                    let genome: Genome = serde_json::from_slice(&bytes).map_err(|_| invalid)?;
+                    if genome.slug != *genome_slug || !rynvek_rts::world::authoring::valid_authoring_key(genome_slug) {
+                        return Err(invalid);
+                    }
+                    if ambiguous.contains(genome_slug) {
+                        return Err(RynvekErrorCode::StructuralMutationConflict);
+                    }
+                    UnitBrain::from_genome(&genome)?;
+                    catalogue.insert(genome_slug.clone());
+                    Prepared::Genome(genome)
+                }
+                WorldPatchOp::UpdateRuleModule {
+                    module_id,
+                    rule_graph_json,
+                    compiled_rir_blake3,
+                } => {
+                    if !rynvek_rts::world::authoring::valid_authoring_key(module_id) {
+                        return Err(invalid);
+                    }
+                    rule_ids.insert(module_id.clone());
+                    if rule_ids.len() > 32 {
+                        return Err(RynvekErrorCode::DimensionMismatch);
+                    }
+                    Prepared::Rule(module_id.clone(), checked_rule(rule_graph_json, *compiled_rir_blake3)?)
+                }
+                WorldPatchOp::RemoveEntityTemplate { template_id } => {
+                    let slug = template_id
+                        .strip_prefix("genome/")
+                        .ok_or(RynvekErrorCode::PluginCapabilityDenied)?;
+                    if ambiguous.contains(slug) {
+                        return Err(RynvekErrorCode::StructuralMutationConflict);
+                    }
+                    if !catalogue.remove(slug) {
+                        return Err(RynvekErrorCode::EntityNotFoundOrTombstoned);
+                    }
+                    Prepared::Remove(slug.into())
+                }
+            });
         }
-
-        for op in &self.operations {
+        for op in &plan {
             match op {
-                WorldPatchOp::PaintTerrainRect {
+                Prepared::Paint {
                     x0,
                     y0,
                     width,
@@ -247,26 +361,37 @@ impl WorldPatch {
                     );
                     world.invalidate_flow();
                 }
-                WorldPatchOp::SetWorldParam {
-                    key_path,
-                    new_value_json,
-                } => {
-                    if key_path == "economy.grant_biomass_milli" {
-                        if let Ok(amount) = serde_json::from_str::<i64>(new_value_json) {
-                            if amount > 0 {
-                                for f in &mut world.factions {
-                                    f.ledger.deposit(rynvek_rts::ResourceKind::Biomass, amount);
-                                }
-                            }
-                        }
+
+                Prepared::Grant(amount) => {
+                    for f in &mut world.factions {
+                        f.ledger.deposit(rynvek_rts::ResourceKind::Biomass, *amount);
                     }
                     report.params_updated += 1;
                 }
-                WorldPatchOp::UpsertSeedGenome { .. }
-                | WorldPatchOp::UpdateRuleModule { .. }
-                | WorldPatchOp::RemoveEntityTemplate { .. } => return Err(RynvekErrorCode::PluginCapabilityDenied),
+                Prepared::Ecology(ecology) => {
+                    world.config.ecology = Some(ecology.clone());
+                    report.params_updated += 1;
+                }
+                Prepared::Genome(genome) => {
+                    for f in &mut world.factions {
+                        f.genomes.insert(genome.slug.clone(), genome.clone());
+                    }
+                    report.genomes_updated += 1;
+                }
+                Prepared::Rule(id, rule) => {
+                    world.authoring.rules.insert(id.clone(), rule.clone());
+                    world.authoring.rule_fault = None;
+                    report.rules_updated += 1;
+                }
+                Prepared::Remove(slug) => {
+                    for f in &mut world.factions {
+                        f.genomes.remove(slug);
+                    }
+                    report.templates_removed += 1;
+                }
             }
         }
+
         Ok(report)
     }
 }
@@ -323,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_patch_operations_must_not_report_success_or_partially_apply() {
+    fn invalid_or_unbound_operations_must_not_report_success_or_partially_apply() {
         let unsupported = [
             WorldPatchOp::SetWorldParam {
                 key_path: "field.diffusion".into(),
@@ -335,7 +460,7 @@ mod tests {
             },
             WorldPatchOp::UpdateRuleModule {
                 module_id: "test".into(),
-                ts_source: "export {}".into(),
+                rule_graph_json: "export {}".into(),
                 compiled_rir_blake3: [0; 32],
             },
             WorldPatchOp::RemoveEntityTemplate {
@@ -347,7 +472,7 @@ mod tests {
             let before = world.state_hash();
             assert!(
                 patch_with(vec![paint(), op]).apply_to_arena(&mut world).is_err(),
-                "未接通操作不能伪报成功"
+                "无效或未绑定操作不能伪报成功"
             );
             assert_eq!(world.state_hash(), before, "补丁失败必须保留原始世界");
         }

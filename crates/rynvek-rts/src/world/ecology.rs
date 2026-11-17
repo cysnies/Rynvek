@@ -97,6 +97,7 @@ pub struct MitosisBirth {
     pub parent_genome: Blake3Hash,
     pub child_genome: Blake3Hash,
     pub allocated_q: u64,
+    pub birth_contract: RoleEnergyContract,
 }
 
 /// 私有权威组件，按实体序号保存；遗骸保留亚格量子/满场截断余量和历史收支。
@@ -230,9 +231,10 @@ impl ArenaWorld {
                             && child.0 < self.next_serial
                             && birth.born_tick <= self.tick
                             && birth.parent_generation.checked_add(1) == Some(birth.generation)
-                            && self
-                                .role_energy(birth.unit, birth.faction)
-                                .is_some_and(|r| r.natural_reproduction && birth.allocated_q == r.birth_q())
+                            // 出生时规则不可被后来的创作调参覆盖；实付金额另由不可变转账事实核验。
+                            && birth.birth_contract.validate().is_ok()
+                            && birth.birth_contract.natural_reproduction
+                            && birth.allocated_q == birth.birth_contract.birth_q()
                             && (e.bodies.contains_key(&birth.parent) || e.remains.contains_key(&birth.parent))
                             && (e.bodies.contains_key(child) || e.remains.contains_key(child))
                     })

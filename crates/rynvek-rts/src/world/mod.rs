@@ -16,6 +16,7 @@
 //!
 //! 所有集合以 `BTreeMap<EntitySerial, _>` 保存并按序号遍历；随机性只来自 Philox。
 
+pub mod authoring;
 mod combat_sys;
 pub mod ecology;
 mod economy;
@@ -443,6 +444,7 @@ impl CanonicalWorldState {
 #[derive(Clone, Debug)]
 pub struct ArenaWorld {
     pub config: MatchConfig,
+    pub authoring: authoring::AuthoringState,
     pub map: ArenaMap,
     pub nav: NavGrid,
     pub hpa: HpaGraph,
@@ -500,6 +502,7 @@ impl ArenaWorld {
             ecology: config.ecology.as_ref().map(|_| ecology::EcologyState::default()),
             pve: (config.mode == MatchMode::PveSurvival).then(|| PveDirector::new(config.world_seed)),
             config,
+            authoring: Default::default(),
             nav,
             hpa,
             fields,
@@ -1210,6 +1213,7 @@ impl ArenaWorld {
         if self.tick % rynvek_core::constants::COUPLING_EPOCH_TICKS as u64 == 0 {
             self.step_brains();
         }
+        self.step_authored_rules();
         self.step_movement();
         self.step_harvest();
         self.step_metabolism();
@@ -1290,8 +1294,9 @@ impl ArenaWorld {
         let config_root = {
             let mut h = Hasher::new();
             // 当前格式绑定整个配置，删除历史模式共用标签与二次身份来源。
-            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_8");
+            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_9");
             h.update(&serde_json::to_vec(&self.config).expect("配置仅含确定性枚举和整数"));
+            h.update(&serde_json::to_vec(&self.authoring).expect("有序创作规则"));
             h.update(&self.map.width.to_le_bytes());
             h.update(&self.map.height.to_le_bytes());
             h.update(&self.map.seed.to_le_bytes());

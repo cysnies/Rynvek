@@ -44,9 +44,9 @@ impl ArenaWorld {
                 true
             };
             if account.is_none_or(|a| a.received_q < birth.allocated_q)
-                || self
-                    .role_energy(birth.unit, birth.faction)
-                    .is_none_or(|r| !r.natural_reproduction)
+                || !birth.birth_contract.natural_reproduction
+                || birth.birth_contract.validate().is_err()
+                || birth.allocated_q != birth.birth_contract.birth_q()
                 || birth.faction.is_wild()
                 || self.faction(birth.faction).is_none()
                 || birth.slug.is_empty()
@@ -161,6 +161,7 @@ impl ArenaWorld {
                 parent_genome,
                 child_genome,
                 allocated_q,
+                birth_contract: contract,
             },
         );
         occupied.insert((x as u32, y as u32));

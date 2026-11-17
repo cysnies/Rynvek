@@ -126,6 +126,7 @@ struct RngsChunkDto {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct ConfChunkDto {
     pub arena_format: String,
+    pub authoring: super::authoring::AuthoringState,
     pub config: MatchConfig,
     pub map_width: u32,
     pub map_height: u32,
@@ -156,6 +157,10 @@ impl ArenaWorld {
         world_revision: u64,
         parent_state_root: [u8; 32],
     ) -> Result<(Vec<u8>, SnapshotWriteOutput), RynvekErrorCode> {
+        self.authoring.validate()?;
+        if self.authoring.last_edit_revision > world_revision {
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+        }
         if !self.validate_ecology() {
             return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
@@ -167,7 +172,8 @@ impl ArenaWorld {
         let canonical = self.canonical_state_with_parent(Blake3Hash(parent_state_root));
 
         let conf = ConfChunkDto {
-            arena_format: "rynvek-arena/8".into(),
+            arena_format: "rynvek-arena/9".into(),
+            authoring: self.authoring.clone(),
             config: self.config.clone(),
             map_width: self.map.width,
             map_height: self.map.height,
@@ -324,7 +330,7 @@ impl ArenaWorld {
             read.find_chunk(CONF_TAG)
                 .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
-        if conf.arena_format != "rynvek-arena/8" {
+        if conf.arena_format != "rynvek-arena/9" {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
         let comp: CompChunkDto = from_chunk(
@@ -440,7 +446,12 @@ impl ArenaWorld {
         }
 
         let ecology = read.find_chunk(super::ecology::ECOL_TAG).map(from_chunk).transpose()?;
+        conf.authoring.validate()?;
+        if conf.authoring.last_edit_revision > read.header.world_revision {
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+        }
         let mut world = Self {
+            authoring: conf.authoring,
             ecology,
             config: conf.config,
             map,

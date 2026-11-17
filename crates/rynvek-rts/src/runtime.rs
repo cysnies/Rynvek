@@ -94,6 +94,23 @@ impl ArenaRuntime {
         tick: u64,
         apply: impl FnOnce(&mut ArenaWorld) -> Result<T, RynvekErrorCode>,
     ) -> Result<T, RynvekErrorCode> {
+        self.transact_inner(tick, false, apply)
+    }
+
+    /// 创作入口仅允许同一已配置角色组的值更新；其余结构仍须分叉。
+    pub fn transact_authoring_at<T>(
+        &mut self,
+        tick: u64,
+        apply: impl FnOnce(&mut ArenaWorld) -> Result<T, RynvekErrorCode>,
+    ) -> Result<T, RynvekErrorCode> {
+        self.transact_inner(tick, true, apply)
+    }
+    fn transact_inner<T>(
+        &mut self,
+        tick: u64,
+        authoring: bool,
+        apply: impl FnOnce(&mut ArenaWorld) -> Result<T, RynvekErrorCode>,
+    ) -> Result<T, RynvekErrorCode> {
         if tick < self.world.tick || tick.saturating_sub(self.world.tick) > 4 {
             return Err(RynvekErrorCode::SimulationInvariantViolated);
         }
@@ -105,7 +122,24 @@ impl ArenaRuntime {
         let boundary_tick = candidate.world.tick;
         let result = apply(&mut candidate.world)?;
         if candidate.world.config != self.world.config {
-            return Err(RynvekErrorCode::StructuralMutationConflict);
+            let mut allowed = self.world.config.clone();
+            if authoring
+                && matches!((&allowed.ecology,&candidate.world.config.ecology),(Some(a),Some(b)) if a.roles.keys().eq(b.roles.keys()))
+            {
+                allowed.ecology = candidate.world.config.ecology.clone();
+            }
+            if candidate.world.config != allowed || candidate.world.config.validate_energy_contract().is_err() {
+                return Err(RynvekErrorCode::StructuralMutationConflict);
+            }
+        }
+        if authoring {
+            candidate.world.authoring.last_edit_revision = if self.staged_tick.is_some() {
+                self.revision
+            } else {
+                self.revision
+                    .checked_add(1)
+                    .ok_or(RynvekErrorCode::SimulationInvariantViolated)?
+            };
         }
         if candidate.world.tick != boundary_tick {
             return Err(RynvekErrorCode::SimulationInvariantViolated);
@@ -203,6 +237,7 @@ impl ArenaRuntime {
         self_.parent_root = self_.state_root();
         self_.world_id = world_id;
         self_.revision = 0;
+        self_.world.authoring.last_edit_revision = 0;
         Ok(self_)
     }
 }

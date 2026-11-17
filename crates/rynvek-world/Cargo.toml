@@ -10,6 +10,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+base64.workspace = true
+rynvek-rules.workspace = true
 blake3.workspace = true
 naga.workspace = true
 rynvek-core.workspace = true

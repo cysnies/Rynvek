@@ -301,3 +301,42 @@ fn w3_zero_replication_mutation_is_consumed_by_real_natural_birth_not_only_echoe
         .replication_mutation_rate_permille = 1001;
     assert!(w.config.validate_energy_contract().is_err());
 }
+
+#[test]
+fn authoring_new_threshold_does_not_rewrite_historical_birth_contract_or_payment() {
+    let mut w = ready_parent_world();
+    w.step();
+    let original = w.ecology.as_ref().unwrap().births.values().next().unwrap().clone();
+    let mut runtime = ArenaRuntime::new([92; 16], w);
+    let target = runtime.world().tick + 4 - runtime.world().tick % 4;
+    runtime
+        .transact_authoring_at(target, |w| {
+            let role = w
+                .config
+                .ecology
+                .as_mut()
+                .unwrap()
+                .roles
+                .get_mut(&UnitKind::Forager)
+                .unwrap();
+            role.birth_energy_milli += 7;
+            role.natural_reproduction = false;
+            role.replication_mutation_rate_permille = 0;
+            Ok(())
+        })
+        .unwrap();
+    let history = runtime
+        .world()
+        .ecology
+        .as_ref()
+        .unwrap()
+        .births
+        .values()
+        .find(|b| b.slug == original.slug)
+        .unwrap();
+    assert_eq!(history, &original);
+    let checkpoint = runtime.checkpoint().unwrap();
+    let recovered =
+        ArenaRuntime::restore([92; 16], runtime.revision(), runtime.state_root(), &checkpoint.bytes).unwrap();
+    assert_eq!(recovered.state_root(), runtime.state_root());
+}

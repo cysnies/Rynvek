@@ -35,6 +35,21 @@ impl UnitBrain {
     /// 按基因组表达为脑实例
     pub fn from_genome(g: &Genome) -> Result<Self, RynvekErrorCode> {
         let n = g.n_hid as usize;
+        // 来自创作API的基因不可信；先验尺寸，避免LIF输出索引panic或巨额分配。
+        if n == 0
+            || n > rynvek_neural::storage::BLOCK_SPARSE_MAX_NEURONS
+            || g.w_in.len() != n * GENOME_INPUTS
+            || g.w_out.len() != n * GENOME_OUTPUTS
+            || g.w_rec.len()
+                != if matches!(g.model, NeuronModelKind::Izhikevich | NeuronModelKind::CTRNN) {
+                    n * n
+                } else {
+                    0
+                }
+            || (g.model == NeuronModelKind::CTRNN && (g.tau_ticks.len() != n || g.tau_ticks.contains(&0)))
+        {
+            return Err(RynvekErrorCode::DimensionMismatch);
+        }
         Ok(Self(match g.model {
             NeuronModelKind::GatedMLP => {
                 // 门控全开：w_gate = 0、b_g = +2.0 → hard_sigmoid = 1.0，即标准两层前馈网络

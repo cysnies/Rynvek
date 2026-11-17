@@ -1,0 +1,160 @@
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+//! 创作规则复用既有编译器/CPU确定性解释器，只绑定真实动作，不允许直接写能量/生命/场。
+use super::ArenaWorld;
+use rynvek_core::{Blake3Hash, error::RynvekErrorCode};
+use rynvek_rules::{
+    CompileOptions, RuleModule, RuleWorldState, compile_rule_graph_json,
+    cpu::DEFAULT_TICK_GAS_BUDGET,
+    emit_cpu_simd_bytecode, encode_rir, execute_rule_tick,
+    ir::{Opcode, ValueType},
+};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+pub const ACTION_COMPONENTS: [&str; 6] = [
+    "unit.actions.move_x",
+    "unit.actions.move_y",
+    "unit.actions.harvest",
+    "unit.actions.attack",
+    "unit.actions.defense",
+    "unit.actions.emit",
+];
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthoredRule {
+    pub rule_graph_json: String,
+    pub compiled_rir_blake3: [u8; 32],
+    pub rir: Vec<u8>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthoringState {
+    /// 最近创作提交的权威修订；普通Tick不使安全边界排队的编辑自行过期。
+    pub last_edit_revision: u64,
+    pub rules: BTreeMap<String, AuthoredRule>,
+    /// 拒绝整个动作写集合，保留原脑动作；错误事实入根和快照，工作台可见。
+    pub rule_fault: Option<(String, u16)>,
+}
+pub fn valid_authoring_key(key: &str) -> bool {
+    !key.is_empty()
+        && key.len() <= 128
+        && key
+            .split(['-', '_', '.'])
+            .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
+}
+pub fn compile_action_rule(source: &str) -> Result<RuleModule, RynvekErrorCode> {
+    compile_action_rule_detailed(source).map_err(|e| e.code)
+}
+pub fn compile_action_rule_detailed(source: &str) -> rynvek_rules::error::RuleResult<RuleModule> {
+    if source.len() > 256 * 1024 {
+        return Err(rynvek_rules::error::RuleError::new(
+            RynvekErrorCode::DimensionMismatch,
+            "规则图不能超过256KiB",
+        ));
+    }
+    let module = compile_rule_graph_json(
+        source,
+        &CompileOptions {
+            allowed_write_prefixes: Some(vec!["unit.actions.".into()]),
+        },
+    )?;
+    if module
+        .components
+        .iter()
+        .any(|c| c.ty != ValueType::Q8_8 || !ACTION_COMPONENTS.contains(&c.name.as_str()))
+        || module.field_write_mask != 0
+        || module.instrs.iter().any(|i| {
+            matches!(
+                i.op,
+                Opcode::SampleField | Opcode::NeighborCount | Opcode::LoadNeighborComponent
+            )
+        })
+    {
+        return Err(rynvek_rules::error::RuleError::new(
+            RynvekErrorCode::PluginCapabilityDenied,
+            "只绑定六个Q8.8动作分量；不开放HP/能量/场/邻居写入",
+        ));
+    }
+    Ok(module)
+}
+pub fn checked_rule(source: &str, expected: [u8; 32]) -> Result<AuthoredRule, RynvekErrorCode> {
+    let module = compile_action_rule(source)?;
+    if Blake3Hash::of(&encode_rir(&module)).0 != expected {
+        return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+    }
+    Ok(AuthoredRule {
+        rule_graph_json: source.into(),
+        compiled_rir_blake3: expected,
+        rir: encode_rir(&module),
+    })
+}
+impl AuthoringState {
+    pub fn validate(&self) -> Result<(), RynvekErrorCode> {
+        if self.rules.len() > 32 {
+            return Err(RynvekErrorCode::DimensionMismatch);
+        }
+        for (id, r) in &self.rules {
+            if !valid_authoring_key(id) {
+                return Err(RynvekErrorCode::DimensionMismatch);
+            }
+            if checked_rule(&r.rule_graph_json, r.compiled_rir_blake3)?.rir != r.rir {
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+            }
+        }
+        if self
+            .rule_fault
+            .as_ref()
+            .is_some_and(|(id, _)| !self.rules.contains_key(id))
+        {
+            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
+        }
+        Ok(())
+    }
+}
+impl ArenaWorld {
+    pub(super) fn step_authored_rules(&mut self) {
+        if self.authoring.rules.is_empty() {
+            return;
+        }
+        let ids: Vec<_> = self.units.keys().copied().collect();
+        let mut actions: Vec<_> = ids.iter().map(|id| self.units[id].actions).collect();
+        for (id, rule) in &self.authoring.rules {
+            let result = (|| {
+                let module = rynvek_rules::decode_rir(&rule.rir).map_err(|e| e.code)?;
+                let state = RuleWorldState {
+                    tick: self.tick,
+                    world_seed: self.config.world_seed,
+                    entity_serials: ids.iter().map(|i| u64::from(i.0)).collect(),
+                    components: module
+                        .components
+                        .iter()
+                        .map(|c| {
+                            let a = ACTION_COMPONENTS
+                                .iter()
+                                .position(|n| *n == c.name)
+                                .expect("编译绑定已校验");
+                            actions.iter().map(|v| i64::from(v[a])).collect()
+                        })
+                        .collect(),
+                    ..Default::default()
+                };
+                let out = execute_rule_tick(&emit_cpu_simd_bytecode(&module), &state, DEFAULT_TICK_GAS_BUDGET)
+                    .map_err(|e| e.code)?;
+                for (slot, c) in module.components.iter().enumerate().filter(|(_, c)| c.write) {
+                    let a = ACTION_COMPONENTS.iter().position(|n| *n == c.name).unwrap();
+                    for (e, v) in out.components[slot].iter().enumerate() {
+                        actions[e][a] = (*v).clamp(-256, 256) as i16;
+                    }
+                }
+                Ok::<(), RynvekErrorCode>(())
+            })();
+            if let Err(code) = result {
+                self.authoring.rule_fault = Some((id.clone(), code as u16));
+                return;
+            }
+        }
+        for (id, a) in ids.into_iter().zip(actions) {
+            self.units.get_mut(&id).unwrap().actions = a;
+        }
+        self.authoring.rule_fault = None;
+    }
+}
