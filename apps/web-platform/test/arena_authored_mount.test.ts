@@ -17,7 +17,7 @@ class Socket extends EventTarget {
  send(raw:string){const m=JSON.parse(raw);this.sent.push(m);
   if(m.type==="hello"){this.receive({...welcome,mode:"PvE_Survival"});this.receive(observation);}
   if(m.type==="acquire_lease")this.receive({type:"lease",seq:m.seq,lease:{holder:{id:"123",kind:"Human"},faction:0,level:"Sovereign",fencing_token:11,issued_tick:1,expires_tick:900}});
-  if(m.type==="command")this.receive({type:"ack",seq:m.seq,tick:1,ack:{type:"cancelled",vat:m.command.vat}});
+  if(m.type==="command"){const c=m.command as Record<string,unknown>;const ack=c.type==="queue_unit"?{type:"queued",vat:c.vat,count:c.count}:c.type==="cancel_queue"?{type:"cancelled",vat:c.vat}:c.type==="research_tech"?{type:"research_started",site:c.site,tech:c.tech}:{type:"cancelled",vat:0};this.receive({type:"ack",seq:m.seq,tick:1,ack});}
  }
  close(){this.closed=true;this.onclose?.(new Event("close"));}
 }
@@ -35,9 +35,19 @@ it("Studio已有世界真实挂载原控制器，命令经WS/租约；不走prac
  expect(fetcher.mock.calls[0]?.[0]).toBe(`http://srv/api/v1/worlds/${world}/arena`);expect(fetcher).toHaveBeenCalledTimes(1);
  const socket=Socket.all[0]!;expect(socket.url).toContain(world);expect(socket.url).not.toContain("secret");expect(socket.sent[0]).toMatchObject({type:"hello",capability_token:"test-memory-secret"});
  expect(field("capability").value).toBe("");expect((field("move") as HTMLButtonElement).disabled).toBe(false);
- (field("command-json") as unknown as HTMLTextAreaElement).value=JSON.stringify({type:"cancel_queue",vat:42});(field("send-command") as HTMLButtonElement).click();
+ expect(document.getElementById("command-json")).toBeNull();
+ expect(document.getElementById("build")?.textContent).toContain("精炼厂");
+ expect(document.getElementById("build")?.textContent).toContain("坩埚");
+ const live=structuredClone(observation.observation);
+ live.buildings.push({id:42,faction:0,kind:"bld.spawning_vat",origin:[8,8],hp_milli:900000,max_hp_milli:900000,complete:true,powered:true,build_progress:100,queue:["unit.forager"],research:null,beacon:null});
+ socket.receive({type:"observation",observation:live,events:[]});
+ await vi.waitFor(()=>expect(document.querySelector('[data-action="select-building"][data-building-id="42"]')).not.toBeNull());
+ (document.querySelector('[data-action="select-building"][data-building-id="42"]') as HTMLButtonElement).click();
+ await vi.waitFor(()=>expect((document.querySelector('[data-action="cancel-queue"]') as HTMLButtonElement|null)?.disabled).toBe(false));
+ (document.querySelector('[data-action="cancel-queue"]') as HTMLButtonElement).click();
  await vi.waitFor(()=>expect(socket.sent.some(m=>m.type==="command")).toBe(true));expect(socket.sent.at(-1)).toMatchObject({type:"command",fencing_token:11,command:{type:"cancel_queue",vat:42}});
- (field("disconnect") as HTMLButtonElement).click();expect(socket.closed).toBe(true);expect(document.getElementById("biomass")?.textContent).toBe("—");expect((field("send-command") as HTMLButtonElement).disabled).toBe(true);expect(store).not.toHaveBeenCalled();
+ (field("disconnect") as HTMLButtonElement).click();expect(socket.closed).toBe(true);expect(document.getElementById("biomass")?.textContent).toBe("—");
+ expect([...document.querySelectorAll("#command-panel [data-action]")].filter((b)=> (b as HTMLButtonElement).dataset.action!=="select-building").every((b)=>(b as HTMLButtonElement).disabled)).toBe(true);expect(store).not.toHaveBeenCalled();
 });
 it("身份断开后的迟到run回执不能重新连入或恢复私有状态",async()=>{
  let resolve!:(r:Response)=>void;const fetcher=vi.fn((_url:unknown,_init?:RequestInit)=>new Promise<Response>(r=>{resolve=r}));await mount(fetcher);
@@ -49,6 +59,6 @@ it("终局已有世界打开验签前缀播放器，只读控件不向运行Acto
  const fetcher=vi.fn(async(url:unknown,init?:RequestInit)=>String(url).endsWith("/arena")?Response.json({...run,match_state:"Completed"}):init?.method==="DELETE"?Response.json({closed:true}):Response.json(frame));await mount(fetcher);
  (field("connect-world") as HTMLButtonElement).click();await vi.waitFor(()=>expect((field("watch-replay") as HTMLButtonElement).disabled).toBe(false));(field("watch-replay") as HTMLButtonElement).click();
  await vi.waitFor(()=>expect(document.getElementById("connection")?.textContent).toContain("只读签名重演"));expect(Socket.all).toHaveLength(0);
- expect((field("move") as HTMLButtonElement).disabled).toBe(true);expect((field("send-command") as HTMLButtonElement).disabled).toBe(true);expect(document.getElementById("replay-status")?.textContent).toContain("未验证后缀");
+ expect((field("move") as HTMLButtonElement).disabled).toBe(true);expect(document.getElementById("command-json")).toBeNull();expect([...document.querySelectorAll("#command-panel [data-action]")].filter((b)=> (b as HTMLButtonElement).dataset.action!=="select-building").every((b)=>(b as HTMLButtonElement).disabled)).toBe(true);expect(document.getElementById("replay-status")?.textContent).toContain("未验证后缀");
  (field("close-replay") as HTMLButtonElement).click();await vi.waitFor(()=>expect(fetcher.mock.calls.some(([,init])=>init?.method==="DELETE")).toBe(true));expect(document.getElementById("biomass")?.textContent).toBe("—");
 });
