@@ -14,3 +14,7 @@
 生命周期先取消输出连接再异步close，迟到resume/旧源不能复活旧图；已交给硬件缓冲/已听到的声音不能撤回。音频错误不改变服务器仿真。无外部资产/Hub依赖，未公共发行；音频包真实制品链、成品采样/音乐分轨与空间化留后续，不把占位配方或空分轨称成品音频。
 
 本轮只做必要类型与定向验证：audio/client tsc build；web-platform tsc --noEmit；`test/arena_audio.test.ts`四项及`test/arena_authored_mount.test.ts`中「实际Arena挂载需显式音频手势」一项。它们用原Rust会话生成的真实跨语言夹具及录制型FakeAudioContext/JSDOM，不是离线DSP渲染或实际浏览器/硬件听验；另有Rust己方投影/原会话/Worker夹具与真实C#本机服务直接验证。命令、边界与接续详见同一`docs/ACTIVE_DEVELOPMENT.md`第三十二批。
+
+## 现行私有PCM与二维空间化
+
+第四十批已将严格PCM16 mono WAV内存采样接入原Director/mixer与原Arena手势生命周期；生成短CC0技术信号用`createTechnicalPcm16Wav`，不是歌曲/第三方音色。私有v2容器/签名/精确依赖/限额、实际可见位置/原相机与DSP未验边界见[PCM_SPATIAL_AUDIO.md](../../docs/PCM_SPATIAL_AUDIO.md)。当前Arena不加载任意网络/通用codec，不声称HRTF或耳机听验。
