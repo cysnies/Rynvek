@@ -500,6 +500,16 @@ impl<C: MonotonicClock> ArenaSession<C> {
         self.seats.remove(id).is_some()
     }
 
+    /// 权威席位撤销不同于断线：清除本人租约/备用接管并使旧fence失效。
+    pub fn revoke_seat(&mut self, id: &str, faction: u32) {
+        self.seats.remove(id);
+        self.standby.remove(&faction);
+        // 已断线时席位映射已移除，仍须按权威席位所属阵营回收保留租约。
+        if let Some(lease)=self.broker.leases().current(faction).filter(|l|l.holder.id==id).cloned() {
+            let _=self.broker.leases_mut().release(faction,lease.fencing_token);
+        }
+    }
+
     fn advance(&mut self, ticks: u32) -> Vec<Envelope> {
         let events = match self.step_world(ticks) {
             Ok(events) => events,

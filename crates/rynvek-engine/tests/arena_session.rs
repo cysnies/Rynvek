@@ -391,3 +391,16 @@ fn legacy_sdk_wire_payloads_are_rejected_without_mutation() {
         assert_eq!(session.world.state_root(), before);
     }
 }
+
+#[test]
+fn explicit_seat_revocation_reclaims_even_a_disconnected_principals_lease() {
+    let mut s=ArenaSession::new(MatchConfig::duel(42),ManualClock::default());
+    hello(&mut s,"human:p0",PrincipalKind::Human,0);
+    let old=lease(&mut s,"human:p0","Sovereign");
+    assert!(s.leave("human:p0"));
+    assert!(s.broker().leases().current(0).is_some(),"普通断线仍保留原协议重连租约");
+    s.revoke_seat("human:p0",0);
+    assert!(s.broker().leases().current(0).is_none(),"显式权威撤销不得遗留断线租约");
+    hello(&mut s,"human:p0",PrincipalKind::Human,0);
+    assert!(lease(&mut s,"human:p0","Sovereign")>old,"重新取得的fence不能复用撤销前值");
+}
