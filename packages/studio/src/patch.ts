@@ -227,8 +227,8 @@ export function parseWorldPatchOp(v: unknown, where = "op"): WorldPatchOp {
     }
     case "RemoveEntityTemplate": {
       exactKeys(body, ["template_id"], w);
-      const template_id = string(body["template_id"], `${w}.template_id`, 135);
-      if (!SLUG_PATTERN.test(template_id.startsWith("genome/")?template_id.slice(7):template_id)) invalid(`${w}.template_id 格式非法`);
+      const template_id = string(body["template_id"], `${w}.template_id`, 138);
+      if (!SLUG_PATTERN.test(template_id.startsWith("genome/")?template_id.slice(7):template_id.startsWith("parameter/")?template_id.slice(10):template_id)) invalid(`${w}.template_id 格式非法`);
       return { RemoveEntityTemplate: { template_id } };
     }
     default:

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import {expect,it} from "vitest";
 import {RemoteStudioSession,StudioClient,type AuthoringView,type WorldPatch} from "../src/index.js";
-const basis:AuthoringView={world_id:"w",revision:9,tick:4,state_root:"ab".repeat(32),rule_fault:null,baseline:{width:1,height:1,terrain:[0],genomes:{seed:"e30="},templates:["genome/seed"]}};
+const basis:AuthoringView={world_id:"w",revision:9,tick:4,state_root:"ab".repeat(32),rule_fault:null,parameter_state:{next_serial:0,entities:{},fault:null},baseline:{width:1,height:1,terrain:[0],genomes:{seed:"e30="},templates:["genome/seed"]}};
 it("共享模板删除/恢复/重做沿同一CRDT寄存器和真实修订回执，不把补丁数当世界版本",async()=>{
  const sent:WorldPatch[]=[];
  const fetcher:typeof fetch=async(_url,init)=>{const p=JSON.parse(String(init?.body)) as WorldPatch;sent.push(p);expect(init?.cache).toBe("no-store");return Response.json({status:"applied",world_id:"w",world_revision:p.base_authoring_revision+2,effective_tick:8,state_root:"cd".repeat(32)})};

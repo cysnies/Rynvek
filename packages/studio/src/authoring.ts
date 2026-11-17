@@ -203,7 +203,8 @@ export class AuthoringDocument {
       } else {
         const { template_id } = op.RemoveEntityTemplate;
         if(template_id.startsWith("genome/"))record(this.history(this.catalogue,template_id.slice(7)),{stamp,value:undefined},{kind:"template",templateId:template_id});
-        if(!template_id.startsWith("genome/"))record(this.history(this.removals, template_id), { stamp, value: true }, { kind: "template", templateId: template_id });
+        if(template_id.startsWith("parameter/")){const key=`rules.templates.${template_id.slice(10)}`;record(this.history(this.params,key),{stamp,value:"null"},{kind:"param",key});}
+        if(!template_id.startsWith("genome/")&&!template_id.startsWith("parameter/"))record(this.history(this.removals, template_id), { stamp, value: true }, { kind: "template", templateId: template_id });
       }
     });
     this.patches.set(id, patch);
@@ -241,8 +242,9 @@ export class AuthoringDocument {
     return writes?.length ? writes.at(-1)?.value : this.baseRules.get(id);
   }
 
-  /** 模板只能删除不能新建：存在于基线且没有删除记录 */
+  /** 基因目录和一般参数模板共用模板发现；参数模板由原SetWorldParam寄存器创作。 */
   public hasTemplate(id: string): boolean {
+    if(id.startsWith("parameter/"))return this.param(`rules.templates.${id.slice(10)}`)!==undefined;
     return id.startsWith("genome/") ? this.genome(id.slice(7))!==undefined : this.baseTemplates.has(id) && !this.removals.has(id);
   }
 
@@ -263,7 +265,7 @@ export class AuthoringDocument {
       .filter((e): e is [string, string] => e[1] !== undefined);
     const genomes = keys(this.baseGenomes.keys(), this.catalogue.keys()).map((k): [string, string | undefined] => [k, this.genome(k)]).filter((e):e is [string,string]=>e[1]!==undefined);
     const rules = keys(this.baseRules.keys(), this.rules.keys()).map((k): [string, RuleModuleSource | undefined] => [k, this.ruleModule(k)]).filter((e): e is [string, RuleModuleSource] => e[1] !== undefined);
-    const templates = [...new Set([...this.baseTemplates,...keys(this.baseGenomes.keys(),this.catalogue.keys()).map(k=>`genome/${k}`)])].filter((t) => this.hasTemplate(t)).sort();
+    const templates = [...new Set([...this.baseTemplates,...keys(this.baseGenomes.keys(),this.catalogue.keys()).map(k=>`genome/${k}`),...keys(this.baseParams.keys(),this.params.keys()).filter(k=>k.startsWith("rules.templates.")).map(k=>`parameter/${k.slice(16)}`)])].filter((t) => this.hasTemplate(t)).sort();
     return JSON.stringify({
       width: this.width,
       height: this.height,
@@ -323,15 +325,15 @@ export class AuthoringDocument {
       else if (this.ruleModule(moduleId) !== undefined) ops.push({ RemoveRuleModule: { module_id: moduleId } });
     };
     const seenParams = new Set<string>();
+    const invertParam=(key:string)=>{
+      if(seenParams.has(key))return;seenParams.add(key);const r=previous(this.params.get(key));
+      if(r===null)skipped.push({register:{kind:"param",key},reason:"superseded"});
+      else ops.push({SetWorldParam:{key_path:key,new_value_json:r.prev??this.baseParams.get(key)??"null"}});
+    };
     const tileRows = new Map<number, Map<number, number>>(); // y → (x → 先前地形)
     for (const op of patch.operations) {
       if ("SetWorldParam" in op) {
-        const key = op.SetWorldParam.key_path;
-        if (seenParams.has(key)) continue;
-        seenParams.add(key);
-        const r = previous(this.params.get(key));
-        if (r === null) skipped.push({ register: { kind: "param", key }, reason: "superseded" });
-        else ops.push({ SetWorldParam: { key_path: key, new_value_json: r.prev ?? this.baseParams.get(key) ?? "null" } });
+        invertParam(op.SetWorldParam.key_path);
       } else if ("PaintTerrainRect" in op) {
         const { x0, y0, width, height } = op.PaintTerrainRect;
         for (let y = y0; y < y0 + height; y++) {
@@ -355,7 +357,8 @@ export class AuthoringDocument {
         invertRule(op.RemoveRuleModule.module_id);
       } else {
         if(op.RemoveEntityTemplate.template_id.startsWith("genome/")){invertCatalogue(op.RemoveEntityTemplate.template_id.slice(7));continue;}
-        // 非基因目录模板没有恢复操作。
+        if(op.RemoveEntityTemplate.template_id.startsWith("parameter/")){invertParam(`rules.templates.${op.RemoveEntityTemplate.template_id.slice(10)}`);continue;}
+        // 未知模板类别没有恢复操作。
         skipped.push({ register: { kind: "template", templateId: op.RemoveEntityTemplate.template_id }, reason: "not_invertible" });
       }
     }

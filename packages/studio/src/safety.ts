@@ -51,7 +51,7 @@ export function requiredClassOf(op: WorldPatchOp): LiveEditSafetyClass {
     case "PaintTerrainRect":
       return LiveEditSafetyClass.TickBoundarySafe;
     case "RemoveEntityTemplate":
-      return LiveEditSafetyClass.TickBoundarySafe;
+      return (op as Extract<WorldPatchOp,{RemoveEntityTemplate:unknown}>).RemoveEntityTemplate.template_id.startsWith("parameter/")?LiveEditSafetyClass.EpochBoundarySafe:LiveEditSafetyClass.TickBoundarySafe;
     // 基因组决定神经拓扑发育；规则模块热重载（.rir）——规范明确为 Epoch 边界
     case "UpsertSeedGenome":
     case "UpdateRuleModule":

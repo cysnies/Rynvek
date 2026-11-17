@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 // HTTP只是传输；所有权、边界、编译和修订由原权威Actor再次验证。
+import {checkParameterState,type ParameterState} from "./parameter-registry.js";
 import {AuthoringDocument,type AuthoringBaseline} from "./authoring.js";
 import {HybridLogicalClock} from "./hlc.js";
 import {UndoManager,type LocalEdit} from "./undo.js";
 import {type WorldPatchOp,type WorldPatch} from "./patch.js";
-export interface AuthoringView {world_id:string;revision:number;tick:number;state_root:string;rule_fault:[string,number]|null;baseline:Omit<AuthoringBaseline,"terrain"> & {terrain:number[]}}
+export interface AuthoringView {world_id:string;revision:number;tick:number;state_root:string;rule_fault:[string,number]|null;parameter_state:ParameterState;baseline:Omit<AuthoringBaseline,"terrain"> & {terrain:number[]}}
 export interface AuthoringAck {status:"applied";world_id:string;world_revision:number;effective_tick:number;state_root:string;patch_cid:string;report:Record<string,number|boolean>}
 export class StudioClient {
   readonly origin:string;
@@ -14,7 +15,7 @@ export class StudioClient {
     this.origin=u.origin;
   }
   private async request(path:string,signal:AbortSignal,body?:unknown):Promise<unknown>{
-    const r=await this.fetcher(`${this.origin}/api/v1/worlds${path?`/${path}`:""}`,{signal,cache:"no-store",headers:{Authorization:`Bearer ${this.token}`,"Content-Type":"application/json"},...(body===undefined?{}:{method:"POST",body:JSON.stringify(body)})});
+    const r=await this.fetcher(`${this.origin}/api/v1/worlds${path?`/${path}`:""}`,{signal,cache:"no-store",credentials:"omit",redirect:"error",headers:{Authorization:`Bearer ${this.token}`,"Content-Type":"application/json"},...(body===undefined?{}:{method:"POST",body:JSON.stringify(body)})});
     if(!r.ok){const error=await r.json().catch(()=>({}));throw new Error(`HTTP ${r.status} ${String(error.message??"权威请求失败")}`)}return r.json();
   }
   async create(title:string,mapSeed:number,ecology:unknown,signal:AbortSignal):Promise<string>{
@@ -24,7 +25,7 @@ export class StudioClient {
   async view(world:string,signal:AbortSignal):Promise<AuthoringView>{
     const v=await this.request(`${encodeURIComponent(world)}/authoring`,signal) as AuthoringView;
     if(v.world_id!==world||!Number.isSafeInteger(v.revision)||v.revision<0||!Number.isSafeInteger(v.tick)||v.tick<0||!v.baseline||!Array.isArray(v.baseline.terrain)||!v.baseline.terrain.every(n=>Number.isInteger(n)&&n>=0&&n<=4)||!/^[a-f0-9]{64}$/.test(v.state_root))throw new Error("创作基线身份/修订非法");
-    return v;
+    checkParameterState(v.parameter_state);return v;
   }
   async compile(world:string,source:string,signal:AbortSignal):Promise<number[]>{
     const v=await this.request(`${encodeURIComponent(world)}/authoring/compile-rule`,signal,{rule_graph_json:source}) as {compiled_rir_blake3:number[]};

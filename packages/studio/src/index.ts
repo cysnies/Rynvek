@@ -18,3 +18,5 @@ export * from "./components/RviewPreview.js";
 export { DOCK_STYLESHEET } from "./components/styles.js";
 
 export * from "./remote.js";
+
+export * from "./parameter-registry.js";

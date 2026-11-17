@@ -6,7 +6,7 @@ import {afterEach,expect,it,vi} from "vitest";
 import {cleanup,fireEvent,render,screen,waitFor,act} from "@testing-library/react";
 import {StudioApp} from "../src/StudioApp.js";
 afterEach(()=>{cleanup();vi.unstubAllGlobals()});
-const basis={world_id:"w",revision:7,tick:4,state_root:"ab".repeat(32),rule_fault:null,baseline:{width:2,height:2,terrain:[0,0,0,0],params:{},genomes:{},rules:{},templates:[]}};
+const basis={world_id:"w",revision:7,tick:4,state_root:"ab".repeat(32),rule_fault:null,parameter_state:{next_serial:0,entities:{},fault:null},baseline:{width:2,height:2,terrain:[0,0,0,0],params:{},genomes:{},rules:{},templates:[]}};
 async function connect(){render(<StudioApp/>);fireEvent.change(screen.getByLabelText("Studio服务地址"),{target:{value:"http://srv"}});fireEvent.change(screen.getByLabelText("世界ID"),{target:{value:"w"}});fireEvent.change(screen.getByLabelText("Studio令牌"),{target:{value:"private"}});fireEvent.click(screen.getByText("连接权威世界"));await screen.findByText(/revision 7/)}
 it("真实HTTP会话挂载停靠编辑，回执前不展示乐观地形/修订，断开清除私有结果",async()=>{
  let resolve!:(r:Response)=>void;const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>init?.method==="POST"?new Promise<Response>(r=>{resolve=r}):Response.json(basis));vi.stubGlobal("fetch",fetcher);
@@ -46,4 +46,12 @@ it("首次创建和删除均有权威撤销重做入口，删除回执前保留�
  deferDelete=false;fireEvent.click(screen.getByText("权威撤销"));await screen.findByText(/revision 27/);expect(screen.getByRole("button",{name:"control"})).toBeTruthy();
  expect(sent.map(p=>Object.keys(p.operations[0])[0])).toEqual(["UpdateRuleModule","RemoveRuleModule","UpdateRuleModule","RemoveRuleModule","UpdateRuleModule"]);
  expect(sent[4].operations[0]).toEqual(sent[0].operations[0]);expect(sent.every(p=>p.safety_class==="EpochBoundarySafe")).toBe(true);
+});
+it("一般参数模板真实编辑入口提交原Epoch补丁且只显示服务读取的动态态，断开清理",async()=>{
+ const sent:any[]=[];let current=basis;vi.stubGlobal("fetch",vi.fn(async(_url:unknown,init?:RequestInit)=>{
+ if(init?.method==="POST"){const patch=JSON.parse(String(init.body));sent.push(patch);return Response.json({status:"applied",world_id:"w",world_revision:11,effective_tick:8,state_root:"cd".repeat(32)});}
+ return Response.json(current);
+ }));await connect();fireEvent.click(screen.getByText("RuleGraph动作规则"));expect(screen.getByLabelText("一般参数实体registry")).toBeTruthy();fireEvent.click(screen.getByText("创建或编辑registry项"));await screen.findByText(/revision 11/);expect(sent[0].operations[0].SetWorldParam.key_path).toBe("rules.templates.model.counter");expect(sent[0].safety_class).toBe("EpochBoundarySafe");expect(screen.getByLabelText("权威参数实体状态").textContent).not.toContain('"state.total"');
+ current={...basis,revision:11,tick:9,state_root:"cd".repeat(32),parameter_state:{next_serial:1,entities:{"counter.one":{serial:1,values:{"state.total":1337}}},fault:null}} as typeof basis;
+ fireEvent.click(screen.getByText("读取权威参数实体状态"));await waitFor(()=>expect(screen.getByLabelText("权威参数实体状态").textContent).toContain("1337"));fireEvent.change(screen.getByLabelText("registry JSON"),{target:{value:'{"private-user-value":3}'}});fireEvent.click(screen.getByText("断开身份"));expect((screen.getByLabelText("registry JSON") as HTMLTextAreaElement).value).not.toContain("private-user-value");expect(screen.getByLabelText("权威参数实体状态").textContent).not.toContain("1337");
 });
