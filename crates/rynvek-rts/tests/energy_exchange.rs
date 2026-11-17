@@ -228,3 +228,22 @@ fn snapshot_cannot_drop_or_forge_private_energy_even_with_valid_container_checks
         );
     }
 }
+
+#[test]
+fn delivered_exchange_v1_snapshot_and_following_roots_stay_frozen() {
+    let f: serde_json::Value =
+        serde_json::from_str(include_str!("../../../tests/arena/energy-exchange-v1.json")).unwrap();
+    let bytes: Vec<u8> = f["snapshot_hex"]
+        .as_str()
+        .unwrap()
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
+        .collect();
+    let mut w = ArenaWorld::decode_snapshot(&bytes).unwrap();
+    assert_eq!(w.config.ecology, Some(EcologyVersion::EnergyExchangeV1));
+    for root in f["next_roots"].as_array().unwrap() {
+        w.step();
+        assert_eq!(format!("{:?}", w.state_hash()), root.as_str().unwrap());
+    }
+}

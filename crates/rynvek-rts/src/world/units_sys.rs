@@ -227,8 +227,30 @@ impl ArenaWorld {
             let plasticity = self
                 .faction(faction)
                 .is_some_and(|f| f.techs.contains(TechId::HebbianPlasticity));
+            let budgeted = self.has_neural_energy_budget(id);
+            let cost = self
+                .faction(faction)
+                .map_or(800, |f| f.modifiers().spike_cost_micro_energy) as u32;
             let u = self.units.get_mut(&id).expect("存在");
             u.modulators = m;
+            if budgeted && u.defense.hp_milli <= 0 {
+                u.actions = [0; 6];
+                continue;
+            }
+            if budgeted {
+                let body = self
+                    .ecology
+                    .as_mut()
+                    .expect("预算世界有私有账本")
+                    .bodies
+                    .get_mut(&id)
+                    .expect("存活个体");
+                u.actions = u
+                    .brain
+                    .step_epoch_budgeted(&x, m.0, plasticity, &mut body.account, cost)
+                    .map_or([0; 6], |(actions, _)| actions);
+                continue;
+            }
             let (actions, spikes) = u.brain.step_epoch_metered(&x, m.0, plasticity);
             u.actions = actions;
             if let Some(ecology) = &mut self.ecology {
