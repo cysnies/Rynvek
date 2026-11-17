@@ -119,7 +119,7 @@ struct CreateWorld {
     map_seed: Option<u64>,
     /// 仅 PvE 新世界显式启用；既有世界和排位绝不自动改变规则。
     #[serde(default)]
-    ecology: Option<rynvek_rts::world::ecology::ForagerEcologyContract>,
+    ecology: Option<rynvek_rts::world::ecology::EcologyContract>,
 }
 
 /// `.rworld` 上传时通过查询串传递的元数据（请求体是二进制包）

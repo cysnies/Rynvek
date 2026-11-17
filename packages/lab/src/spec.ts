@@ -24,11 +24,17 @@ export type LabMode = "pve" | "duel";
 export type PolicyKind = "idle" | "economy" | "ecology";
 
 /** 当前Forager供能/出生实验契约；数值必须显式，不是生物学默认常数。 */
-export interface ForagerEcologyContract {
-  readonly basal_cost_micro_per_tick: number;
-  readonly reserve_ticks: number;
-  readonly birth_energy_milli: number;
+export type EnergyUnitKind = "unit.forager"|"unit.striker"|"unit.carapace"|"unit.spitter"|"unit.weaver"|"unit.leviathan";
+export interface RoleEnergyContract {
+  readonly basal_cost_micro_per_tick:number;
+  readonly reserve_ticks:number;
+  readonly birth_energy_milli:number;
+  readonly movement_cost_micro_per_tile:number;
+  readonly synapse_maintenance_micro_per_tick:number;
+  readonly natural_reproduction:boolean;
 }
+export interface EcologyContract {readonly roles:Readonly<Partial<Record<EnergyUnitKind,RoleEnergyContract>>>}
+
 
 /** 实验变体（一组对照条件） */
 export interface VariantSpec {
@@ -37,7 +43,7 @@ export interface VariantSpec {
   /** 玩家阵营数；缺省 PvE 为 1、双人局为 2 */
   readonly players?: number;
   readonly policy?: PolicyKind;
-  readonly ecology?: ForagerEcologyContract | null;
+  readonly ecology?: EcologyContract | null;
 }
 
 /** 实验规格 */
@@ -110,17 +116,18 @@ export function validateSpec(spec: ExperimentSpec): void {
     if (v.ecology != null) {
       if ((v.mode ?? "pve") !== "pve") throw new SpecError("生态实验只允许显式PvE变体");
       const c=v.ecology;
-      if(typeof c!=="object"||Array.isArray(c)) throw new SpecError("生态契约必须是对象");
-      const allowed=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli"];
-      if (Object.keys(c).some(k=>!allowed.includes(k))) throw new SpecError("未知生态契约字段");
-      for (const [key,value] of Object.entries(c)) {
-        if (!Number.isInteger(value) || value<0 || value>0xffff_ffff || (key!=="reserve_ticks" && value===0)) {
-          throw new SpecError(`生态参数${key}超出u32合法范围`);
+      if(typeof c!=="object"||Array.isArray(c)||Object.keys(c).some(k=>k!=="roles")||!c.roles||Object.keys(c.roles).length===0) throw new SpecError("必须提供非空角色表");
+      const kinds=["unit.forager","unit.striker","unit.carapace","unit.spitter","unit.weaver","unit.leviathan"];
+      for (const [kind,role] of Object.entries(c.roles)) {
+        if(!kinds.includes(kind)||!role||typeof role!=="object"||Array.isArray(role)) throw new SpecError("未知角色或非法生命成本对象");
+        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction"];
+        if(keys.some(k=>!Object.prototype.hasOwnProperty.call(role,k))||Object.keys(role).some(k=>!keys.includes(k))) throw new SpecError("角色成本必须完整显式配置");
+        if(typeof role.natural_reproduction!=="boolean") throw new SpecError("自然繁殖许可必须为boolean");
+        for(const [key,value] of Object.entries(role)) {
+          if(key==="natural_reproduction")continue;
+          if(!Number.isInteger(value)||value<0||value>0xffff_ffff||((key==="birth_energy_milli"||key==="basal_cost_micro_per_tick")&&value===0))throw new SpecError("生命成本超出u32合法范围");
         }
-      }
-      if (allowed.some(key=>!Object.prototype.hasOwnProperty.call(c,key))) throw new SpecError("生态契约必须完整显式配置");
-      if (BigInt(c.basal_cost_micro_per_tick)*BigInt(c.reserve_ticks)*4n > (1n<<64n)-1n) {
-        throw new SpecError("实验代谢预留超出精确能量表示范围");
+        if(BigInt(role.basal_cost_micro_per_tick)*BigInt(role.reserve_ticks)*4n>(1n<<64n)-1n)throw new SpecError("代谢预留超出精确范围");
       }
     }
     const p = playerCount(v);

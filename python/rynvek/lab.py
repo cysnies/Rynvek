@@ -26,12 +26,20 @@ TABLES: tuple[TableName, ...] = ("runs", "metrics", "lineage", "energy")
 
 
 @dataclass(frozen=True)
-class EcologyContract:
-    """显式Forager生态实验参数，不提供无来源能量默认值。"""
+class RoleEnergyContract:
+    """显式角色生命成本；零值明确表示未启用该项，不冒充规范平衡。"""
 
     basal_cost_micro_per_tick: int
     reserve_ticks: int
     birth_energy_milli: int
+    movement_cost_micro_per_tile: int
+    synapse_maintenance_micro_per_tick: int
+    natural_reproduction: bool
+
+
+@dataclass(frozen=True)
+class EcologyContract:
+    roles: dict[str, RoleEnergyContract]
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,7 @@ __all__ = [
     "TABLES",
     "ExperimentResult",
     "EcologyContract",
+    "RoleEnergyContract",
     "ExperimentSpec",
     "Variant",
     "read_parquet",

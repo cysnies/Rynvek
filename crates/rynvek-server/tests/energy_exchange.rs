@@ -5,7 +5,7 @@
 mod common;
 use common::*;
 use rynvek_protocol::{WireChannelId, WireUuid};
-use rynvek_rts::world::ecology::ForagerEcologyContract;
+use rynvek_rts::world::ecology::{EcologyContract, RoleEnergyContract};
 use rynvek_rts::{ArenaRuntime, MatchConfig};
 use rynvek_security::{League, PrincipalKindCode};
 use rynvek_server::host::{MatchSpec, SeatSpec};
@@ -27,10 +27,13 @@ async fn restored(server: &RunningServer, world_id: WireUuid) -> ArenaRuntime {
 #[tokio::test]
 async fn automatic_local_uptake_uses_real_actor_permissions_private_state_and_wal() {
     run_energy_contract(
-        ForagerEcologyContract {
+        RoleEnergyContract {
             basal_cost_micro_per_tick: 1000,
             reserve_ticks: 4,
             birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 0,
+            synapse_maintenance_micro_per_tick: 0,
+            natural_reproduction: true,
         },
         false,
     )
@@ -41,17 +44,21 @@ async fn automatic_local_uptake_uses_real_actor_permissions_private_state_and_wa
 async fn explicit_basal_survival_contract_really_kills_fed_foragers_in_actor_and_wal() {
     // 实验数值特意高于单Tick真实摄食量，不冒充v1冻结平衡。
     run_energy_contract(
-        ForagerEcologyContract {
+        RoleEnergyContract {
             basal_cost_micro_per_tick: 2_000_000,
             reserve_ticks: 4,
             birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 0,
+            synapse_maintenance_micro_per_tick: 0,
+            natural_reproduction: true,
         },
         true,
     )
     .await;
 }
 
-async fn run_energy_contract(params: ForagerEcologyContract, expect_death: bool) {
+async fn run_energy_contract(params: RoleEnergyContract, expect_death: bool) {
+    let ecology = EcologyContract::single(rynvek_rts::UnitKind::Forager, params);
     let server = start_server(false).await;
     let base = server.base_url();
     let owner = register(&base, "energy-owner", "human", 101).await;
@@ -60,7 +67,7 @@ async fn run_energy_contract(params: ForagerEcologyContract, expect_death: bool)
         "POST",
         &url,
         Some(&owner.token),
-        &json!({"title":"禁止排位换规则","template":"arena_duel","ecology":params}),
+        &json!({"title":"禁止排位换规则","template":"arena_duel","ecology":&ecology}),
     )
     .await
     .unwrap();
@@ -69,7 +76,7 @@ async fn run_energy_contract(params: ForagerEcologyContract, expect_death: bool)
         "POST",
         &url,
         Some(&owner.token),
-        &json!({"title":"真实能量交换","template":"arena_pve","map_seed":57,"visibility":"Public","ecology":params}),
+        &json!({"title":"真实能量交换","template":"arena_pve","map_seed":57,"visibility":"Public","ecology":&ecology}),
     )
     .await
     .unwrap();
@@ -107,7 +114,7 @@ async fn run_energy_contract(params: ForagerEcologyContract, expect_death: bool)
         .await
         .unwrap();
     let mut config = MatchConfig::pve(57, 1);
-    config.ecology = Some(params);
+    config.ecology = Some(ecology.clone());
     let host = server
         .state
         .attach_world_host(MatchSpec {
@@ -356,11 +363,17 @@ fn automatic_first_feeding_survives_serialized_tick_wal() {
     use rynvek_rts::{ArenaMap, ArenaWorld, TerrainTileKind, UnitKind};
     use rynvek_server::transactions::TickRecord;
     let mut cfg = MatchConfig::pve(57, 1);
-    cfg.ecology = Some(ForagerEcologyContract {
-        basal_cost_micro_per_tick: 1000,
-        reserve_ticks: 4,
-        birth_energy_milli: 1000,
-    });
+    cfg.ecology = Some(EcologyContract::single(
+        rynvek_rts::UnitKind::Forager,
+        RoleEnergyContract {
+            basal_cost_micro_per_tick: 1000,
+            reserve_ticks: 4,
+            birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 0,
+            synapse_maintenance_micro_per_tick: 0,
+            natural_reproduction: true,
+        },
+    ));
     let mut world = ArenaWorld::with_map(
         cfg,
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),
@@ -419,7 +432,7 @@ async fn survival_contract_cannot_sneak_into_legacy_or_invalid_worlds() {
     let base = server.base_url();
     let owner = register(&base, "survival-validation", "human", 105).await;
     let url = format!("{base}/api/v1/worlds");
-    let params = json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000});
+    let params = json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}});
     for ecology in [serde_json::Value::Null, json!("energy_exchange_v1")] {
         let res = client::send_json(
             "POST",
@@ -432,11 +445,11 @@ async fn survival_contract_cannot_sneak_into_legacy_or_invalid_worlds() {
         assert_eq!(res.status, 400);
     }
     for bad in [
-        json!({"reserve_ticks":4,"birth_energy_milli":1000}),
-        json!({"basal_cost_micro_per_tick":0,"reserve_ticks":4,"birth_energy_milli":1000}),
-        json!({"basal_cost_micro_per_tick":u32::MAX,"reserve_ticks":u32::MAX,"birth_energy_milli":1000}),
-        json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4}),
-        json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":0}),
+        json!({"roles":{"unit.forager":{"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}),
+        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":0,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}),
+        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":u32::MAX,"reserve_ticks":u32::MAX,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}),
+        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}),
+        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":0,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true}}}),
     ] {
         let res = client::send_json(
             "POST",

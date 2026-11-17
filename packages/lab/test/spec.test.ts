@@ -100,10 +100,20 @@ describe("planRuns / toRequestBody", () => {
 });
 
 it("生态扫描只接受完整显式PvE契约，不把缺省规则偷偷开启",()=>{
-  const ecology={basal_cost_micro_per_tick:1000,reserve_ticks:4,birth_energy_milli:1000};
+  const role={basal_cost_micro_per_tick:1000,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:0,synapse_maintenance_micro_per_tick:0,natural_reproduction:true};
+  const ecology={roles:{"unit.forager":role}};
   const spec={name:"生态",seeds:[57],ticks:60,variants:[{label:"x",policy:"ecology" as const,ecology}]};
   expect(toRequestBody(spec)).toMatchObject({variants:[{ecology}]});
   expect(()=>validateSpec({...spec,variants:[{...spec.variants[0]!,mode:"duel"}]})).toThrow();
   expect(()=>validateSpec({...spec,variants:[{label:"x",policy:"ecology"}]})).toThrow();
-  expect(()=>validateSpec({...spec,variants:[{...spec.variants[0]!,ecology:{...ecology,reserve_ticks:0xffff_ffff,basal_cost_micro_per_tick:0xffff_ffff}}]})).toThrow();
+  expect(()=>validateSpec({...spec,variants:[{...spec.variants[0]!,ecology:{roles:{"unit.forager":{...role,reserve_ticks:0xffff_ffff,basal_cost_micro_per_tick:0xffff_ffff}}}}]})).toThrow();
+});
+
+it("统一角色表保留非采集成本和自然繁殖许可，拒绝旧平铺或未知角色",()=>{
+  const role={basal_cost_micro_per_tick:100,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:100,synapse_maintenance_micro_per_tick:1,natural_reproduction:false};
+  const spec={name:"角色补给",seeds:[57],ticks:30,variants:[{label:"s",ecology:{roles:{"unit.striker":role}}}]};
+  expect(toRequestBody(spec)).toMatchObject({variants:[{ecology:{roles:{"unit.striker":role}}}]});
+  for(const ecology of [role,{roles:{}},{roles:{"unit.unknown":role}}]) {
+    expect(()=>validateSpec({...spec,variants:[{label:"bad",ecology:ecology as never}]})).toThrow();
+  }
 });

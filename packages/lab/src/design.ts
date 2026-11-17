@@ -73,7 +73,7 @@ export interface SweepAxes {
   readonly mode?: readonly LabMode[];
   readonly policy?: readonly PolicyKind[];
   readonly players?: readonly number[];
-  readonly ecology?: readonly import("./spec.js").ForagerEcologyContract[];
+  readonly ecology?: readonly import("./spec.js").EcologyContract[];
 }
 
 const playersValid = (mode: LabMode, p: number): boolean => (mode === "pve" ? p === 1 || p === 2 : p === 2);

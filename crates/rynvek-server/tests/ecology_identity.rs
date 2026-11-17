@@ -5,7 +5,7 @@
 mod common;
 use common::*;
 use rynvek_protocol::WireUuid;
-use rynvek_rts::world::ecology::ForagerEcologyContract;
+use rynvek_rts::world::ecology::{EcologyContract, RoleEnergyContract};
 use rynvek_rts::{ArenaRuntime, ArenaWorld, MatchConfig};
 use rynvek_security::Visibility;
 use rynvek_server::store::{CommitRow, WorldRow};
@@ -15,11 +15,17 @@ use serde_json::json;
 
 async fn seed_current(s: &RunningServer, u: &User) -> (WorldRow, MatchConfig) {
     let mut expected = MatchConfig::pve(57, 1);
-    expected.ecology = Some(ForagerEcologyContract {
-        basal_cost_micro_per_tick: 1000,
-        reserve_ticks: 4,
-        birth_energy_milli: 1000,
-    });
+    expected.ecology = Some(EcologyContract::single(
+        rynvek_rts::UnitKind::Forager,
+        RoleEnergyContract {
+            basal_cost_micro_per_tick: 1000,
+            reserve_ticks: 4,
+            birth_energy_milli: 1000,
+            movement_cost_micro_per_tile: 0,
+            synapse_maintenance_micro_per_tick: 0,
+            natural_reproduction: true,
+        },
+    ));
     let world = ArenaWorld::new(expected.clone());
     let id = rynvek_server::ids::new_uuid_v7();
     let runtime = ArenaRuntime::new(id.0, world);
@@ -208,9 +214,36 @@ async fn current_wal_rejects_other_contracts_and_replays_committed_suffix() {
         let mut wrong = config.clone();
         match variant {
             0 => wrong.ecology = None,
-            1 => wrong.ecology.as_mut().unwrap().basal_cost_micro_per_tick += 1,
-            2 => wrong.ecology.as_mut().unwrap().reserve_ticks += 1,
-            _ => wrong.ecology.as_mut().unwrap().birth_energy_milli += 1,
+            1 => {
+                wrong
+                    .ecology
+                    .as_mut()
+                    .unwrap()
+                    .roles
+                    .get_mut(&rynvek_rts::UnitKind::Forager)
+                    .unwrap()
+                    .basal_cost_micro_per_tick += 1
+            }
+            2 => {
+                wrong
+                    .ecology
+                    .as_mut()
+                    .unwrap()
+                    .roles
+                    .get_mut(&rynvek_rts::UnitKind::Forager)
+                    .unwrap()
+                    .reserve_ticks += 1
+            }
+            _ => {
+                wrong
+                    .ecology
+                    .as_mut()
+                    .unwrap()
+                    .roles
+                    .get_mut(&rynvek_rts::UnitKind::Forager)
+                    .unwrap()
+                    .birth_energy_milli += 1
+            }
         }
         let other = ArenaRuntime::new(source.world_id.0, ArenaWorld::new(wrong));
         assert!(record.replay(&other).is_err(), "空输入也不能跨契约混入WAL");

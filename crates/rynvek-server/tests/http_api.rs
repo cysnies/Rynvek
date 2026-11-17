@@ -792,9 +792,12 @@ async fn ecology_lab_exports_private_real_lineage_energy_and_structured_status()
     let owner = register(&base, "ecology-lab-owner", "human", 41).await;
     let other = register(&base, "ecology-lab-other", "human", 42).await;
     let spec = json!({"name":"自然家谱","seeds":[57],"ticks":600,"sample_every":300,
-    "variants":[{"label":"自然复制","policy":"ecology","ecology":{
+    "variants":[{"label":"自然复制","policy":"ecology","ecology":{"roles":{"unit.forager":{
       "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
-    }}]});
+    ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true},"unit.striker":{
+        "basal_cost_micro_per_tick":100,"reserve_ticks":4,"birth_energy_milli":1000,
+        "movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":false
+      }}}}]});
     let response = send(
         &base,
         "POST",

@@ -16,7 +16,7 @@
 
 import { RynvekErrorCode, errorNameOf } from "@rynvek/core";
 
-import { type ExperimentSpec, type VariantSpec, type ForagerEcologyContract, toRequestBody } from "./spec.js";
+import { type ExperimentSpec, type VariantSpec, type EcologyContract, toRequestBody } from "./spec.js";
 
 export type LabTable = "runs" | "metrics" | "lineage" | "energy";
 export const LAB_TABLES: readonly LabTable[] = ["runs", "metrics", "lineage", "energy"];
@@ -31,7 +31,7 @@ export interface ExperimentRecord {
   readonly seeds: readonly number[];
   readonly ticks: number;
   readonly sample_every: number;
-  readonly variants: readonly (Omit<VariantSpec,"players"|"ecology"> & {players:number|null;ecology:ForagerEcologyContract|null})[];
+  readonly variants: readonly (Omit<VariantSpec,"players"|"ecology"> & {players:number|null;ecology:EcologyContract|null})[];
   readonly status: ExperimentStatus;
   readonly submitted_at_unix_s: number;
   readonly started_at_unix_s: number | null;
