@@ -51,16 +51,8 @@ pub struct AudioTelemetryFrame {
 /// 从 `ArenaWorld` 提取当前 Tick 的确定性程序化声学遥测帧
 pub fn extract_arena_audio_telemetry(world: &ArenaWorld) -> AudioTelemetryFrame {
     let unit_count = world.units.len() as i64;
-    let firing_units = world
-        .units
-        .values()
-        .filter(|u| u.weapon_cooldown > 0)
-        .count() as i64;
-    let weaver_count = world
-        .units
-        .values()
-        .filter(|u| u.kind == UnitKind::Weaver)
-        .count() as i64;
+    let firing_units = world.units.values().filter(|u| u.weapon_cooldown > 0).count() as i64;
+    let weaver_count = world.units.values().filter(|u| u.kind == UnitKind::Weaver).count() as i64;
 
     // 群体发射读出同步度（通道 5 a_emit）
     let sync_permille = if unit_count == 0 {
@@ -118,9 +110,7 @@ pub fn extract_arena_audio_telemetry(world: &ArenaWorld) -> AudioTelemetryFrame 
         SonificationMood::Homeostasis
     };
 
-    let carrier_freq_mhz = 110_000
-        + (sync_permille as u32) * 110
-        + (combat_density as u32) * 220;
+    let carrier_freq_mhz = 110_000 + (sync_permille as u32) * 110 + (combat_density as u32) * 220;
 
     AudioTelemetryFrame {
         tick: world.tick,

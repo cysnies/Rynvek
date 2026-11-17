@@ -16,8 +16,7 @@
 use rynvek_core::{Blake3Hash, Q8_8, RynvekErrorCode};
 use rynvek_neural::models::IzhikevichParams;
 use rynvek_neural::{
-    CtrnnBrain, GatedMlpBrain, IzhikevichBrain, LifBrain, NeurChunk, NeurNeuronRow, NeuralGraphStorage,
-    NeuronModelKind,
+    CtrnnBrain, GatedMlpBrain, IzhikevichBrain, LifBrain, NeurChunk, NeurNeuronRow, NeuralGraphStorage, NeuronModelKind,
 };
 
 use crate::genome::{GENOME_INPUTS, GENOME_OUTPUTS, Genome, action, sensor};

@@ -50,11 +50,7 @@ impl EntityId {
     #[inline]
     pub const fn to_serial_u32(self) -> Option<u32> {
         let s = self.monotonic_serial();
-        if s <= u32::MAX as u64 {
-            Some(s as u32)
-        } else {
-            None
-        }
+        if s <= u32::MAX as u64 { Some(s as u32) } else { None }
     }
 
     /// 是否为无效身份

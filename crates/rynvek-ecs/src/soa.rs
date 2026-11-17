@@ -164,9 +164,7 @@ impl<T> PagedComponentColumn<T> {
         }
         let last_idx = self.len - 1;
         let last_chunk = last_idx / CHUNK_CAPACITY;
-        let last_val = self.chunks[last_chunk]
-            .pop()
-            .expect("非空分块尾部必有元素");
+        let last_val = self.chunks[last_chunk].pop().expect("非空分块尾部必有元素");
         if self.chunks[last_chunk].is_empty() {
             self.chunks.pop();
         }

@@ -274,7 +274,10 @@ mod tests {
         let tiny = Q32_32(1);
         assert_eq!(big.checked_div(tiny), Err(RynvekErrorCode::FixedPointOverflow));
         assert_eq!(big.div_safe(tiny, Q32_32::ZERO), Q32_32::MAX);
-        assert_eq!(Q32_32::ONE.checked_div(Q32_32::ZERO), Err(RynvekErrorCode::FixedPointOverflow));
+        assert_eq!(
+            Q32_32::ONE.checked_div(Q32_32::ZERO),
+            Err(RynvekErrorCode::FixedPointOverflow)
+        );
     }
 
     #[test]
@@ -307,8 +310,14 @@ mod tests {
     fn q32_saturating_ops_clamp() {
         assert_eq!(Q32_32(i64::MAX).saturating_add(Q32_32::ONE), Q32_32(i64::MAX));
         assert_eq!(Q32_32(i64::MIN).saturating_sub(Q32_32::ONE), Q32_32(i64::MIN));
-        assert_eq!(Q32_32(i64::MAX).checked_add(Q32_32::ONE), Err(RynvekErrorCode::FixedPointOverflow));
-        assert_eq!(Q32_32(i64::MIN).checked_sub(Q32_32::ONE), Err(RynvekErrorCode::FixedPointOverflow));
+        assert_eq!(
+            Q32_32(i64::MAX).checked_add(Q32_32::ONE),
+            Err(RynvekErrorCode::FixedPointOverflow)
+        );
+        assert_eq!(
+            Q32_32(i64::MIN).checked_sub(Q32_32::ONE),
+            Err(RynvekErrorCode::FixedPointOverflow)
+        );
     }
 
     #[test]
