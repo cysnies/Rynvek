@@ -87,18 +87,13 @@ pub struct MatchConfig {
     pub world_seed: u64,
     /// 玩家阵营数：PvP 固定 2；PvE 为 1 或 2
     pub players: u8,
-    /// 显式、未认证的 PvE 规则版本；缺省绝不默默升级旧世界或排位。
+    /// 显式PvE实验契约：局部摄食、真实计算预算与首次摄食后基础代谢；无隐含数值。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ecology: Option<ecology::EcologyVersion>,
-    /// 既有V2里的显式实验参数；缺省None且不序列化，绝不自动升级旧世界。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub forager_survival: Option<ecology::ForagerSurvivalContract>,
-    /// 根编码身份；旧快照缺失时保留legacy，仅新建入口显式绑定。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ecology_identity: Option<ecology::EcologyIdentity>,
+    pub ecology: Option<ecology::ForagerEcologyContract>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct MatchConfigWire {
     mode: MatchMode,
     map_size: ArenaMapSize,
@@ -106,11 +101,7 @@ struct MatchConfigWire {
     world_seed: u64,
     players: u8,
     #[serde(default)]
-    ecology: Option<ecology::EcologyVersion>,
-    #[serde(default)]
-    forager_survival: Option<ecology::ForagerSurvivalContract>,
-    #[serde(default)]
-    ecology_identity: Option<ecology::EcologyIdentity>,
+    ecology: Option<ecology::ForagerEcologyContract>,
 }
 
 impl TryFrom<MatchConfigWire> for MatchConfig {
@@ -126,8 +117,6 @@ impl TryFrom<MatchConfigWire> for MatchConfig {
             world_seed: w.world_seed,
             players: w.players,
             ecology: w.ecology,
-            forager_survival: w.forager_survival,
-            ecology_identity: w.ecology_identity,
         };
         config.validate_energy_contract()?;
         Ok(config)
@@ -135,24 +124,10 @@ impl TryFrom<MatchConfigWire> for MatchConfig {
 }
 
 impl MatchConfig {
-    pub fn bind_ecology_identity(&mut self) {
-        self.ecology_identity = self.ecology.map(|_| ecology::EcologyIdentity::BoundV1);
-    }
-
-    pub fn has_unbound_ecology(&self) -> bool {
-        self.ecology.is_some() && self.ecology_identity.is_none() && self.forager_survival.is_none()
-    }
-
     pub fn validate_energy_contract(&self) -> Result<(), &'static str> {
-        if self.ecology_identity.is_some() && self.ecology.is_none() {
-            return Err("无生态契约不能附加生态根编码");
-        }
-        if self.ecology.is_some() && self.mode != MatchMode::PveSurvival {
-            return Err("未认证的能量规则不能进入PvP/排位");
-        }
-        if let Some(contract) = self.forager_survival {
-            if self.ecology != Some(ecology::EcologyVersion::ForagerBudgetV2) {
-                return Err("Forager实验生存参数仅可在显式forager_budget_v2新PvE世界启用");
+        if let Some(contract) = self.ecology {
+            if self.mode != MatchMode::PveSurvival {
+                return Err("未认证的能量规则不能进入PvP/排位");
             }
             contract.validate()?;
         }
@@ -167,8 +142,6 @@ impl MatchConfig {
             world_seed: map_seed,
             players: 2,
             ecology: None,
-            forager_survival: None,
-            ecology_identity: None,
         }
     }
 
@@ -180,8 +153,6 @@ impl MatchConfig {
             world_seed: map_seed,
             players,
             ecology: None,
-            forager_survival: None,
-            ecology_identity: None,
         }
     }
 }
@@ -508,8 +479,7 @@ impl ArenaWorld {
     }
 
     /// 用给定地图开局（测试与自定义房间）
-    pub fn with_map(mut config: MatchConfig, map: ArenaMap) -> Self {
-        config.bind_ecology_identity();
+    pub fn with_map(config: MatchConfig, map: ArenaMap) -> Self {
         assert!((1..=2).contains(&config.players), "仅存在 2 个对称出生锚点");
         assert!(
             config.mode == MatchMode::PveSurvival || config.players == 2,
@@ -1222,6 +1192,7 @@ impl ArenaWorld {
         if self.tick % crate::fields::FIELD_STEP_TICKS == 0 {
             self.step_fields();
         }
+        self.step_forager_uptake();
         if self.tick % rynvek_core::constants::COUPLING_EPOCH_TICKS as u64 == 0 {
             self.step_brains();
         }
@@ -1304,29 +1275,13 @@ impl ArenaWorld {
         // 1. config_root：MatchConfig + 地图尺寸与地形内容摘要
         let config_root = {
             let mut h = Hasher::new();
-            h.update(b"RYNVEK_SUBROOT_CONFIG");
-            h.update(&[self.config.mode as u8, self.config.map_size as u8, self.config.players]);
-            h.update(&self.config.map_seed.to_le_bytes());
-            h.update(&self.config.world_seed.to_le_bytes());
+            // 当前格式绑定整个配置，删除历史模式共用标签与二次身份来源。
+            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_3");
+            h.update(&serde_json::to_vec(&self.config).expect("配置仅含确定性枚举和整数"));
             h.update(&self.map.width.to_le_bytes());
             h.update(&self.map.height.to_le_bytes());
             h.update(&self.map.seed.to_le_bytes());
             h.update(&self.map.tiles_hash().0);
-            if self.config.ecology.is_some() {
-                // 已交付V1/V2共用此legacy标签；不能破坏旧快照后续根来暗改身份格式。
-                h.update(b"energy_exchange_v1");
-            }
-            if self.config.ecology_identity == Some(ecology::EcologyIdentity::BoundV1) {
-                h.update(b"RYNVEK_ECOLOGY_IDENTITY_BOUND_V1");
-                h.update(
-                    &serde_json::to_vec(&(self.config.ecology, self.config.forager_survival))
-                        .expect("契约仅含枚举与整数"),
-                );
-            } else if let Some(contract) = self.config.forager_survival {
-                // 已交付显式生存契约的旧根同样原样保留。
-                h.update(b"RYNVEK_FORAGER_SURVIVAL_CONTRACT_V1");
-                h.update(&serde_json::to_vec(&(self.config.ecology, contract)).expect("显式契约仅含枚举与整数"));
-            }
             Blake3Hash(*h.finalize().as_bytes())
         };
 

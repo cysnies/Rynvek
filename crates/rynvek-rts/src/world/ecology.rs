@@ -1,10 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! V1能量交换与显式V2 Forager计算预算：复用冻结采集率、1:1营养转移和实际脉冲成本。
-//! 基础代谢只接受显式实验契约；未定义的出生禀赋、能量场恢复基率、分泌/自然分裂不在这里猜测。
-//! 仅显式 PvE 世界可启用；旧世界/排位保持原语义及规范根。个体池不是新脑模拟器。
-
+//! 显式Forager契约统一局部摄食、实际脉冲预算与首次真实摄食后的生存成本。
+//! 出生池始终为空；摄食从既有环境场扣款，不杜撰出生禀赋或给其他角色断供。
 use super::ArenaWorld;
 use crate::{EntitySerial, FieldId, UnitKind};
 use rynvek_neural::metabolism::EnergyAccount;
@@ -13,38 +11,15 @@ use std::collections::BTreeMap;
 
 pub const ECOL_TAG: [u8; 4] = *b"ECOL";
 
-/// 根身份格式，不是另一套生态规则；缺失只表示历史编码，不猜测升级。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EcologyIdentity {
-    BoundV1,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EcologyVersion {
-    EnergyExchangeV1,
-    ForagerBudgetV2,
-}
-
-/// 生存参数是显式实验契约，不是冒充v1冻结数值的默认平衡。
+/// 数值为显式实验参数，并非原v1冻结平衡；首次摄食由原账本received_q推导。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ForagerSurvivalContract {
-    pub activation: SurvivalActivation,
+pub struct ForagerEcologyContract {
     pub basal_cost_micro_per_tick: u32,
     pub reserve_ticks: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SurvivalActivation {
-    /// 没有有来源出生禀赋时，不将尚未获得第一份真实营养的个体全体饿死。
-    /// 是否曾摄食由原账本received_q永久推导，耗尽后不能重置激活或复活。
-    AfterFirstUptake,
-}
-
-impl ForagerSurvivalContract {
+impl ForagerEcologyContract {
     pub fn validate(self) -> Result<(), &'static str> {
         if self.basal_cost_micro_per_tick == 0 {
             return Err("实验基础代谢成本必须显式大于0");
@@ -85,9 +60,7 @@ pub struct EcologyState {
 impl ArenaWorld {
     /// 仅已核定真实摄食契约的玩家Forager进入新预算规则；其他角色不擅自断供。
     pub(super) fn has_neural_energy_budget(&self, id: EntitySerial) -> bool {
-        self.config.ecology == Some(EcologyVersion::ForagerBudgetV2)
-            && self.units[&id].kind == UnitKind::Forager
-            && !self.units[&id].faction.is_wild()
+        self.config.ecology.is_some() && self.units[&id].kind == UnitKind::Forager && !self.units[&id].faction.is_wild()
     }
 
     pub(super) fn validate_ecology(&self) -> bool {
@@ -103,8 +76,7 @@ impl ArenaWorld {
                         b.account.is_conserved()
                             && b.account.returned_q == 0
                             // 稳定权威边界必须已退役耗尽的激活个体，不能存成活体等待新食物复活。
-                            && (self.config.forager_survival.is_none()
-                                || !self.has_neural_energy_budget(*id)
+                            && (!self.has_neural_energy_budget(*id)
                                 || b.account.received_q == 0
                                 || b.account.stored_q > 0)
                             && (!self.has_neural_energy_budget(*id)
@@ -124,7 +96,7 @@ impl ArenaWorld {
         }
     }
 
-    /// V1在此支付实际发放；V2预算Forager已随候选脑原子支付，此处保留下一Epoch预算。
+    /// Forager随候选脑原子支付，此处保留下一Epoch预算；其他角色仅记原诊断成本。
     /// 仅完整毫余量转原账本；未转出的能量仍在原池，没有第二份能量或虚构适应度。
     pub(super) fn step_metabolism(&mut self) {
         if self.ecology.is_none() {
@@ -153,7 +125,7 @@ impl ArenaWorld {
             } else {
                 0
             };
-            let survival = if budgeted { self.config.forager_survival } else { None };
+            let survival = if budgeted { self.config.ecology } else { None };
             let reserve_q = reserve_q.saturating_add(survival.map_or(0, |c| c.reserve_q().expect("创建/恢复已验证")));
             let room = self
                 .faction(faction)

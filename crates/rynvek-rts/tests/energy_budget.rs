@@ -1,14 +1,16 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use rynvek_rts::commands::{RtsCommand, UnitSelector};
 use rynvek_rts::genome::action;
-use rynvek_rts::world::ecology::EcologyVersion;
-use rynvek_rts::{ArenaMap, ArenaRuntime, ArenaWorld, FactionId, MatchConfig, TerrainTileKind, UnitKind};
+use rynvek_rts::world::ecology::ForagerEcologyContract;
+use rynvek_rts::{ArenaMap, ArenaRuntime, ArenaWorld, MatchConfig, TerrainTileKind, UnitKind};
 
 fn budget_world() -> (ArenaWorld, rynvek_rts::EntitySerial) {
     let mut config = MatchConfig::pve(57, 1);
-    config.ecology = Some(EcologyVersion::ForagerBudgetV2);
+    config.ecology = Some(ForagerEcologyContract {
+        basal_cost_micro_per_tick: 1000,
+        reserve_ticks: 4,
+    });
     let mut w = ArenaWorld::with_map(
         config,
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),
@@ -23,22 +25,17 @@ fn budget_world() -> (ArenaWorld, rynvek_rts::EntitySerial) {
     g.w_out[action::HARVEST * n..(action::HARVEST + 1) * n].fill(512);
     u.brain = rynvek_rts::brain::UnitBrain::from_genome(&g).unwrap();
     u.genome = g;
-    let target = u.position;
-    w.apply_command(
-        FactionId(0),
-        &RtsCommand::IssueOrder {
-            units: UnitSelector::Archetype(Some(UnitKind::Forager)),
-            order: rynvek_rts::OrderKind::Harvest,
-            target,
-        },
-    )
-    .unwrap();
     (w, id)
 }
 
 #[test]
 fn unfunded_brain_cannot_commit_then_real_uptake_funds_resumption() {
     let (mut w, id) = budget_world();
+    for y in 0..96 {
+        for x in 0..96 {
+            w.fields.set(rynvek_rts::FieldId::Nutrient, x, y, 0);
+        }
+    }
     let before = w.units[&id].brain.state_root();
     w.units.get_mut(&id).unwrap().actions = [200; 6];
     assert_eq!(w.ecology.as_ref().unwrap().bodies[&id].account.received_q, 0);
@@ -52,8 +49,10 @@ fn unfunded_brain_cannot_commit_then_real_uptake_funds_resumption() {
     let a = &w.ecology.as_ref().unwrap().bodies[&id].account;
     assert_eq!(a.dissipated_q, 0);
     assert_eq!(a.unfunded_q, 0);
-    assert!(a.received_q > 0, "战略Harvest必须从真实场取得能量，不以假出生禀赋启动");
-    assert!(a.stored_q > 0, "应从同一真实收入保留下一Epoch预算，不全部转走");
+    assert_eq!(a.received_q, 0, "无局部营养不能凭空供能");
+    assert_eq!(a.stored_q, 0);
+    let (x, y) = w.units[&id].tile();
+    w.fields.set(rynvek_rts::FieldId::Nutrient, x, y, 5120);
     w.run(20);
     assert_ne!(w.units[&id].brain.state_root(), before);
     let a = &w.ecology.as_ref().unwrap().bodies[&id].account;
@@ -91,7 +90,8 @@ fn budgeted_energy_recovers_and_replays_with_private_roots() {
 fn roles_without_an_individual_feed_contract_are_not_starved_or_repriced() {
     let (mut budget, _) = budget_world();
     let mut exchange = budget.clone();
-    exchange.config.ecology = Some(EcologyVersion::EnergyExchangeV1);
+    exchange.config.ecology = None;
+    exchange.ecology = None;
     let striker = *budget
         .units
         .iter()
@@ -186,7 +186,7 @@ fn already_dead_forager_does_not_pay_for_another_candidate_epoch() {
 }
 
 #[test]
-fn delivered_budget_v2_snapshot_and_following_roots_stay_frozen() {
+fn retired_budget_v2_snapshot_is_explicitly_unsupported() {
     let f: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/arena/forager-budget-v2.json")).unwrap();
     let bytes: Vec<u8> = f["snapshot_hex"]
@@ -196,13 +196,8 @@ fn delivered_budget_v2_snapshot_and_following_roots_stay_frozen() {
         .chunks_exact(2)
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
         .collect();
-    let mut expected = MatchConfig::pve(57, 1);
-    expected.ecology = Some(EcologyVersion::ForagerBudgetV2);
-    assert!(ArenaWorld::decode_snapshot(&bytes).is_err(), "旧歧义格式须显式可信配置");
-    let mut w = ArenaWorld::decode_snapshot_with_config(&bytes, &expected).unwrap();
-    assert_eq!(w.config.ecology, Some(EcologyVersion::ForagerBudgetV2));
-    for root in f["next_roots"].as_array().unwrap() {
-        w.step();
-        assert_eq!(format!("{:?}", w.state_hash()), root.as_str().unwrap());
-    }
+    assert!(
+        ArenaWorld::decode_snapshot(&bytes).is_err(),
+        "退役V2数据必须明确拒绝而非隐式迁移"
+    );
 }

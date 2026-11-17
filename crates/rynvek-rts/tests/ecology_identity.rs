@@ -1,118 +1,72 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use rynvek_rts::world::ecology::EcologyVersion;
-use rynvek_rts::{ArenaWorld, MatchConfig};
+use rynvek_rts::world::ecology::ForagerEcologyContract;
+use rynvek_rts::{ArenaRuntime, ArenaWorld, MatchConfig};
 
-#[test]
-fn new_world_config_root_distinguishes_actual_ecology_mode() {
-    let mut v1 = MatchConfig::pve(57, 1);
-    v1.ecology = Some(EcologyVersion::EnergyExchangeV1);
-    let mut v2 = v1.clone();
-    v2.ecology = Some(EcologyVersion::ForagerBudgetV2);
-    let a = ArenaWorld::new(v1);
-    let b = ArenaWorld::new(v2);
-    assert_ne!(
-        a.canonical_state().config_root,
-        b.canonical_state().config_root,
-        "新世界必须绑定实际模式，不能共用legacy标签"
-    );
-}
-
-fn fixture(v2: bool) -> (Vec<u8>, MatchConfig) {
-    let text = if v2 {
-        include_str!("../../../tests/arena/forager-budget-v2.json")
-    } else {
-        include_str!("../../../tests/arena/energy-exchange-v1.json")
-    };
-    let f: serde_json::Value = serde_json::from_str(text).unwrap();
-    let bytes = f["snapshot_hex"]
-        .as_str()
-        .unwrap()
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|x| u8::from_str_radix(std::str::from_utf8(x).unwrap(), 16).unwrap())
-        .collect();
-    // 固定旧夹具已知创世配置，绝不从待检CONF推导可信期望。
-    let mut expected = MatchConfig::pve(57, 1);
-    expected.ecology = Some(if v2 {
-        EcologyVersion::ForagerBudgetV2
-    } else {
-        EcologyVersion::EnergyExchangeV1
+fn config() -> MatchConfig {
+    let mut c = MatchConfig::pve(57, 1);
+    c.ecology = Some(ForagerEcologyContract {
+        basal_cost_micro_per_tick: 1000,
+        reserve_ticks: 4,
     });
-    (bytes, expected)
+    c
 }
 
 #[test]
-fn legacy_requires_independent_mode_pin_and_migration_preserves_real_history() {
-    use rynvek_journal::CommitManifest;
-    use rynvek_rts::ArenaRuntime;
-    use rynvek_snapshot::{CMIT_TAG, SnapshotReader};
-    for v2 in [false, true] {
-        let (bytes, expected) = fixture(v2);
-        let read = SnapshotReader::read_bytes(&bytes).unwrap();
-        assert!(ArenaWorld::decode_snapshot(&bytes).is_err());
-        let (_, wrong) = fixture(!v2);
-        assert!(ArenaWorld::decode_snapshot_with_config(&bytes, &wrong).is_err());
-        let mut old = ArenaRuntime::restore_with_config(
-            read.header.world_id,
-            read.header.world_revision,
-            read.state_root,
-            &bytes,
-            &expected,
-        )
-        .unwrap();
-        let before = old.checkpoint().unwrap();
-        assert!(old.clone().fork([91; 16]).is_err());
-        assert!(
-            old.transact_at(old.tick, |w| {
-                w.config.ecology = wrong.ecology;
-                Ok(())
-            })
-            .is_err()
-        );
-        assert_eq!(old.checkpoint().unwrap().bytes, before.bytes);
-        assert!(old.migrate_ecology_identity([91; 16], &wrong).is_err());
-        let mut migrated = old.migrate_ecology_identity([91; 16], &expected).unwrap();
-        assert_eq!(old.checkpoint().unwrap().bytes, before.bytes);
-        assert_eq!(migrated.tick, old.tick);
-        assert_eq!(migrated.revision(), 0);
-        assert_ne!(migrated.state_root(), old.state_root());
-        assert_eq!(migrated.config.ecology, old.config.ecology);
-        assert!(migrated.config.ecology_identity.is_some());
-        let cp = migrated.checkpoint().unwrap();
-        let r = SnapshotReader::read_bytes(&cp.bytes).unwrap();
-        assert_eq!(
-            CommitManifest::decode(r.find_chunk(CMIT_TAG).unwrap())
-                .unwrap()
-                .parent_commit_hash,
-            old.state_root()
-        );
-        let mut restored = ArenaRuntime::restore([91; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
-        for _ in 0..12 {
-            migrated.step().unwrap();
-            restored.step().unwrap();
-            assert_eq!(migrated.state_root(), restored.state_root());
+fn whole_current_contract_is_bound_and_transaction_cannot_reprice_it() {
+    let w = ArenaWorld::new(config());
+    let root = w.canonical_state().config_root;
+    for variant in 0..3 {
+        let mut changed = w.clone();
+        match variant {
+            0 => changed.config.ecology = None,
+            1 => changed.config.ecology.as_mut().unwrap().basal_cost_micro_per_tick += 1,
+            _ => changed.config.ecology.as_mut().unwrap().reserve_ticks += 1,
         }
+        assert_ne!(changed.canonical_state().config_root, root);
+        let mut runtime = ArenaRuntime::new([91; 16], w.clone());
+        let before = runtime.checkpoint().unwrap();
+        assert!(
+            runtime
+                .transact_at(0, |world| {
+                    world.config = changed.config.clone();
+                    Ok(())
+                })
+                .is_err()
+        );
+        assert_eq!(runtime.checkpoint().unwrap().bytes, before.bytes);
+    }
+    for field in ["ecology_identity", "forager_survival", "forager_uptake"] {
+        let mut v = serde_json::to_value(config()).unwrap();
+        v[field] = serde_json::json!(null);
+        assert!(
+            serde_json::from_value::<MatchConfig>(v).is_err(),
+            "退役字段不得静默忽略"
+        );
     }
 }
 
 #[test]
-fn resealed_cross_mode_snapshot_and_downgrade_are_rejected() {
+fn resealed_snapshot_rejects_cross_contract_and_unsupported_arena_format() {
     use rynvek_snapshot::{CONF_TAG, SnapshotReader, SnapshotWriter};
-    let mut c = MatchConfig::pve(57, 1);
-    c.ecology = Some(EcologyVersion::EnergyExchangeV1);
-    let w = ArenaWorld::new(c);
+    let w = ArenaWorld::new(config());
     let (bytes, _) = w.encode_snapshot([92; 16], 0, [0; 32]).unwrap();
     let read = SnapshotReader::read_bytes(&bytes).unwrap();
-    for drop_identity in [false, true] {
+    for variant in 0..5 {
         let mut chunks = read.custom_chunks.clone();
         let conf = chunks.iter_mut().find(|c| c.tag == CONF_TAG).unwrap();
         let mut v: serde_json::Value = serde_json::from_slice(&conf.payload).unwrap();
-        if drop_identity {
-            v["config"].as_object_mut().unwrap().remove("ecology_identity");
-        } else {
-            v["config"]["ecology"] = serde_json::json!("forager_budget_v2");
+        match variant {
+            0 => {
+                v["config"].as_object_mut().unwrap().remove("ecology");
+            }
+            1 => v["config"]["ecology"]["reserve_ticks"] = serde_json::json!(5),
+            2 => v["config"]["ecology"]["basal_cost_micro_per_tick"] = serde_json::json!(1001),
+            3 => {
+                v.as_object_mut().unwrap().remove("arena_format");
+            }
+            _ => v["arena_format"] = serde_json::json!("rynvek-arena/2"),
         }
         conf.payload = serde_json::to_vec(&v).unwrap();
         let (forged, _) = SnapshotWriter::write_bytes_with_chunks(
@@ -125,8 +79,22 @@ fn resealed_cross_mode_snapshot_and_downgrade_are_rejected() {
             &chunks,
         )
         .unwrap();
-        SnapshotReader::read_bytes(&forged).expect("通用容器合法，领域根仍须拒绝跨模式/降级");
+        SnapshotReader::read_bytes(&forged).expect("容器合法，领域仍必须拒绝");
         assert!(ArenaWorld::decode_snapshot(&forged).is_err());
-        assert!(ArenaWorld::decode_snapshot_with_config(&forged, &w.config).is_err());
     }
+}
+
+#[test]
+fn current_fork_replays_without_migration_or_second_identity_source() {
+    let mut a = ArenaRuntime::new([93; 16], ArenaWorld::new(config()))
+        .fork([94; 16])
+        .unwrap();
+    let cp = a.checkpoint().unwrap();
+    let mut b = ArenaRuntime::restore([94; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
+    for _ in 0..12 {
+        a.step().unwrap();
+        b.step().unwrap();
+        assert_eq!(a.state_root(), b.state_root());
+    }
+    assert!(a.candidate_tick().unwrap().fork([95; 16]).is_err());
 }

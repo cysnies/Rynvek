@@ -5,12 +5,11 @@ use rynvek_rts::commands::{RtsCommand, UnitSelector};
 use rynvek_rts::{ArenaMap, ArenaRuntime, ArenaWorld, FactionId, FieldId, MatchConfig, TerrainTileKind, UnitKind};
 
 fn contract(cost: u32, reserve: u32) -> serde_json::Value {
-    serde_json::json!({"activation":"after_first_uptake","basal_cost_micro_per_tick":cost,"reserve_ticks":reserve})
+    serde_json::json!({"basal_cost_micro_per_tick":cost,"reserve_ticks":reserve})
 }
 fn world(cost: u32, reserve: u32) -> (ArenaWorld, rynvek_rts::EntitySerial) {
     let mut cfg = serde_json::to_value(MatchConfig::pve(57, 1)).unwrap();
-    cfg["ecology"] = serde_json::json!("forager_budget_v2");
-    cfg["forager_survival"] = contract(cost, reserve);
+    cfg["ecology"] = contract(cost, reserve);
     let mut w = ArenaWorld::with_map(
         serde_json::from_value(cfg).unwrap(),
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),
@@ -122,7 +121,7 @@ fn never_fed_is_explicitly_unactivated_not_given_free_birth_energy() {
             .all(|b| b.account.received_q == 0 && b.account.stored_q == 0 && b.account.dissipated_q == 0)
     );
     let cfg = serde_json::to_value(&w.config).unwrap();
-    assert_eq!(cfg["forager_survival"], contract(1000, 4));
+    assert_eq!(cfg["ecology"], contract(1000, 4));
 }
 
 #[test]
@@ -131,39 +130,29 @@ fn survival_parameters_are_bound_validated_and_not_implicitly_enabled() {
     let cfg = serde_json::to_value(&w.config).unwrap();
     let root = w.canonical_state().config_root;
     let mut changed = w.clone();
-    changed
-        .config
-        .forager_survival
-        .as_mut()
-        .unwrap()
-        .basal_cost_micro_per_tick += 1;
+    changed.config.ecology.as_mut().unwrap().basal_cost_micro_per_tick += 1;
     assert_ne!(changed.canonical_state().config_root, root);
     for bad in [
         serde_json::Value::Null,
-        serde_json::json!({"activation":"after_first_uptake","reserve_ticks":4}),
+        serde_json::json!({"reserve_ticks":4}),
         contract(0, 4),
         contract(u32::MAX, u32::MAX),
     ] {
         let mut value = cfg.clone();
-        value["forager_survival"] = bad.clone();
+        value["ecology"] = bad.clone();
         if bad.is_null() {
-            assert!(
-                serde_json::from_value::<MatchConfig>(value)
-                    .unwrap()
-                    .forager_survival
-                    .is_none()
-            );
+            assert!(serde_json::from_value::<MatchConfig>(value).unwrap().ecology.is_none());
         } else {
             assert!(serde_json::from_value::<MatchConfig>(value).is_err());
         }
     }
-    for version in [serde_json::Value::Null, serde_json::json!("energy_exchange_v1")] {
+    for retired in ["energy_exchange_v1", "forager_budget_v2"] {
         let mut value = cfg.clone();
-        value["ecology"] = version;
+        value["ecology"] = serde_json::json!(retired);
         assert!(serde_json::from_value::<MatchConfig>(value).is_err());
     }
-    assert!(MatchConfig::pve(57, 1).forager_survival.is_none());
-    assert!(MatchConfig::duel(57).forager_survival.is_none());
+    assert!(MatchConfig::pve(57, 1).ecology.is_none());
+    assert!(MatchConfig::duel(57).ecology.is_none());
 }
 
 #[test]
@@ -201,9 +190,9 @@ fn validly_resealed_snapshot_cannot_reprice_or_drop_survival_contract() {
         let conf = chunks.iter_mut().find(|c| c.tag == CONF_TAG).unwrap();
         let mut value: serde_json::Value = serde_json::from_slice(&conf.payload).unwrap();
         if remove {
-            value["config"].as_object_mut().unwrap().remove("forager_survival");
+            value["config"].as_object_mut().unwrap().remove("ecology");
         } else {
-            value["config"]["forager_survival"]["basal_cost_micro_per_tick"] = serde_json::json!(1001);
+            value["config"]["ecology"]["basal_cost_micro_per_tick"] = serde_json::json!(1001);
         }
         conf.payload = serde_json::to_vec(&value).unwrap();
         let (forged, _) = SnapshotWriter::write_bytes_with_chunks(

@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use rynvek_rts::world::ecology::EcologyVersion;
+use rynvek_rts::world::ecology::ForagerEcologyContract;
 use rynvek_rts::{ArenaMap, ArenaRuntime, ArenaWorld, FactionId, FieldId, MatchConfig, TerrainTileKind, UnitKind};
 
 fn world() -> ArenaWorld {
     let mut config = MatchConfig::pve(57, 1);
-    config.ecology = Some(EcologyVersion::EnergyExchangeV1);
+    config.ecology = Some(ForagerEcologyContract {
+        basal_cost_micro_per_tick: 1000,
+        reserve_ticks: 4,
+    });
     ArenaWorld::with_map(
         config,
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),
@@ -90,15 +93,15 @@ fn actual_forager_brain_spikes_are_charged_at_the_frozen_cost() {
     );
     assert_eq!(body.account.unfunded_q, 0);
     assert_eq!(
-        body.account.dissipated_q * 3,
-        enhanced.account.dissipated_q * 5,
+        (body.account.dissipated_q - 4000) * 3,
+        (enhanced.account.dissipated_q - 4000) * 5,
         "超导科技必须消费同一真实发放数的0.48 milli成本"
     );
     assert!(
-        body.account.dissipated_q > 0,
+        body.account.dissipated_q > 4000,
         "必须由真实发放扣费，而非动作幅值或固定常数"
     );
-    assert_eq!(body.account.dissipated_q % (800 * 4), 0);
+    assert_eq!((body.account.dissipated_q - 4000) % (800 * 4), 0);
     assert!(body.account.is_conserved());
 }
 
@@ -137,7 +140,7 @@ fn death_returns_only_real_remaining_energy_and_keeps_clipped_residue() {
 }
 
 #[test]
-fn old_snapshot_and_all_following_roots_remain_unchanged() {
+fn retired_arena_snapshot_is_explicitly_unsupported() {
     let fixture: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/arena/energy-legacy.json")).unwrap();
     let hex = fixture["snapshot_hex"].as_str().unwrap();
@@ -146,19 +149,16 @@ fn old_snapshot_and_all_following_roots_remain_unchanged() {
         .chunks_exact(2)
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
         .collect();
-    let mut world = ArenaWorld::decode_snapshot(&bytes).expect("旧快照不得默默升级生态规则");
-    assert!(world.ecology.is_none());
-    assert!(world.config.ecology.is_none());
-    for expected in fixture["next_roots"].as_array().unwrap() {
-        world.step();
-        assert_eq!(format!("{:?}", world.state_hash()), expected.as_str().unwrap());
-    }
+    assert!(
+        ArenaWorld::decode_snapshot(&bytes).is_err(),
+        "当前Arena格式显式拒绝旧编码，不默默升级"
+    );
 }
 
 #[test]
 fn ranked_cannot_opt_into_an_uncertified_ecology_version() {
     let mut value = serde_json::to_value(MatchConfig::duel(42)).unwrap();
-    value["ecology"] = serde_json::json!("energy_exchange_v1");
+    value["ecology"] = serde_json::json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4});
     assert!(serde_json::from_value::<MatchConfig>(value).is_err());
 }
 
@@ -166,6 +166,12 @@ fn ranked_cannot_opt_into_an_uncertified_ecology_version() {
 fn competing_foragers_transfer_exactly_the_available_field_quantum() {
     let mut world = world();
     world.tick = 1;
+    // 只有这一个真实场量子；其他Forager自动摄食不能混入额外测试收入。
+    for y in 0..96 {
+        for x in 0..96 {
+            world.fields.set(FieldId::Nutrient, x, y, 0);
+        }
+    }
     let ids: Vec<_> = world.units.keys().copied().take(2).collect();
     for id in ids {
         let u = world.units.get_mut(&id).unwrap();
@@ -186,7 +192,8 @@ fn competing_foragers_transfer_exactly_the_available_field_quantum() {
         .map(|b| &b.account)
         .collect();
     assert_eq!(accounts.iter().map(|a| a.received_q).sum::<u64>(), 15_625);
-    assert_eq!(accounts.iter().map(|a| a.stored_q).sum::<u64>(), 15_625);
+    assert_eq!(accounts.iter().map(|a| a.dissipated_q).sum::<u64>(), 4_000);
+    assert_eq!(accounts.iter().map(|a| a.stored_q).sum::<u64>(), 11_625);
     assert!(accounts.iter().all(|a| a.is_conserved()));
 }
 
@@ -230,7 +237,7 @@ fn snapshot_cannot_drop_or_forge_private_energy_even_with_valid_container_checks
 }
 
 #[test]
-fn delivered_exchange_v1_snapshot_and_following_roots_stay_frozen() {
+fn retired_exchange_v1_snapshot_is_explicitly_unsupported() {
     let f: serde_json::Value =
         serde_json::from_str(include_str!("../../../tests/arena/energy-exchange-v1.json")).unwrap();
     let bytes: Vec<u8> = f["snapshot_hex"]
@@ -240,13 +247,8 @@ fn delivered_exchange_v1_snapshot_and_following_roots_stay_frozen() {
         .chunks_exact(2)
         .map(|p| u8::from_str_radix(std::str::from_utf8(p).unwrap(), 16).unwrap())
         .collect();
-    let mut expected = MatchConfig::pve(57, 1);
-    expected.ecology = Some(EcologyVersion::EnergyExchangeV1);
-    assert!(ArenaWorld::decode_snapshot(&bytes).is_err(), "旧歧义格式须显式可信配置");
-    let mut w = ArenaWorld::decode_snapshot_with_config(&bytes, &expected).unwrap();
-    assert_eq!(w.config.ecology, Some(EcologyVersion::EnergyExchangeV1));
-    for root in f["next_roots"].as_array().unwrap() {
-        w.step();
-        assert_eq!(format!("{:?}", w.state_hash()), root.as_str().unwrap());
-    }
+    assert!(
+        ArenaWorld::decode_snapshot(&bytes).is_err(),
+        "不再兼容已退役的V1生态分支"
+    );
 }
