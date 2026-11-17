@@ -25,7 +25,7 @@ pub use frame::{
     JournalPatchRecord, JournalRecord, JournalSnapshotRefRecord,
 };
 pub use header::{JOURNAL_HEADER_LEN, JOURNAL_MAGIC, JOURNAL_VERSION, JournalFileHeader};
-pub use manifest::{CommitManifest, CommitSubRoots};
+pub use manifest::{CanonicalDomains, CommitManifest, CommitSubRoots};
 pub use reader::{JournalReadResult, JournalReader};
 pub use recovery::{CrashRecoveryState, CrashRecoveryStateMachine, RecoveryInput, RecoveryOutput};
 pub use writer::JournalWriter;

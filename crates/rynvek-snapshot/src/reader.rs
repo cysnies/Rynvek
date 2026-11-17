@@ -13,7 +13,7 @@ use rynvek_ecs::EntityRegistry;
 
 use crate::header::{SNAPSHOT_HEADER_LEN, SnapshotFileHeader};
 use crate::neur::{NEUR_TAG, NeurChunk};
-use crate::writer::{ENTI_TAG, ENTS_TAG, SnapshotCustomChunk};
+use crate::writer::{CMIT_TAG, ENTI_TAG, ENTS_TAG, SnapshotCustomChunk};
 
 /// 解压后快照最大允许体积（256 MiB，防止恶意或损坏 Zstd 压缩炸弹耗尽内存）
 pub const MAX_SNAPSHOT_DECOMPRESSED_BYTES: usize = 256 * 1024 * 1024;
@@ -70,8 +70,8 @@ impl SnapshotReader {
         }
         let compressed = &bytes[payload_start..payload_end];
         let uncompressed = if header.is_zstd() {
-            let mut decoder = zstd::stream::read::Decoder::new(compressed)
-                .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+            let mut decoder =
+                zstd::stream::read::Decoder::new(compressed).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
             let mut out = Vec::new();
             decoder
                 .by_ref()
@@ -89,6 +89,7 @@ impl SnapshotReader {
             compressed.to_vec()
         };
 
+        let mut tags = std::collections::BTreeSet::new();
         let mut offset = 0usize;
         let mut parsed_chunks = 0u16;
         let mut registry: Option<EntityRegistry> = None;
@@ -100,6 +101,10 @@ impl SnapshotReader {
                 return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             let tag: [u8; 4] = uncompressed[offset..offset + 4].try_into().unwrap();
+            let unique_tag = if &tag == b"ENTS" { ENTS_TAG } else { tag };
+            if !tags.insert(unique_tag) {
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+            }
             let len = u32::from_le_bytes(uncompressed[offset + 4..offset + 8].try_into().unwrap()) as usize;
             let expected_hash: [u8; 32] = uncompressed[offset + 8..offset + 40].try_into().unwrap();
             let body_start = offset + 40;
@@ -133,6 +138,22 @@ impl SnapshotReader {
             return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
 
+        let canonical = custom_chunks.iter().find(|c| c.tag == CMIT_TAG);
+        match (header.format_version, canonical) {
+            (crate::header::CANONICAL_SNAPSHOT_VERSION, Some(chunk)) => {
+                let commit = rynvek_journal::CommitManifest::decode(&chunk.payload)?;
+                if commit.canonical_domains.is_none()
+                    || commit.state_root_hash != state_root
+                    || commit.world_id != header.world_id
+                    || commit.tick != header.tick
+                    || commit.world_revision != header.world_revision
+                {
+                    return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+                }
+            }
+            (crate::header::SNAPSHOT_VERSION, None) => {}
+            _ => return Err(RynvekErrorCode::InvalidFileMagicOrVersion),
+        }
         let registry = registry.ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?;
         Ok(SnapshotReadResult {
             header,
@@ -148,7 +169,7 @@ impl SnapshotReader {
 mod tests {
     use super::*;
     use crate::neur::NeurNeuronRow;
-    use crate::writer::{ CONF_TAG, SnapshotWriter };
+    use crate::writer::{CONF_TAG, SnapshotWriter};
     use tempfile::TempDir;
 
     #[test]
@@ -179,8 +200,8 @@ mod tests {
             payload: b"duel_seed_42".to_vec(),
         }];
 
-        let out = SnapshotWriter::write_path_with_chunks(&path, [9; 16], 16, 4, [0; 32], &reg, Some(&neur), &extra)
-            .unwrap();
+        let out =
+            SnapshotWriter::write_path_with_chunks(&path, [9; 16], 16, 4, [0; 32], &reg, Some(&neur), &extra).unwrap();
         let read = SnapshotReader::read_path(&path).unwrap();
         assert_eq!(read.header.tick, 16);
         assert_eq!(read.header.chunk_count, 3);
@@ -201,9 +222,9 @@ mod tests {
         // 篡改 header.chunk_count 触发计数校验失败
         let (mut bytes2, _) = SnapshotWriter::write_bytes([1; 16], 1, 1, [0; 32], &reg, None).unwrap();
         bytes2[10] = 99;
-        assert_eq!(
+        assert!(matches!(
             SnapshotReader::read_bytes(&bytes2),
             Err(RynvekErrorCode::Blake3ChecksumMismatch)
-        );
+        ));
     }
 }

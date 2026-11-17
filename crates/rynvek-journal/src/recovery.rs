@@ -178,7 +178,7 @@ fn verify_snapshot_file_envelope(
         return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
     }
     let version = u16::from_le_bytes([prefix[4], prefix[5]]);
-    if version != 1 {
+    if version != 1 && version != 2 {
         return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
     }
     let tick = u64::from_le_bytes(prefix[32..40].try_into().unwrap());
@@ -187,9 +187,7 @@ fn verify_snapshot_file_envelope(
     if tick != expected_tick || file_state_root != expected_state_root {
         return Err(RynvekErrorCode::Blake3ChecksumMismatch);
     }
-    let meta = f
-        .metadata()
-        .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+    let meta = f.metadata().map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
     if meta.len() < 96 + payload_bytes {
         return Err(RynvekErrorCode::Blake3ChecksumMismatch);
     }
