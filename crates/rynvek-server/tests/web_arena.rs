@@ -293,3 +293,434 @@ async fn browser_pve_moves_builds_rejects_and_downloads_verifiable_replay() {
     drop(ws);
     server.shutdown().await;
 }
+
+async fn authored_post(
+    server: &rynvek_server::RunningServer,
+    path: &str,
+    token: &str,
+    body: serde_json::Value,
+) -> rynvek_server::client::HttpResponse {
+    rynvek_server::client::send_json("POST", &format!("{}{path}", server.base_url()), Some(token), &body)
+        .await
+        .unwrap()
+}
+async fn archived(
+    server: &rynvek_server::RunningServer,
+    id: rynvek_protocol::WireUuid,
+) -> rynvek_server::store::MatchRow {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let row = server.state.store().get_match(id).await.unwrap().unwrap().0;
+            if row.replay_cid_blake3.is_some() {
+                return row;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("真实归档提交超时")
+}
+#[tokio::test]
+async fn studio_world_runs_reconnects_and_replays_full_private_history() {
+    use rynvek_server::client;
+    let server = start_server(false).await; // practice默认关闭，此链不得调用它。
+    let owner = register(&server.base_url(), "arena-author", "human", 81).await;
+    let other = register(&server.base_url(), "arena-outsider", "human", 82).await;
+    let create = authored_post(
+        &server,
+        "/api/v1/worlds",
+        &owner.token,
+        json!({"title":"真实已有创作世界","template":"arena_pve","map_seed":73,"visibility":"Private"}),
+    )
+    .await;
+    assert_eq!(create.status, 201, "{:?}", create.json());
+    let world = create.json().unwrap()["world_id"].as_str().unwrap().to_owned();
+    let patch=authored_post(&server,&format!("/api/v1/worlds/{world}/patches"),&owner.token,json!({"patch_id":vec![23;16],"base_authoring_revision":0,"hlc":{"wall_time_ms":1,"logical_counter":0,"author_node_id":1},"safety_class":"TickBoundarySafe","operations":[{"PaintTerrainRect":{"x0":100,"y0":100,"width":1,"height":1,"tile_kind":4}}]})).await;
+    assert_eq!(patch.status, 200, "{:?}", patch.json());
+    let baseline = patch.json().unwrap();
+    let path = format!("/api/v1/worlds/{world}/arena");
+    assert_eq!(authored_post(&server, &path, &other.token, json!({})).await.status, 404);
+    let (one, two) = tokio::join!(
+        authored_post(&server, &path, &owner.token, json!({})),
+        authored_post(&server, &path, &owner.token, json!({}))
+    );
+    assert_eq!(one.status, 200, "{:?}", one.json());
+    assert_eq!(two.status, 200, "{:?}", two.json());
+    assert_eq!(one.header("cache-control"), Some("no-store"));
+    let run = one.json().unwrap();
+    assert_eq!(run["match_id"], two.json().unwrap()["match_id"]);
+    assert_eq!(run["world_id"], world);
+    assert!(run.get("token").is_none());
+    assert_eq!(
+        server.state.store().matches_of(owner.principal_id).await.unwrap().len(),
+        1
+    );
+    assert_eq!(
+        server
+            .state
+            .store()
+            .list_worlds(Some(owner.principal_id), 100, 0)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let world_id = world.parse().unwrap();
+    let host = server.state.registry().by_world(&world_id).unwrap();
+    assert_eq!(host.status().revision, baseline["world_revision"].as_u64().unwrap());
+    assert_eq!(
+        rynvek_server::ids::hex(&host.status().state_root),
+        baseline["state_root"].as_str().unwrap()
+    );
+    let match_id = run["match_id"].as_str().unwrap();
+    let metadata = format!("{}/api/v1/matches/{match_id}", server.base_url());
+    assert_eq!(client::get(&metadata, None).await.unwrap().status, 404);
+    assert_eq!(client::get(&metadata, Some(&other.token)).await.unwrap().status, 404);
+    assert_eq!(
+        client::get(&metadata, Some(&owner.token))
+            .await
+            .unwrap()
+            .header("cache-control"),
+        Some("no-store")
+    );
+    let mut ws = json_connect(&server, &run, &owner.token, 0).await;
+    assert_eq!(recv_type(&mut ws, "welcome").await["mode"], "PvE_Survival");
+    let initial = recv_type(&mut ws, "observation").await["observation"].clone();
+    assert!(!initial.to_string().contains("w_in"));
+    send_json(&mut ws, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
+    let lease = recv_type(&mut ws, "lease").await["lease"]["fencing_token"].clone();
+    let pos = initial["units"][0]["position"].clone();
+    let unit = initial["units"][0]["id"].clone();
+    send_json(&mut ws,json!({"type":"command","seq":2,"fencing_token":lease,"command":{"type":"issue_order","units":{"kind":"ids","value":[unit]},"order":"Move","target":[pos[0].as_i64().unwrap()+(3i64<<32),pos[1]]}})).await;
+    host.wait_for(|s| s.pending_inputs == 1).await;
+    host.advance(3).await.unwrap();
+    assert_eq!(recv_type(&mut ws, "ack").await["ack"]["type"], "order_issued");
+    let row = server.state.store().get_world(world_id).await.unwrap().unwrap();
+    let actual = rynvek_server::transactions::restore_committed(
+        server.state.store(),
+        server.state.inner.world_snapshots.as_ref(),
+        &row,
+    )
+    .await
+    .unwrap();
+    assert_ne!(
+        serde_json::to_value(actual.observe(rynvek_rts::FactionId(0)).unwrap().units[0].position).unwrap(),
+        pos
+    );
+    drop(ws);
+    let reconnect = authored_post(&server, &path, &owner.token, json!({}))
+        .await
+        .json()
+        .unwrap();
+    assert_eq!(reconnect["match_id"], run["match_id"]);
+    assert_eq!(host.status().state_root, actual.state_root());
+    let mut ws = json_connect(&server, &run, &owner.token, 0).await;
+    recv_type(&mut ws, "welcome").await;
+    recv_type(&mut ws, "observation").await;
+    send_json(&mut ws, json!({"type":"acquire_lease","seq":3,"level":"Sovereign"})).await;
+    let lease = recv_type(&mut ws, "lease").await["lease"]["fencing_token"].clone();
+    let before = host.status();
+    send_json(
+        &mut ws,
+        json!({"type":"command","seq":4,"fencing_token":lease,"command":{"type":"surrender"}}),
+    )
+    .await;
+    host.wait_for(|s| s.pending_inputs == 1).await;
+    host.advance(1).await.unwrap();
+    assert_eq!(recv_type(&mut ws, "ack").await["ack"]["type"], "surrendered");
+    let final_tick = host.status().tick;
+    assert!(final_tick == before.tick || final_tick == before.tick + 1);
+    assert_ne!(host.status().state_root, before.state_root);
+    let row = archived(&server, match_id.parse().unwrap()).await;
+    let archive_url = format!("{metadata}/replay");
+    assert_eq!(client::get(&archive_url, None).await.unwrap().status, 404);
+    assert_eq!(client::get(&archive_url, Some(&other.token)).await.unwrap().status, 404);
+    let archive = client::get(&archive_url, Some(&owner.token)).await.unwrap();
+    assert_eq!(archive.status, 200);
+    assert_eq!(archive.header("cache-control"), Some("no-store"));
+    let mut keys = rynvek_security::Keyring::new();
+    keys.insert(SERVER_KEY_ID, server_key().public_key()).unwrap();
+    let report = rynvek_server::replay::verify(&archive.body, &keys).unwrap();
+    assert_eq!(
+        report.final_state_root,
+        rynvek_server::ids::hex(&host.status().state_root)
+    );
+    let opened = rynvek_server::replay::open(&archive.body, Some(&keys)).unwrap();
+    assert_eq!(
+        opened.body.runtime.as_ref().unwrap().initial_revision,
+        baseline["world_revision"].as_u64().unwrap()
+    );
+    assert_eq!(
+        rynvek_server::ids::hex(&opened.body.runtime.as_ref().unwrap().initial_root),
+        baseline["state_root"].as_str().unwrap()
+    );
+    assert_eq!(opened.body.commands.len(), 2);
+    assert_eq!(opened.body.runtime.as_ref().unwrap().ticks.len(), 4);
+    // 即便模拟旧部署误放公共CAS，也不能按公开Hub CID绕开私有回放权限。
+    let cid = server.state.inner.blobs.put(&archive.body).unwrap();
+    assert_eq!(row.replay_cid_blake3, Some(cid.0));
+    assert_eq!(
+        client::get(
+            &format!("{}/api/v1/hub/blobs/{}", server.base_url(), cid.to_hex()),
+            None
+        )
+        .await
+        .unwrap()
+        .status,
+        404
+    );
+    let playback_path = format!("/api/v1/matches/{match_id}/playback");
+    assert_eq!(
+        authored_post(&server, &playback_path, &other.token, json!({"faction":0}))
+            .await
+            .status,
+        404
+    );
+    let first = authored_post(&server, &playback_path, &owner.token, json!({"faction":0})).await;
+    assert_eq!(first.status, 200, "{:?}", first.json());
+    assert_eq!(first.header("cache-control"), Some("no-store"));
+    let first = first.json().unwrap();
+    assert_eq!(first["signature_verified"], true);
+    assert_eq!(first["complete_verified"], false);
+    let cursor_path = format!("{playback_path}/{}", first["cursor_id"].as_str().unwrap());
+    assert_eq!(
+        authored_post(
+            &server,
+            &cursor_path,
+            &other.token,
+            json!({"tick":final_tick,"max_steps":1})
+        )
+        .await
+        .status,
+        404
+    );
+    assert_eq!(
+        authored_post(
+            &server,
+            &cursor_path,
+            &owner.token,
+            json!({"tick":final_tick,"max_steps":121})
+        )
+        .await
+        .status,
+        400
+    );
+    let partial = authored_post(
+        &server,
+        &cursor_path,
+        &owner.token,
+        json!({"tick":final_tick,"max_steps":1}),
+    )
+    .await
+    .json()
+    .unwrap();
+    assert_eq!(partial["ready"], false);
+    assert_eq!(partial["verified_records"], 1);
+    assert_eq!(partial["complete_verified"], false);
+    let end = authored_post(
+        &server,
+        &cursor_path,
+        &owner.token,
+        json!({"tick":final_tick,"max_steps":120}),
+    )
+    .await
+    .json()
+    .unwrap();
+    assert_eq!(end["complete_verified"], true, "{end}");
+    assert_eq!(end["state_root"], report.final_state_root);
+    assert!(end["observation"]["outcome"].is_object()); // 真终局来自重演，不从元数据虚构。
+    let rewind = authored_post(
+        &server,
+        &cursor_path,
+        &owner.token,
+        json!({"tick":first["initial_tick"]}),
+    )
+    .await
+    .json()
+    .unwrap();
+    assert_eq!(rewind["tick"], first["initial_tick"]);
+    assert_eq!(rewind["verified_records"], 0);
+    assert_eq!(rewind["complete_verified"], false);
+    let authority_root = host.status().state_root;
+    let end_again = authored_post(&server, &cursor_path, &owner.token, json!({"tick":final_tick}))
+        .await
+        .json()
+        .unwrap();
+    assert_eq!(end_again["state_root"], end["state_root"]);
+    assert_eq!(host.status().state_root, authority_root);
+    let replaced = authored_post(&server, &playback_path, &owner.token, json!({"faction":0})).await;
+    assert_eq!(replaced.status, 200);
+    assert_eq!(
+        authored_post(
+            &server,
+            &cursor_path,
+            &owner.token,
+            json!({"tick":first["initial_tick"]})
+        )
+        .await
+        .status,
+        404
+    );
+    let closed = client::send_json(
+        "DELETE",
+        &format!("{}{playback_path}", server.base_url()),
+        Some(&owner.token),
+        &json!({}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(closed.status, 200);
+    // 已签名但日志根被故意改坏：只读重演失败，不得动权威世界。
+    let mut bad = opened.body;
+    bad.runtime.as_mut().unwrap().ticks[1].state_root[0] ^= 1;
+    let bad = rynvek_server::replay::encode(&bad, world_id.0, &server_key()).unwrap();
+    let mut bad_row = row.clone();
+    bad_row.replay_cid_blake3 = Some(server.state.inner.world_snapshots.put(&bad).unwrap().0);
+    server.state.store().update_match(bad_row).await.unwrap();
+    let bad_open = authored_post(&server, &playback_path, &owner.token, json!({"faction":0}))
+        .await
+        .json()
+        .unwrap();
+    let bad_path = format!("{playback_path}/{}", bad_open["cursor_id"].as_str().unwrap());
+    let failed = authored_post(&server, &bad_path, &owner.token, json!({"tick":final_tick})).await;
+    assert_ne!(failed.status, 200);
+    // 同批先前的好记录也不能偷偷推进游标；只取一条应仍可从原起点成功。
+    let retry = authored_post(
+        &server,
+        &bad_path,
+        &owner.token,
+        json!({"tick":final_tick,"max_steps":1}),
+    )
+    .await;
+    assert_eq!(retry.status, 200, "{:?}", retry.json());
+    assert_eq!(retry.json().unwrap()["verified_records"], 1);
+    assert_eq!(host.status().state_root, authority_root);
+    drop(ws);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn studio_arena_recovery_keeps_same_match_and_prefence_wal() {
+    use rynvek_server::{client, host::TickDriver, store::Store};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let config = rynvek_server::AppConfig {
+        public_base_url: String::new(),
+        blob_dir: Some(dir.path().to_owned()),
+        tick_driver: TickDriver::Manual,
+        lobby_timeout: None,
+        ..Default::default()
+    };
+    let start = |app| {
+        rynvek_server::start(rynvek_server::ServerConfig {
+            http_addr: "127.0.0.1:0".parse().unwrap(),
+            webtransport_addr: None,
+            app,
+            store: store.clone(),
+            signer: server_key(),
+        })
+    };
+    let original = start(config.clone()).await.unwrap();
+    let owner = register(&original.base_url(), "recover-author", "human", 83).await;
+    let created = authored_post(
+        &original,
+        "/api/v1/worlds",
+        &owner.token,
+        json!({"title":"持久恢复","template":"arena_pve","map_seed":93,"visibility":"Private"}),
+    )
+    .await
+    .json()
+    .unwrap();
+    let world = created["world_id"].as_str().unwrap();
+    let path = format!("/api/v1/worlds/{world}/arena");
+    let run = authored_post(&original, &path, &owner.token, json!({}))
+        .await
+        .json()
+        .unwrap();
+    let world_id = world.parse().unwrap();
+    let old = original.state.registry().by_world(&world_id).unwrap();
+    let mut ws = json_connect(&original, &run, &owner.token, 0).await;
+    recv_type(&mut ws, "welcome").await;
+    let first = recv_type(&mut ws, "observation").await["observation"].clone();
+    send_json(&mut ws, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
+    let lease = recv_type(&mut ws, "lease").await["lease"]["fencing_token"].clone();
+    let unit = first["units"][0]["id"].clone();
+    let pos = first["units"][0]["position"].clone();
+    send_json(&mut ws,json!({"type":"command","seq":2,"fencing_token":lease,"command":{"type":"issue_order","units":{"kind":"ids","value":[unit]},"order":"Move","target":[pos[0].as_i64().unwrap()+(2i64<<32),pos[1]]}})).await;
+    old.wait_for(|s| s.pending_inputs == 1).await;
+    old.advance(3).await.unwrap();
+    recv_type(&mut ws, "ack").await;
+    drop(ws);
+    let before = original.state.store().get_world(world_id).await.unwrap().unwrap();
+    // 新AppState+同一Store/磁盘CAS模拟节点上下文恢复，不声称PG断电或浏览器验收。
+    let resumed = start(config).await.unwrap();
+    let result = authored_post(&resumed, &path, &owner.token, json!({})).await;
+    assert_eq!(result.status, 200, "{:?}", result.json());
+    let recovered = result.json().unwrap();
+    assert_eq!(recovered["match_id"], run["match_id"]);
+    assert_eq!(recovered["recovered"], true);
+    let host = resumed.state.registry().by_world(&world_id).unwrap();
+    assert_eq!(host.status().state_root, before.latest_state_root);
+    assert_eq!(host.status().tick, 3);
+    assert_eq!(
+        resumed
+            .state
+            .store()
+            .get_world(world_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .fencing_token,
+        before.fencing_token + 1
+    );
+    // 旧宿主真实推进会被fence拒绝；其迟到Aborted也不得终止新对局。
+    assert!(old.advance(1).await.is_err());
+    let mut ws = json_connect(&resumed, &recovered, &owner.token, 0).await;
+    recv_type(&mut ws, "welcome").await;
+    recv_type(&mut ws, "observation").await;
+    send_json(&mut ws, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
+    let lease = recv_type(&mut ws, "lease").await["lease"]["fencing_token"].clone();
+    host.advance(2).await.unwrap();
+    send_json(
+        &mut ws,
+        json!({"type":"command","seq":2,"fencing_token":lease,"command":{"type":"surrender"}}),
+    )
+    .await;
+    host.wait_for(|s| s.pending_inputs == 1).await;
+    host.advance(1).await.unwrap();
+    recv_type(&mut ws, "ack").await;
+    let match_id = run["match_id"].as_str().unwrap();
+    let row = archived(&resumed, match_id.parse().unwrap()).await;
+    assert_eq!(row.match_state, rynvek_server::store::MatchState::Completed);
+    let archive = client::get(
+        &format!("{}/api/v1/matches/{match_id}/replay", resumed.base_url()),
+        Some(&owner.token),
+    )
+    .await
+    .unwrap();
+    assert_eq!(archive.status, 200);
+    let mut keys = rynvek_security::Keyring::new();
+    keys.insert(SERVER_KEY_ID, server_key().public_key()).unwrap();
+    let verified = rynvek_server::replay::verify(&archive.body, &keys).unwrap();
+    assert_eq!(
+        verified.final_state_root,
+        rynvek_server::ids::hex(&host.status().state_root)
+    );
+    let body = rynvek_server::replay::open(&archive.body, Some(&keys)).unwrap().body;
+    assert_eq!(body.commands.len(), 2, "恢复前Move和恢复后投降均必须存在");
+    assert_eq!(body.runtime.as_ref().unwrap().initial_revision, 0);
+    assert_eq!(body.runtime.as_ref().unwrap().ticks.len(), 6);
+    assert_eq!(
+        resumed
+            .state
+            .store()
+            .matches_of(owner.principal_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    drop(ws);
+    resumed.shutdown().await;
+    original.shutdown().await;
+}

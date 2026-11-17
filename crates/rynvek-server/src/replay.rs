@@ -108,6 +108,8 @@ impl RuntimeReplay {
             runtime = tick
                 .replay(&runtime)
                 .map_err(|e| ReplayError::new(e, "有序 Tick 日志重放分歧"))?;
+            // 临时事件与实时Actor一样逐Tick清空，不累积成另一份无界历史。
+            runtime.drain_events();
         }
         Ok(runtime)
     }
@@ -148,6 +150,36 @@ pub fn record_runtime(
         final_state_root: crate::ids::hex(&world.state_root()),
         outcome: world.outcome.clone(),
         runtime: Some(runtime),
+    })
+}
+
+/// 从真实已提交创作锚点 + 全部运行期 Tick WAL 重建，不因宿主重启丢掉先前命令/谱系。
+/// 预期终根来自实际已提交终局；命令日志只取真实重演，不从部分宿主内存补造。
+pub(crate) fn record_world_history(
+    history: RuntimeReplay,
+    expected_tick: u64,
+    expected_root: [u8; 32],
+    match_id: String,
+    ruleset_hash: String,
+    participants: Vec<ReplayParticipant>,
+) -> Result<ReplayBody, ReplayError> {
+    let world = history.replay()?;
+    if world.tick != expected_tick || world.state_root() != expected_root {
+        return Err(ReplayError::divergence("完整持久世界历史与实际终局不一致"));
+    }
+    Ok(ReplayBody {
+        format: REPLAY_RUNTIME_FORMAT.into(),
+        match_id,
+        world_id: rynvek_protocol::WireUuid(history.world_id).to_string(),
+        ruleset_hash,
+        config: world.config.clone(),
+        participants,
+        commands: world.command_log().to_vec(),
+        checkpoints: history.checkpoints(),
+        final_tick: world.tick,
+        final_state_root: crate::ids::hex(&world.state_root()),
+        outcome: world.outcome.clone(),
+        runtime: Some(history),
     })
 }
 

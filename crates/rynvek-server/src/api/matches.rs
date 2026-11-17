@@ -18,7 +18,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::host::MatchHandle;
 use crate::ids::{hex, parse_hex, unix_now_s};
 use crate::matchmaking::QueueEntry;
-use crate::store::MatchState;
+use crate::store::{MatchRow, MatchState};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -119,14 +119,15 @@ fn parse_match_id(id: &str) -> ApiResult<WireUuid> {
     id.parse().map_err(|_| ApiError::not_found("match_id 不是合法 UUID"))
 }
 
-/// `11 GET /api/v1/matches/{match_id}`（Public）
-pub async fn get_match(State(app): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {
+/// `11 GET /api/v1/matches/{match_id}`：按世界可见性隔离私有对局元数据。
+pub async fn get_match(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
     let match_id = parse_match_id(&id)?;
     let (row, participants) = app
         .store()
         .get_match(match_id)
         .await?
         .ok_or_else(|| ApiError::not_found("对局不存在"))?;
+    access(&app, &headers, &row, false).await?;
     let live = app.registry().get(&match_id).map(|h| h.status());
     // 持久化可能略滞后于宿主：进行中对局以宿主实时状态为准
     let (state, tick) = match live {
@@ -150,45 +151,49 @@ pub async fn get_match(State(app): State<AppState>, Path(id): Path<String>) -> A
             "rating_delta": p.rating_delta,
         }));
     }
-    Ok(Json(serde_json::json!({
-        "match_id": row.match_id.to_string(),
-        "world_id": row.world_id.to_string(),
-        "game_mode": row.game_mode,
-        "ruleset_blake3": hex(&row.ruleset_blake3),
-        "map_seed": row.map_seed,
-        "match_state": state,
-        "tick": tick,
-        "winner_faction_id": row.winner_faction_id,
-        "win_reason": row.win_reason,
-        "total_ticks": row.total_ticks,
-        "replay_cid_blake3": row.replay_cid_blake3.map(|c| hex(&c)),
-        "started_at_unix_s": row.started_at_unix_s,
-        "completed_at_unix_s": row.completed_at_unix_s,
-        "participants": ps,
-        "replay_url": row.replay_cid_blake3.map(|_| format!("/api/v1/matches/{}/replay", row.match_id)),
-        "replay_signer": {
-            "key_id": app.inner.signer.key_id(),
-            "ed25519_public_key": hex(&app.inner.signer.public_key()),
-        },
-    }))
-    .into_response())
+    Ok((
+        [(header::CACHE_CONTROL, "no-store"), (header::VARY, "Authorization")],
+        Json(serde_json::json!({
+            "match_id": row.match_id.to_string(),
+            "world_id": row.world_id.to_string(),
+            "game_mode": row.game_mode,
+            "ruleset_blake3": hex(&row.ruleset_blake3),
+            "map_seed": row.map_seed,
+            "match_state": state,
+            "tick": tick,
+            "winner_faction_id": row.winner_faction_id,
+            "win_reason": row.win_reason,
+            "total_ticks": row.total_ticks,
+            "replay_cid_blake3": row.replay_cid_blake3.map(|c| hex(&c)),
+            "started_at_unix_s": row.started_at_unix_s,
+            "completed_at_unix_s": row.completed_at_unix_s,
+            "participants": ps,
+            "replay_url": row.replay_cid_blake3.map(|_| format!("/api/v1/matches/{}/replay", row.match_id)),
+            "replay_signer": {
+                "key_id": app.inner.signer.key_id(),
+                "ed25519_public_key": hex(&app.inner.signer.public_key()),
+            },
+        })),
+    )
+        .into_response())
 }
 
-/// `12 GET /api/v1/matches/{match_id}/replay`（Public）：签名 `.rreplay`
-pub async fn replay(State(app): State<AppState>, Path(id): Path<String>) -> ApiResult<Response> {
+/// `12 GET /api/v1/matches/{match_id}/replay`：公共排位公开，自创完整源码归档要求WorldEdit。
+pub async fn replay(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
     let match_id = parse_match_id(&id)?;
     let (row, _) = app
         .store()
         .get_match(match_id)
         .await?
         .ok_or_else(|| ApiError::not_found("对局不存在"))?;
+    let public = access(&app, &headers, &row, true).await?;
     let Some(cid) = row
         .replay_cid_blake3
         .filter(|_| row.match_state == MatchState::Completed)
     else {
         return Err(ApiError::not_found("对局尚未结束，回放不可用"));
     };
-    let bytes = app.inner.blobs.get(&rynvek_core::hash::Blake3Hash(cid))?;
+    let bytes = archive(&app, &row)?;
     Ok((
         [
             (header::CONTENT_TYPE, "application/vnd.rynvek.rreplay".to_owned()),
@@ -197,11 +202,58 @@ pub async fn replay(State(app): State<AppState>, Path(id): Path<String>) -> ApiR
                 format!("attachment; filename=\"{match_id}.rreplay\""),
             ),
             (header::ETAG, format!("\"{}\"", hex(&cid))),
-            (header::CACHE_CONTROL, "public, max-age=31536000, immutable".to_owned()),
+            (
+                header::CACHE_CONTROL,
+                if public {
+                    "public, max-age=31536000, immutable"
+                } else {
+                    "no-store"
+                }
+                .to_owned(),
+            ),
+            (header::VARY, "Authorization".to_owned()),
         ],
         bytes,
     )
         .into_response())
+}
+
+/// 公共排位可公开；自创世界归档含全量私有基因/规则，必须 WorldEdit，不能把 WorldRead 当源码授权。
+/// 不存在、无凭据、越权统一404；完整归档绝不经 Hub 公共制品路由。
+pub(crate) async fn access(app: &AppState, headers: &HeaderMap, row: &MatchRow, full_archive: bool) -> ApiResult<bool> {
+    let world = app
+        .store()
+        .get_world(row.world_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("对局不存在"))?;
+    if world.visibility == rynvek_security::Visibility::Public && (!full_archive || row.game_mode == "PvP_Ranked") {
+        return Ok(true);
+    }
+    let scope = if full_archive {
+        CapabilityScope::WorldEdit
+    } else {
+        CapabilityScope::WorldRead
+    };
+    let subject = app
+        .require(headers, scope)
+        .await
+        .map_err(|_| ApiError::not_found("对局不存在"))?;
+    super::worlds::load_world(app, &subject, &row.world_id.to_string(), scope)
+        .await
+        .map_err(|_| ApiError::not_found("对局不存在"))?;
+    Ok(false)
+}
+
+pub(crate) fn archive(app: &AppState, row: &MatchRow) -> ApiResult<Vec<u8>> {
+    let cid = row
+        .replay_cid_blake3
+        .filter(|_| row.match_state == MatchState::Completed)
+        .ok_or_else(|| ApiError::not_found("对局尚未结束，回放不可用"))?;
+    let bytes = app.inner.world_snapshots.get(&rynvek_core::hash::Blake3Hash(cid))?;
+    if blake3::hash(&bytes).as_bytes() != &cid {
+        return Err(ApiError::new(RynvekErrorCode::Blake3ChecksumMismatch, "回放CID不符"));
+    }
+    Ok(bytes)
 }
 
 #[derive(Debug, Deserialize)]

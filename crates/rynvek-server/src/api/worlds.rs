@@ -65,7 +65,12 @@ fn world_resource(w: &WorldRow) -> Resource {
     }
 }
 
-async fn load_world(app: &AppState, subject: &Subject, id: &str, scope: CapabilityScope) -> ApiResult<WorldRow> {
+pub(crate) async fn load_world(
+    app: &AppState,
+    subject: &Subject,
+    id: &str,
+    scope: CapabilityScope,
+) -> ApiResult<WorldRow> {
     let world_id = parse_world_id(id)?;
     let world = app
         .store()

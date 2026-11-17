@@ -195,7 +195,8 @@ pub fn map_info(world: &ArenaWorld) -> MapInfo {
 }
 
 /// 事件是否对某阵营可见：本阵营事件与全局事件（虫潮、突然死亡、终局）
-fn event_visible_to(e: &RtsEvent, faction: FactionId) -> bool {
+/// 阵营事件可见性：实时流和只读签名重演共用，不能在播放器另设宽松规则。
+pub fn event_visible_to(e: &RtsEvent, faction: FactionId) -> bool {
     match e {
         RtsEvent::BuildingPlaced { faction: f, .. }
         | RtsEvent::BuildingCompleted { faction: f, .. }

@@ -332,7 +332,7 @@ async fn failed_fencing_commit_publishes_neither_patch_nor_tick() {
         )
         .await
         .unwrap();
-    f.host.advance(1).await.unwrap();
+    assert!(f.host.advance(1).await.is_err());
     assert_eq!(request.await.unwrap().status, 409);
     assert_eq!(f.host.status().state, MatchState::Aborted);
     assert_eq!(f.host.status().state_root, before.state_root);

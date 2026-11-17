@@ -3,6 +3,7 @@
 
 //! 服务端共享状态：存储、令牌中心、质询、匹配队列、进行中对局注册表，以及终局持久化任务。
 
+use rynvek_core::hash::Blake3Hash;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
@@ -166,6 +167,10 @@ pub struct AppInner {
     /// Lab 执行并发槽
     pub lab_slots: Arc<tokio::sync::Semaphore>,
     pub practice_slots: Arc<tokio::sync::Semaphore>,
+    /// 创作世界启动在本节点串行化；不持有同步注册表锁跨 await。
+    pub authored_arena_start: tokio::sync::Mutex<()>,
+    pub playback_slots: Arc<tokio::sync::Semaphore>,
+    pub playbacks: Mutex<BTreeMap<WireUuid, crate::api::arena::PlaybackEntry>>,
     /// WASM 插件运行时（首次使用时创建）
     pub plugins: std::sync::OnceLock<rynvek_rules::plugin::PluginRuntime>,
     pub signer: ServerSigningKey,
@@ -197,6 +202,9 @@ impl AppState {
         let state = Self {
             inner: Arc::new(AppInner {
                 practice_slots: Arc::new(tokio::sync::Semaphore::new(4)),
+                authored_arena_start: tokio::sync::Mutex::new(()),
+                playback_slots: Arc::new(tokio::sync::Semaphore::new(2)),
+                playbacks: Mutex::new(BTreeMap::new()),
                 store,
                 blobs: match &config.blob_dir {
                     Some(dir) => Arc::new(
@@ -657,7 +665,8 @@ async fn finalizer(state: AppState, mut rx: mpsc::UnboundedReceiver<HostEvent>) 
                 match_id,
                 state: to,
                 tick,
-            } => persist_state(&state, match_id, to, tick).await,
+                fencing_token,
+            } => persist_state(&state, match_id, to, tick, fencing_token).await,
             HostEvent::Audit(row) => state.store().append_audit(row).await,
             HostEvent::Completed(c) => persist_completion(&state, *c).await,
         };
@@ -667,13 +676,30 @@ async fn finalizer(state: AppState, mut rx: mpsc::UnboundedReceiver<HostEvent>) 
     }
 }
 
-async fn persist_state(state: &AppState, match_id: WireUuid, to: MatchState, tick: u64) -> ApiResult<()> {
+async fn persist_state(
+    state: &AppState,
+    match_id: WireUuid,
+    to: MatchState,
+    tick: u64,
+    fencing_token: Option<u64>,
+) -> ApiResult<()> {
     let store = state.store();
     let Some((mut row, _)) = store.get_match(match_id).await? else {
         return Err(ApiError::not_found("对局不存在"));
     };
     if to == MatchState::Completed {
         // 由 persist_completion 原子地写入终局字段
+        return Ok(());
+    }
+    // 恢复宿主重新经历 Lobby/Ready/Running，持久状态不倒退、不重写 started_at。
+    if matches!(
+        (row.match_state, to),
+        (
+            MatchState::Running,
+            MatchState::Lobby | MatchState::Ready | MatchState::Running
+        ) | (MatchState::Ready, MatchState::Lobby | MatchState::Ready)
+            | (MatchState::Lobby, MatchState::Lobby)
+    ) {
         return Ok(());
     }
     if !row.match_state.can_transition(to) {
@@ -685,14 +711,21 @@ async fn persist_state(state: &AppState, match_id: WireUuid, to: MatchState, tic
     row.match_state = to;
     row.total_ticks = tick;
     if to == MatchState::Running {
-        row.started_at_unix_s = Some(unix_now_s());
+        row.started_at_unix_s.get_or_insert_with(unix_now_s);
     }
     if to == MatchState::Aborted {
         row.completed_at_unix_s = Some(unix_now_s());
-        let mut reg = state.registry();
-        reg.by_principal.retain(|_, m| *m != match_id);
     }
-    store.update_match(row).await
+    store
+        .update_match_fenced(
+            row,
+            fencing_token.ok_or_else(|| crate::transactions::conflict("持久宿主缺少fence"))?,
+        )
+        .await?;
+    if to == MatchState::Aborted {
+        state.registry().by_principal.retain(|_, m| *m != match_id);
+    }
+    Ok(())
 }
 
 async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) -> ApiResult<()> {
@@ -702,6 +735,9 @@ async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) ->
         .get_world(c.world_id)
         .await?
         .ok_or_else(|| ApiError::not_found("世界不存在"))?;
+    if c.fencing_token != Some(world.fencing_token) {
+        return Err(crate::transactions::conflict("旧宿主终局fence已失效"));
+    }
     let commits = store.list_commits(c.world_id).await?;
     if world.latest_tick != c.total_ticks
         || world.latest_state_root != c.final_state_root
@@ -711,7 +747,82 @@ async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) ->
     {
         return Err(crate::transactions::conflict("终局与已提交权威检查点不一致"));
     }
-    let replay_cid = state.inner.blobs.put(&c.replay)?;
+    // 从真实已提交Studio起点覆盖全部运行期/恢复前日志；不把开局前创作伪装成运行帧。
+    let snapshots = state.inner.world_snapshots.clone();
+    let signer = state.inner.signer.clone();
+    let expected_tick = c.total_ticks;
+    let expected_root = c.final_state_root;
+    let world_id = c.world_id;
+    let replay = c.replay.clone();
+    let replay_bytes = tokio::task::spawn_blocking(move || -> ApiResult<Vec<u8>> {
+        let mut keys = rynvek_security::Keyring::new();
+        keys.insert(signer.key_id(), signer.public_key())
+            .map_err(|e| ApiError::internal(e.to_string()))?;
+        let current = crate::replay::open(&replay, Some(&keys)).map_err(|e| ApiError::new(e.code, e.message))?;
+        let mut origin = commits
+            .first()
+            .filter(|c| c.world_revision == 0)
+            .ok_or_else(|| crate::transactions::conflict("缺少世界genesis"))?;
+        let mut ticks = Vec::new();
+        for commit in commits.iter().skip(1) {
+            let bytes = snapshots.get(&Blake3Hash(commit.journal_segment_cid))?;
+            if Blake3Hash::of(&bytes).0 != commit.journal_segment_cid {
+                return Err(crate::transactions::conflict("历史WAL CID不符"));
+            }
+            if let Ok(record) = serde_json::from_slice::<crate::transactions::TickRecord>(&bytes) {
+                if record.revision != commit.world_revision
+                    || record.state_root != commit.state_root_blake3
+                    || record.tick != commit.tick
+                    || Some(record.base_revision) != commit.parent_revision
+                {
+                    return Err(crate::transactions::conflict("历史WAL与提交元数据不一致"));
+                }
+                ticks.push(record);
+            } else {
+                // 当前未挂Actor的Studio事务直接形成完整创作锚点，不是可伪装成Tick的帧。
+                // 选择最后真实创作快照为起点；运行期一旦开始，只接受连续TickRecord，绝不截断旧命令。
+                let patch: rynvek_world::WorldPatch = serde_json::from_slice(&bytes)
+                    .map_err(|_| crate::transactions::conflict("未知或损坏的权威日志"))?;
+                if !ticks.is_empty()
+                    || Some(patch.base_authoring_revision) != commit.parent_revision
+                    || commit.snapshot_cid.is_none()
+                {
+                    return Err(crate::transactions::conflict(
+                        "运行日志中出现非Actor创作或缺少真实锚点，不允许截断历史",
+                    ));
+                }
+                origin = commit;
+            }
+        }
+        let cid = origin
+            .snapshot_cid
+            .ok_or_else(|| crate::transactions::conflict("运行起点没有完整快照"))?;
+        let initial_snapshot = snapshots.get(&Blake3Hash(cid))?;
+        if Blake3Hash::of(&initial_snapshot).0 != cid {
+            return Err(crate::transactions::conflict("起点CID不符"));
+        }
+        let history = crate::replay::RuntimeReplay {
+            world_id: world_id.0,
+            initial_revision: origin.world_revision,
+            initial_root: origin.state_root_blake3,
+            initial_snapshot,
+            ticks,
+        };
+        let body = crate::replay::record_world_history(
+            history,
+            expected_tick,
+            expected_root,
+            current.body.match_id,
+            current.body.ruleset_hash,
+            current.body.participants,
+        )
+        .map_err(|e| ApiError::new(e.code, e.message))?;
+        crate::replay::encode(&body, world_id.0, &signer).map_err(|e| ApiError::new(e.code, e.message))
+    })
+    .await
+    .map_err(|_| ApiError::internal("完整世界归档线程失败"))??;
+    // 完整回放包含私有基因和规则，绝不能进入 Hub 公共 CAS。
+    let replay_cid = state.inner.world_snapshots.put(&replay_bytes)?;
     let Some((mut row, participants)) = store.get_match(c.match_id).await? else {
         return Err(ApiError::not_found("对局不存在"));
     };
@@ -791,7 +902,13 @@ async fn persist_completion(state: &AppState, c: crate::host::CompletedMatch) ->
                 .await?;
         }
     }
-    store.update_match(row).await?;
+    store
+        .update_match_fenced(
+            row,
+            c.fencing_token
+                .ok_or_else(|| crate::transactions::conflict("终局缺少fence"))?,
+        )
+        .await?;
     {
         let mut reg = state.registry();
         reg.by_principal.retain(|_, m| *m != c.match_id);

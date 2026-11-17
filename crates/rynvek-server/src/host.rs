@@ -117,6 +117,7 @@ pub struct CompletedMatch {
     pub outcome: Option<MatchOutcome>,
     pub total_ticks: u64,
     pub final_state_root: [u8; 32],
+    pub fencing_token: Option<u64>,
     /// `(阵营, Principal, 最终得分 milli)`
     pub scores: Vec<(u8, u64, i64)>,
     pub winner_faction: Option<u8>,
@@ -131,6 +132,7 @@ pub struct CompletedMatch {
 pub enum HostEvent {
     State {
         match_id: WireUuid,
+        fencing_token: Option<u64>,
         state: MatchState,
         tick: u64,
     },
@@ -571,6 +573,7 @@ impl Host {
         self.state = to;
         let _ = self.events.send(HostEvent::State {
             match_id: self.spec.match_id,
+            fencing_token: self.committer.as_ref().map(|c| c.fencing_token),
             state: to,
             tick: self.session.world.tick,
         });
@@ -615,7 +618,11 @@ impl Host {
                             break;
                         }
                     }
-                    Ok(self.session.world.tick)
+                    if self.state == MatchState::Aborted {
+                        Err(conflict("Tick未提交，宿主已终止；不报告推进成功"))
+                    } else {
+                        Ok(self.session.world.tick)
+                    }
                 };
                 let _ = reply.send(r);
             }
@@ -1366,6 +1373,7 @@ impl Host {
             outcome: world.outcome.clone(),
             total_ticks: world.tick,
             final_state_root: world.state_root(),
+            fencing_token: self.committer.as_ref().map(|c| c.fencing_token),
             scores: self
                 .spec
                 .seats

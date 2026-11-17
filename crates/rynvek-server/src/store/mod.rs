@@ -372,6 +372,9 @@ impl Store {
     pub async fn update_match(&self, row: MatchRow) -> StoreResult<()> {
         dispatch!(self.update_match(row))
     }
+    pub async fn update_match_fenced(&self, row: MatchRow, fencing_token: u64) -> StoreResult<()> {
+        dispatch!(self.update_match_fenced(row, fencing_token))
+    }
     pub async fn update_participant(&self, row: ParticipantRow) -> StoreResult<()> {
         dispatch!(self.update_participant(row))
     }

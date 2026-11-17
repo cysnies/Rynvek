@@ -362,6 +362,10 @@ pub async fn blob(State(app): State<AppState>, headers: HeaderMap, Path(h): Path
         return Err(ApiError::not_found("Blob 不存在"));
     }
     let bytes = app.inner.blobs.get(&id)?;
+    // 回放必须经过世界权限路由；即便旧部署曾把归档放入公共 CAS，也不按 CID 公开。
+    if bytes.starts_with(&crate::replay::REPLAY_MAGIC) {
+        return Err(ApiError::not_found("公开制品不存在"));
+    }
     let len = bytes.len() as u64;
     let etag = format!("\"{}\"", id.to_hex());
     let common = [

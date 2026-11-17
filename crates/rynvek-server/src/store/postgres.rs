@@ -643,13 +643,36 @@ impl PostgresStore {
     }
 
     pub async fn update_match(&self, row: MatchRow) -> StoreResult<()> {
-        let c = self.client.lock().await;
-        let n = c
+        self.update_match_guarded(row, None).await
+    }
+    pub async fn update_match_fenced(&self, row: MatchRow, fencing_token: u64) -> StoreResult<()> {
+        self.update_match_guarded(row, Some(fencing_token)).await
+    }
+    async fn update_match_guarded(&self, row: MatchRow, fencing_token: Option<u64>) -> StoreResult<()> {
+        let mut c = self.client.lock().await;
+        let tx = c.transaction().await.map_err(db_err)?;
+        if let Some(expected) = fencing_token {
+            // 与claim_world锁同一世界行，不能只用MVCC快照EXISTS检查后再写另一行。
+            let locked = tx
+                .query_opt(
+                    "SELECT w.fencing_token FROM worlds w JOIN matches m ON m.world_id=w.world_id \
+                 WHERE m.match_id=$1::text::uuid FOR UPDATE OF w",
+                    &[&uuid_text(&row.match_id)],
+                )
+                .await
+                .map_err(db_err)?
+                .ok_or_else(|| crate::transactions::conflict("对局世界不存在"))?;
+            if locked.get::<_, i64>(0) != i(expected) {
+                return Err(crate::transactions::conflict("旧宿主不得覆盖恢复后的对局状态"));
+            }
+        }
+        let n = tx
             .execute(
                 "UPDATE matches SET game_mode = $2, ruleset_blake3 = $3, map_seed = $4, match_state = $5, \
                  winner_faction_id = $6, win_reason = $7, total_ticks = $8, replay_cid_blake3 = $9, \
                  started_at = to_timestamp($10::bigint), completed_at = to_timestamp($11::bigint) \
-                 WHERE match_id = $1::text::uuid",
+                 WHERE match_id = $1::text::uuid AND ($12::bigint IS NULL OR EXISTS \
+                 (SELECT 1 FROM worlds w WHERE w.world_id = matches.world_id AND w.fencing_token = $12))",
                 &[
                     &uuid_text(&row.match_id),
                     &row.game_mode,
@@ -662,13 +685,15 @@ impl PostgresStore {
                     &row.replay_cid_blake3.as_ref().map(|c| c.as_slice()),
                     &row.started_at_unix_s.map(i),
                     &row.completed_at_unix_s.map(i),
+                    &fencing_token.map(i),
                 ],
             )
             .await
             .map_err(db_err)?;
         if n == 0 {
-            return Err(ApiError::not_found("match_id 不存在"));
+            return Err(crate::transactions::conflict("match_id不存在或宿主fence已失效"));
         }
+        tx.commit().await.map_err(db_err)?;
         Ok(())
     }
 

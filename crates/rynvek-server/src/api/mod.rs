@@ -3,6 +3,7 @@
 
 //! 规范 11.3 HTTP REST / WebSocket 路由表（20 条，路径与方法逐字一致）+ 补充路由 SBOM 下载。
 
+pub mod arena;
 pub mod auth;
 pub mod hub;
 pub mod lab;
@@ -53,6 +54,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/worlds/{world_id}/fork", post(worlds::fork))
         .route("/api/v1/worlds/{world_id}/patches", post(worlds::patches))
         .route("/api/v1/worlds/{world_id}/authoring", get(worlds::authoring))
+        .route("/api/v1/worlds/{world_id}/arena", post(arena::run))
         .route(
             "/api/v1/worlds/{world_id}/authoring/compile-rule",
             post(worlds::compile_authoring_rule),
@@ -61,6 +63,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/matches/queue", post(matches::queue))
         .route("/api/v1/matches/{match_id}", get(matches::get_match))
         .route("/api/v1/matches/{match_id}/replay", get(matches::replay))
+        .route(
+            "/api/v1/matches/{match_id}/playback",
+            post(arena::open_playback).delete(arena::close_owned_playback),
+        )
+        .route(
+            "/api/v1/matches/{match_id}/playback/{cursor}",
+            post(arena::seek).delete(arena::close_playback),
+        )
         .route("/api/v1/rankings/{league}", get(matches::rankings))
         .route("/api/v1/hub/packages", get(hub::search))
         .route("/api/v1/hub/packages/{id}/{ver}", put(hub::publish))

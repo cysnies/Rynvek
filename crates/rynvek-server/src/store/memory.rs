@@ -286,9 +286,23 @@ impl MemoryStore {
     }
 
     pub fn update_match(&self, row: MatchRow) -> StoreResult<()> {
+        self.update_match_guarded(row, None)
+    }
+    pub fn update_match_fenced(&self, row: MatchRow, fencing_token: u64) -> StoreResult<()> {
+        self.update_match_guarded(row, Some(fencing_token))
+    }
+    fn update_match_guarded(&self, row: MatchRow, fencing_token: Option<u64>) -> StoreResult<()> {
         let mut t = self.lock();
-        let slot = t.matches.get_mut(&row.match_id).ok_or_else(|| missing_fk("match_id"))?;
-        *slot = row;
+        let world_id = t
+            .matches
+            .get(&row.match_id)
+            .ok_or_else(|| missing_fk("match_id"))?
+            .world_id;
+        if fencing_token.is_some_and(|token| !t.worlds.get(&world_id).is_some_and(|w| w.fencing_token == token)) {
+            return Err(conflict("旧宿主不得覆盖恢复后的对局状态"));
+        }
+        let match_id = row.match_id;
+        *t.matches.get_mut(&match_id).expect("已校验") = row;
         Ok(())
     }
 
