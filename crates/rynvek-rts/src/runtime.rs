@@ -10,7 +10,7 @@ use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use rynvek_journal::CommitManifest;
 use rynvek_snapshot::{CMIT_TAG, SnapshotReader};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ArenaRuntime {
     world: ArenaWorld,
     world_id: [u8; 16],
@@ -88,7 +88,7 @@ impl ArenaRuntime {
     }
 
     /// 以当前根为前驱，在指定 Tick 的 Phase 01 前边界应用整包操作，并只产生一次修订。
-    /// 克隆候选检查点保证闭包失败时，Tick、状态和修订全部不变；外部持久化另做 CAS。
+    /// 独立内存克隆保证失败回滚；快照只用于持久化/恢复，不在热路径重建地图导航。
     pub fn transact_at<T>(
         &mut self,
         tick: u64,
@@ -98,10 +98,7 @@ impl ArenaRuntime {
             return Err(RynvekErrorCode::SimulationInvariantViolated);
         }
         let previous_root = self.state_root();
-        let checkpoint = self.checkpoint()?;
-        let mut candidate = Self::restore(self.world_id, self.revision, previous_root, &checkpoint.bytes)?;
-        candidate.world.inherit_observers(&self.world);
-        candidate.staged_tick = self.staged_tick;
+        let mut candidate = self.clone();
         while candidate.world.tick < tick.saturating_sub(1) {
             Self::advance_once(&mut candidate.world)?;
         }
@@ -158,14 +155,12 @@ impl ArenaRuntime {
         if self.staged_tick.is_some() || self.world.outcome.is_some() {
             return Err(RynvekErrorCode::SimulationInvariantViolated);
         }
-        let checkpoint = self.checkpoint()?;
-        let mut candidate = Self::restore(self.world_id, self.revision, checkpoint.state_root, &checkpoint.bytes)?;
-        candidate.world.inherit_observers(&self.world);
+        let mut candidate = self.clone();
         candidate.revision = self
             .revision
             .checked_add(1)
             .ok_or(RynvekErrorCode::SimulationInvariantViolated)?;
-        candidate.parent_root = checkpoint.state_root;
+        candidate.parent_root = self.state_root();
         candidate.staged_tick = Some(
             self.world
                 .tick
