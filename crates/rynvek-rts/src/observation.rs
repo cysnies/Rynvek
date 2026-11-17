@@ -46,7 +46,20 @@ pub struct BuildingView {
     pub build_progress: u32,
     pub queue: Vec<UnitKind>,
     pub research: Option<TechId>,
+    /// 当前科研剩余 tick（仅己方可见）。未完成科技不得视为已解锁。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research_remaining_ticks: Option<u32>,
+    /// 定向繁育进度（仅己方可见）。只暴露兵种与剩余 tick，不序列化子代基因组。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breeding: Option<BreedingView>,
     pub beacon: Option<BeaconConfig>,
+}
+
+/// 定向繁育的公开观测投影。故意不含 `BreedJob.child`。
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BreedingView {
+    pub unit: UnitKind,
+    pub remaining_ticks: u32,
 }
 
 /// 资源账本视图
@@ -187,6 +200,15 @@ impl ArenaWorld {
                         Vec::new()
                     },
                     research: if own { b.research.map(|(t, _)| t) } else { None },
+                    research_remaining_ticks: if own { b.research.map(|(_, rem)| rem) } else { None },
+                    breeding: if own {
+                        b.breeding.as_ref().map(|j| BreedingView {
+                            unit: j.unit,
+                            remaining_ticks: j.remaining_ticks,
+                        })
+                    } else {
+                        None
+                    },
                     beacon: (own && b.kind == BuildingKind::SignalBeacon).then_some(b.beacon),
                 }
             })
