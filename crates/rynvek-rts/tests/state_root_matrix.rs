@@ -9,6 +9,7 @@
 //! 2. 顶层 `world.state_hash()` 必然发生变化，杜绝静默状态分叉（Silent Desync）。
 
 use rynvek_core::Q8_8;
+use rynvek_neural::PopulationBrainSlot;
 use rynvek_rts::brain::UnitBrain;
 use rynvek_rts::evolution::FitnessRecord;
 use rynvek_rts::fog::BuildingGhost;
@@ -75,9 +76,9 @@ fn mutation_01_lif_membrane_potential_changes_neural_and_state_root() {
     let striker = mutated
         .units
         .values_mut()
-        .find(|u| matches!(u.brain, UnitBrain::Lif(_)))
+        .find(|u| matches!(u.brain.0, PopulationBrainSlot::Lif(_)))
         .expect("存在 LIF 单位");
-    if let UnitBrain::Lif(b) = &mut striker.brain {
+    if let PopulationBrainSlot::Lif(b) = &mut striker.brain.0 {
         b.membrane_v_q8[0] = Q8_8(b.membrane_v_q8[0].0.wrapping_add(1));
     }
     assert_ne!(
@@ -94,9 +95,9 @@ fn mutation_02_lif_plasticity_delta_w_changes_neural_and_state_root() {
     let striker = mutated
         .units
         .values_mut()
-        .find(|u| matches!(u.brain, UnitBrain::Lif(_)))
+        .find(|u| matches!(u.brain.0, PopulationBrainSlot::Lif(_)))
         .expect("存在 LIF 单位");
-    if let UnitBrain::Lif(b) = &mut striker.brain {
+    if let PopulationBrainSlot::Lif(b) = &mut striker.brain.0 {
         b.weights_delta_q8[0] = b.weights_delta_q8[0].wrapping_add(1);
     }
     assert_ne!(
@@ -113,9 +114,9 @@ fn mutation_03_ctrnn_continuous_state_changes_neural_and_state_root() {
     let carapace = mutated
         .units
         .values_mut()
-        .find(|u| matches!(u.brain, UnitBrain::Ctrnn(_)))
+        .find(|u| matches!(u.brain.0, PopulationBrainSlot::Ctrnn(_)))
         .expect("存在 CTRNN 单位");
-    if let UnitBrain::Ctrnn(b) = &mut carapace.brain {
+    if let PopulationBrainSlot::Ctrnn(b) = &mut carapace.brain.0 {
         b.y_q8[0] = b.y_q8[0].wrapping_add(1);
     }
     assert_ne!(
@@ -132,9 +133,9 @@ fn mutation_04_izhikevich_recovery_u_changes_neural_and_state_root() {
     let leviathan = mutated
         .units
         .values_mut()
-        .find(|u| matches!(u.brain, UnitBrain::Izhikevich(_)))
+        .find(|u| matches!(u.brain.0, PopulationBrainSlot::Izhikevich(_)))
         .expect("存在 Izhikevich 单位");
-    if let UnitBrain::Izhikevich(b) = &mut leviathan.brain {
+    if let PopulationBrainSlot::Izhikevich(b) = &mut leviathan.brain.0 {
         b.u_q8[0] = b.u_q8[0].wrapping_add(1);
     }
     assert_ne!(

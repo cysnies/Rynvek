@@ -14,6 +14,7 @@
 #![deny(unsafe_code)]
 
 pub mod brain;
+pub mod metabolism;
 pub mod models;
 pub mod population;
 pub mod runtime;

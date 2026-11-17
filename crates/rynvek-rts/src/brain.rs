@@ -29,21 +29,16 @@ pub type ModulatorsQ8 = [i16; 4];
 
 /// 单位脑实例
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum UnitBrain {
-    GatedMlp(GatedMlpBrain),
-    Lif(LifBrain),
-    Izhikevich(IzhikevichBrain),
-    Ctrnn(CtrnnBrain),
-}
+pub struct UnitBrain(pub rynvek_neural::PopulationBrainSlot);
 
 impl UnitBrain {
     /// 按基因组表达为脑实例
     pub fn from_genome(g: &Genome) -> Result<Self, RynvekErrorCode> {
         let n = g.n_hid as usize;
-        Ok(match g.model {
+        Ok(Self(match g.model {
             NeuronModelKind::GatedMLP => {
                 // 门控全开：w_gate = 0、b_g = +2.0 → hard_sigmoid = 1.0，即标准两层前馈网络
-                Self::GatedMlp(GatedMlpBrain::new(
+                rynvek_neural::PopulationBrainSlot::GatedMlp(GatedMlpBrain::new(
                     n,
                     g.w_in.clone(),
                     vec![0; n * GENOME_INPUTS],
@@ -60,35 +55,42 @@ impl UnitBrain {
                         w[n * GENOME_INPUTS + h * GENOME_OUTPUTS + k] = g.w_out[k * n + h];
                     }
                 }
-                Self::Lif(LifBrain::new(n, w)?)
+                rynvek_neural::PopulationBrainSlot::Lif(LifBrain::new(n, w)?)
             }
-            NeuronModelKind::Izhikevich => Self::Izhikevich(IzhikevichBrain::new(
+            NeuronModelKind::Izhikevich => rynvek_neural::PopulationBrainSlot::Izhikevich(IzhikevichBrain::new(
                 IzhikevichParams::REGULAR_SPIKING,
                 g.w_in.clone(),
                 NeuralGraphStorage::build(g.storage, n, &g.w_rec)?,
                 g.w_out.clone(),
             )?),
-            NeuronModelKind::CTRNN => Self::Ctrnn(CtrnnBrain::new(
+            NeuronModelKind::CTRNN => rynvek_neural::PopulationBrainSlot::Ctrnn(CtrnnBrain::new(
                 &g.tau_ticks,
                 vec![0; n],
                 g.w_in.clone(),
                 NeuralGraphStorage::build(g.storage, n, &g.w_rec)?,
                 g.w_out.clone(),
             )?),
-        })
+        }))
     }
 
     /// 推进一个 Coupling Epoch，返回平均动作读出（Q8.8 原始值）
     pub fn step_epoch(&mut self, sensory: &[i16; GENOME_INPUTS], m: ModulatorsQ8, plasticity: bool) -> [i16; 6] {
+        self.step_epoch_metered(sensory, m, plasticity).0
+    }
+
+    /// 使用 NeuralPopulationRuntime 同一槽位核计数每个真实子步的发放，不能计读出幅值。
+    pub fn step_epoch_metered(
+        &mut self,
+        sensory: &[i16; GENOME_INPUTS],
+        m: ModulatorsQ8,
+        plasticity: bool,
+    ) -> ([i16; 6], u32) {
         let x = modulated_sensory(sensory, m);
+        let mut spikes = 0;
         let mut acc = [0i32; GENOME_OUTPUTS];
         for _ in 0..BRAIN_STEPS_PER_EPOCH {
-            let y = match self {
-                Self::GatedMlp(b) => b.step(&x),
-                Self::Lif(b) => b.step(&x, m, plasticity),
-                Self::Izhikevich(b) => b.step(&x),
-                Self::Ctrnn(b) => b.step(&x),
-            };
+            let (y, n) = self.0.step_metered(&x, m, plasticity);
+            spikes += n;
             for (a, v) in acc.iter_mut().zip(y) {
                 *a += v.0 as i32;
             }
@@ -97,13 +99,13 @@ impl UnitBrain {
         // 5-HT 抑制攻击倾向
         let serotonin = m[1].max(0) as i32;
         out[action::ATTACK] = (out[action::ATTACK] as i32 - serotonin / 2).clamp(-256, 256) as i16;
-        out
+        (out, spikes)
     }
 
     /// LIF 脑的后天可塑性偏移 δw（鲍德温同化的来源）；其他模型为 `None`
     pub fn plasticity_delta(&self) -> Option<&[i16]> {
-        match self {
-            Self::Lif(b) => Some(&b.weights_delta_q8),
+        match &self.0 {
+            rynvek_neural::PopulationBrainSlot::Lif(b) => Some(&b.weights_delta_q8),
             _ => None,
         }
     }
@@ -111,22 +113,12 @@ impl UnitBrain {
     /// 计算当前脑实例内部全部动态神经状态（含 `GatedMLP.hidden_q8`、`LIF` 膜电位/不应期/脉冲环/可塑性/资格迹、
     /// `Izhikevich` 膜电位/恢复变量/脉冲环、`CTRNN.y_q8`）的确定性状态根哈希
     pub fn state_root(&self) -> Blake3Hash {
-        match self {
-            Self::GatedMlp(b) => b.state_root(),
-            Self::Lif(b) => b.state_root(),
-            Self::Izhikevich(b) => b.state_root(),
-            Self::Ctrnn(b) => b.state_root(),
-        }
+        self.0.state_root()
     }
 
     /// 导出该单位脑的 `NEUR` 快照行
     pub fn to_neur_rows(&self, dense_index: u32) -> Vec<NeurNeuronRow> {
-        match self {
-            Self::GatedMlp(b) => b.to_neur_rows(dense_index),
-            Self::Lif(b) => b.to_neur_rows(dense_index),
-            Self::Izhikevich(b) => b.to_neur_rows(dense_index),
-            Self::Ctrnn(b) => b.to_neur_rows(dense_index),
-        }
+        self.0.to_neur_rows(dense_index)
     }
 
     /// 导出该单位脑的独立 `NEUR` 分块
@@ -138,12 +130,7 @@ impl UnitBrain {
 
     /// 从 `NEUR` 分块恢复单位脑内部动态状态
     pub fn restore_from_neur(&mut self, chunk: &NeurChunk, dense_index: u32) -> Result<(), RynvekErrorCode> {
-        match self {
-            Self::GatedMlp(b) => b.restore_from_neur(chunk, dense_index),
-            Self::Lif(b) => b.restore_from_neur(chunk, dense_index),
-            Self::Izhikevich(b) => b.restore_from_neur(chunk, dense_index),
-            Self::Ctrnn(b) => b.restore_from_neur(chunk, dense_index),
-        }
+        self.0.restore_from_neur(chunk, dense_index)
     }
 }
 

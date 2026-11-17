@@ -7,13 +7,16 @@
 //! - 按模型分簇批处理推进（消除逐个体虚函数分发与缓存抖动）；
 //! - 维护每个个体的代谢能量、累积适应度与脉冲相位，计算群体 Kuramoto 同步序参量（整数定点数）；
 //! - 支持 Coupling Epoch 边界的鲍德温同化（Baldwin Effect，将 LIF 后天可塑性偏移 $\delta w$ 按同化率 $\alpha$ 烙印回先天权重 $W_0$ 并衰减 $\delta w$）；
-//! - 支持全群体 `NEUR` 稀疏神经分块一键导出、无损恢复与 `state_root()` 确定性哈希。
+//! - `NEUR` 仅导出/恢复神经动态态；能量账本需由宿主组件持久化（Arena 使用 ECOL），不能从脑块猜测。
+//! - 群体根V2包含精确能量账本；Arena旧世界不使用该群体根，仍保留原有规范根与推理读出。
 
 use blake3::Hasher;
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_core::fixed::Q8_8;
 use rynvek_core::hash::Blake3Hash;
 use rynvek_snapshot::{NeurChunk, NeurNeuronRow};
+
+use crate::metabolism::{BASE_SPIKE_COST_MICRO, EnergyAccount};
 
 use crate::brain::{LIF_INPUTS, LIF_OUTPUTS, LifBrain};
 use crate::models::{CtrnnBrain, GatedMlpBrain, IzhikevichBrain, MODEL_INPUTS, MODEL_OUTPUTS};
@@ -40,6 +43,23 @@ impl PopulationBrainSlot {
             Self::Izhikevich(b) => b.step(sensory),
             Self::Ctrnn(b) => b.step(sensory),
         }
+    }
+
+    /// 推理与实际发放计数共用同一内核；MLP/CTRNN 不伪造脉冲或基础成本。
+    pub fn step_metered(
+        &mut self,
+        sensory: &[Q8_8; MODEL_INPUTS],
+        modulators_q8: [i16; 4],
+        plasticity_enabled: bool,
+    ) -> ([Q8_8; MODEL_OUTPUTS], u32) {
+        let out = self.step(sensory, modulators_q8, plasticity_enabled);
+        let rings: &[u64] = match self {
+            Self::Lif(b) => &b.spike_ring,
+            Self::Izhikevich(b) => &b.spike_ring,
+            Self::GatedMlp(_) | Self::Ctrnn(_) => &[],
+        };
+        let spikes = rings.iter().filter(|r| **r & 1 != 0).count() as u32;
+        (out, spikes)
     }
 
     pub fn state_root(&self) -> Blake3Hash {
@@ -75,8 +95,8 @@ impl PopulationBrainSlot {
 pub struct PopulationMember {
     pub dense_index: u32,
     pub brain: PopulationBrainSlot,
-    /// 当前代谢能量（毫单位）
-    pub metabolic_energy_milli: i64,
+    /// 精确代谢能量与来源/支出账本（四分之一 micro 单位，不使用动作幅值当成本）
+    pub energy: EnergyAccount,
     /// 累积适应度（毫单位）
     pub fitness_milli: i64,
     /// 最近一次动作读出（6 维 Q8.8）
@@ -111,7 +131,7 @@ impl NeuralPopulationRuntime {
         self.members.push(PopulationMember {
             dense_index,
             brain,
-            metabolic_energy_milli: initial_energy_milli,
+            energy: EnergyAccount::from_milli(initial_energy_milli),
             fitness_milli: 0,
             last_readout: [Q8_8::ZERO; MODEL_OUTPUTS],
         });
@@ -130,10 +150,8 @@ impl NeuralPopulationRuntime {
         }
         let mut readouts = Vec::with_capacity(self.members.len());
         for ((member, sensory), &mods) in self.members.iter_mut().zip(sensory_inputs).zip(modulators_q8) {
-            let out = member.brain.step(sensory, mods, plasticity_enabled);
-            // 动作幅值总和折算基础神经代谢消耗（纯整数毫单位）
-            let activity: i64 = out.iter().map(|v| (v.0 as i64).abs()).sum();
-            member.metabolic_energy_milli = (member.metabolic_energy_milli - (activity / 16).max(1)).max(0);
+            let (out, spikes) = member.brain.step_metered(sensory, mods, plasticity_enabled);
+            member.energy.charge_spikes(spikes, BASE_SPIKE_COST_MICRO);
             member.last_readout = out;
             readouts.push(out);
         }
@@ -210,13 +228,22 @@ impl NeuralPopulationRuntime {
     /// 计算全群体的确定性状态根哈希
     pub fn state_root(&self) -> Blake3Hash {
         let mut h = Hasher::new();
-        h.update(b"RYNVEK_NEURAL_POPULATION_V1");
+        h.update(b"RYNVEK_NEURAL_POPULATION_V2");
         h.update(&self.epochs_completed.to_le_bytes());
         h.update(&(self.members.len() as u32).to_le_bytes());
         for m in &self.members {
             h.update(&m.dense_index.to_le_bytes());
             h.update(&m.brain.state_root().0);
-            h.update(&m.metabolic_energy_milli.to_le_bytes());
+            for q in [
+                m.energy.received_q,
+                m.energy.stored_q,
+                m.energy.dissipated_q,
+                m.energy.exported_q,
+                m.energy.returned_q,
+                m.energy.unfunded_q,
+            ] {
+                h.update(&q.to_le_bytes());
+            }
             h.update(&m.fitness_milli.to_le_bytes());
             for r in m.last_readout {
                 h.update(&r.0.to_le_bytes());
