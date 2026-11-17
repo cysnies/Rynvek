@@ -9,6 +9,8 @@
  * 跨语言一致性由共享夹具 `tests/engine/protocol_messages.json` 双端断言。
  */
 
+import type { FactionObservation } from "@rynvek/client";
+
 /** GPU 使用策略 */
 export type GpuMode = "auto" | "disabled" | "required";
 
@@ -49,6 +51,8 @@ export interface EngineInitOptions {
   /** 32 位十六进制世界 ID（缺省全零） */
   worldId?: string | null;
   gpuMode: GpuMode;
+  /** 远程阵营只读显示，禁止本地 STEP/START。 */
+  arenaFaction?: number;
 }
 
 /** 主线程 → Worker 命令（不含 `ENGINE_INIT`，后者由宿主随画布一起发送） */
@@ -62,6 +66,7 @@ export type EngineCommand =
   | { type: "SET_LAYER_MASK"; mask: number }
   | { type: "SET_HEATMAP_CHANNEL"; channel: FieldChannel }
   | { type: "SIMULATE_DEVICE_LOST" }
+  | { type: "ARENA_OBSERVATION"; worldId: string; observation: FactionObservation }
   | { type: "SHUTDOWN" };
 
 /** `ENGINE_INIT` 消息（`canvas` 为已转移的 OffscreenCanvas） */
@@ -82,6 +87,7 @@ export const ENGINE_COMMAND_TYPES = [
   "SET_LAYER_MASK",
   "SET_HEATMAP_CHANNEL",
   "SIMULATE_DEVICE_LOST",
+  "ARENA_OBSERVATION",
   "SHUTDOWN",
 ] as const;
 

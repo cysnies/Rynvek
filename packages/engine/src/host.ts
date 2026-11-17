@@ -186,6 +186,7 @@ export class EngineHost {
       devicePixelRatio: init.devicePixelRatio,
       worldId: init.worldId ?? null,
       gpuMode: init.gpuMode,
+      ...(init.arenaFaction !== undefined ? { arenaFaction: init.arenaFaction } : {}),
     };
     this.#state = "initializing";
     this.#worker.postMessage(message, [offscreen]);

@@ -97,6 +97,7 @@ impl WorkerHost {
             device_pixel_ratio,
             world_id,
             gpu_mode,
+            arena_faction,
         } = cmd
         else {
             return Err(protocol_error("begin_init 只接受 ENGINE_INIT"));
@@ -122,6 +123,7 @@ impl WorkerHost {
             config: EngineConfig {
                 world_id,
                 gpu_mode: *gpu_mode,
+                arena_faction: *arena_faction,
                 viewport: [*width, *height],
                 ..EngineConfig::default()
             },
@@ -317,6 +319,7 @@ mod tests {
             device_pixel_ratio: 1.0,
             world_id: None,
             gpu_mode: GpuMode::Disabled,
+            arena_faction: None,
         }
     }
 
@@ -329,6 +332,7 @@ mod tests {
             device_pixel_ratio: 1.0,
             world_id: None,
             gpu_mode: GpuMode::Auto,
+            arena_faction: None,
         };
         assert_eq!(h.begin_init(&bad).unwrap_err().code, RynvekErrorCode::DimensionMismatch);
         let bad_id = EngineCommand::EngineInit {
@@ -337,6 +341,7 @@ mod tests {
             device_pixel_ratio: 1.0,
             world_id: Some("xyz".into()),
             gpu_mode: GpuMode::Auto,
+            arena_faction: None,
         };
         assert!(h.begin_init(&bad_id).is_err());
         assert_eq!(h.phase(), HostPhase::AwaitingInit);

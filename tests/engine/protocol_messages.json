@@ -1,7 +1,7 @@
 {
   "$comment": "React 主线程 ⇄ Dedicated Engine Worker 协议的跨语言夹具：rynvek-engine（serde）与 @rynvek/engine（protocol.ts）各自断言逐字段往返一致。ENGINE_INIT 的 canvas 为 OffscreenCanvas，不可 JSON 化，夹具中省略。",
   "commands": [
-    { "type": "ENGINE_INIT", "width": 1280, "height": 720, "devicePixelRatio": 2.0, "worldId": "00112233445566778899aabbccddeeff", "gpuMode": "auto" },
+    { "type": "ENGINE_INIT", "width": 1280, "height": 720, "devicePixelRatio": 2.0, "worldId": "00112233445566778899aabbccddeeff", "gpuMode": "auto", "arenaFaction": 0 },
     { "type": "RESIZE", "width": 640, "height": 360, "devicePixelRatio": 1.5 },
     { "type": "STEP", "ticks": 3 },
     { "type": "START", "tickRate": 30 },
@@ -11,6 +11,7 @@
     { "type": "SET_LAYER_MASK", "mask": 255 },
     { "type": "SET_HEATMAP_CHANNEL", "channel": "signal_a" },
     { "type": "SIMULATE_DEVICE_LOST" },
+    {"type": "ARENA_OBSERVATION", "worldId": "00112233445566778899aabbccddeeff", "observation": {"tick": 42, "faction": 0, "ledger": {"balance": {"biomass": 0, "flux": 0, "neurogel": 0}, "capacity": {"biomass": 0, "flux": 0, "neurogel": 0}, "biomass_harvested_total": 0}, "supply": [0, 0], "techs": [], "genomes": [], "units": [], "buildings": [], "ghosts": [], "visibility": [1, 0, 2, 0], "visibility_width": 2, "score_milli": 0, "pve_wave": null, "outcome": null}},
     { "type": "SHUTDOWN" }
   ],
   "events": [

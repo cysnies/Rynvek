@@ -48,6 +48,9 @@ pub enum EngineCommand {
         world_id: Option<String>,
         #[serde(default)]
         gpu_mode: GpuMode,
+        /// 远程竞技场只读显示：绑定阵营，禁止推进本地演示世界。
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arena_faction: Option<u8>,
     },
     Resize {
         width: u32,
@@ -87,6 +90,11 @@ pub enum EngineCommand {
     },
     /// 故障注入：主动销毁设备以演练 DeviceLost 恢复
     SimulateDeviceLost,
+    /// 服务器已经按阵营裁剪的观察；不是权威世界或本地仿真输入。
+    ArenaObservation {
+        world_id: String,
+        observation: Box<rynvek_rts::observation::FactionObservation>,
+    },
     Shutdown,
 }
 
@@ -200,6 +208,7 @@ mod tests {
                 device_pixel_ratio: 2.0,
                 world_id: None,
                 gpu_mode: GpuMode::Required,
+                arena_faction: None,
             }
         );
         let pick = EngineCommand::from_json(r#"{"type":"PICK_REQUEST","requestId":7,"x":1,"y":2}"#).unwrap();

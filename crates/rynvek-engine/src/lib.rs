@@ -20,6 +20,7 @@ pub mod arena;
 pub mod engine;
 pub mod gpu_field;
 pub mod gpu_neural;
+pub mod observation;
 // 规则内核 GPU 执行器目前只提供阻塞回读（差分测试用），浏览器目标不编译
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_rules;

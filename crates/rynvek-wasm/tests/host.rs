@@ -247,6 +247,7 @@ fn engine_config_from_init_carries_world_id_and_viewport() {
         device_pixel_ratio: 2.0,
         world_id: Some(id.into()),
         gpu_mode: GpuMode::Disabled,
+        arena_faction: None,
     };
     let plan = h.begin_init(&cmd).unwrap();
     assert_eq!(
@@ -259,4 +260,26 @@ fn engine_config_from_init_carries_world_id_and_viewport() {
         }
     );
     assert_eq!(plan.device_pixel_ratio, 2.0);
+}
+
+#[test]
+fn remote_arena_worker_never_advances_a_parallel_simulation() {
+    let mut host = WorkerHost::new();
+    let init = WorkerHost::parse_message(
+        r#"{"type":"ENGINE_INIT","width":256,"height":256,"gpuMode":"disabled","arenaFaction":0}"#,
+    )
+    .unwrap();
+    host.init_native(&init).unwrap();
+    host.drain_events();
+    host.handle_json(r#"{"type":"STEP","ticks":1}"#);
+    assert_eq!(
+        host.engine().unwrap().last_tick(),
+        0,
+        "远程阵营显示宿主不得推进演示世界"
+    );
+    assert!(
+        host.drain_events()
+            .iter()
+            .any(|ev| matches!(ev, EngineEvent::EngineError { .. }))
+    );
 }
