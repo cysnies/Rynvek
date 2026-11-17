@@ -1,0 +1,140 @@
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+
+/** 真实平台 /arena 的临时 Canvas2D 开发显示层；仿真只在服务器的 ArenaRuntime/Actor。
+ * 最终 Dedicated Worker + Rust/wgpu/WebGPU 管线尚待接入，不能把此显示层当作性能验收。
+ */
+import { createArenaApp, type ArenaApp } from "@rynvek/arena";
+import { WebSocketTransport, buildingSpec, rawToFloat, type BuildingKind, type ArenaServerMessage } from "@rynvek/client";
+import { fogAt, project, unproject, viewScale, type Viewport } from "./arena-view.js";
+import "./browser.css";
+
+const mount=document.querySelector<HTMLDivElement>("#app")!;
+mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</span></h1><span id="connection" class="chip">等待开始</span><span class="mode muted">本地 PvE 生存 · 服务器权威 · 非排位</span><button id="start" class="primary">开始本地练习</button></header>
+<main class="layout"><section class="world"><div class="worldbar"><span>SECTOR 42 / <span id="clock">TICK —</span></span><span id="pointer">只读阵营视图</span></div><canvas id="world" tabindex="0" aria-label="Rynvek 战争迷雾地图，左键选择、右键命令"></canvas><div class="metrics"><span class="metric">生物质<b id="biomass">—</b></span><span class="metric">通量<b id="flux">—</b></span><span class="metric">神经胶<b id="neurogel">—</b></span><span class="metric">人口<b id="supply">—</b></span><span class="metric">波次<b id="wave">—</b></span></div></section>
+<aside class="sidebar"><section class="panel"><h2>指挥 / CONTROL</h2><div class="buttons"><button id="select" disabled>全选己方单位</button><button id="home" disabled>主脑居中</button><button id="harvest" disabled>采集 → 点目标</button><button id="move" disabled>移动 → 点目标</button><button disabled title="当前权威协议不提供暂停">暂停未开放</button></div><p id="selection" class="muted">尚未选择</p><p id="intent">开始后，左键点选或拖框；右键移动。黄绿色为营养沼泽，工蜂右键自动采集。</p><p id="outcome" class="outcome"></p></section>
+<section class="panel"><h2>建造 / BUILD</h2><div id="build" class="build"></div><p class="muted">选择建筑后点地图；黄色框仅为落点预览，权限、占地、资源和科技由服务器最终验证。Esc / 右键取消。</p></section>
+<section class="panel"><h2>权威回执 / EVENTS</h2><div id="log" class="log" role="status" aria-live="polite">尚未连接。没有本地随机单位或预演资源。</div><div class="buttons" style="margin-top:12px"><button id="surrender" disabled>结束练习（投降）</button><button id="replay" disabled>下载回放</button></div></section>
+<section class="panel"><h2>操作说明</h2><p>① 开始 → 全选己方单位<br>② 右键附近空地，观察真实位置变化<br>③ 点「采集」再点黄绿地块，观察生物质账本<br>④ 选择「萃取器」放在黄绿地块，或信标放在主脑附近空地；观察资源扣除与施工进度<br>⑤ 在主脑上重复建造会收到实际错误码。</p><p class="muted">滚轮缩放，方向键/WASD 平移，Home 回主脑。黑色未探索、暗色已探索；敌人只来自服务器迷雾裁剪观察。</p></section></aside></main>
+<footer>开发显示层：Canvas2D / 工业像素占位，不是最终 WebGPU。最终方向保留 Rust + wgpu + Dedicated Engine Worker + OffscreenCanvas。<br>此显式回环开发服免输入账号，为每局分配临时能力身份；进程内存储，重启丢失。服务器持续推进，关闭页面不等于暂停。神经生态完整闭环、正式美术和浏览器性能未验收。<a href="/api/v1/meta/source-offer" target="_blank" rel="noopener">源码要约</a></footer>`;
+const el=(id:string):HTMLElement=>document.getElementById(id)!;
+const button=(id:string):HTMLButtonElement=>el(id) as HTMLButtonElement;
+const canvas=el("world") as HTMLCanvasElement;
+const ctx=canvas.getContext("2d")!;
+let arena:ArenaApp|null=null;
+let socket:WebSocket|null=null;
+let session:{token:string;world_id:string;match_id:string;principal_id:string;faction:number}|null=null;
+let connected=false,initialized=false,starting=false;
+let lastNotice:object|null=null;
+let armed:"Move"|"Harvest"|null=null;
+let pointer:[number,number]=[0,0];
+let drag:{x:number;y:number;world:[number,number]}|null=null;
+let logLines:string[]=[];
+const labels:Partial<Record<BuildingKind,string>>={"bld.nexus_core":"主脑","bld.biomass_harvester":"萃取器","bld.signal_beacon":"信标","bld.spawning_vat":"孵化槽","bld.pulse_turret":"防御塔","bld.flux_reactor":"反应堆"};
+const kinds:BuildingKind[]=["bld.biomass_harvester","bld.signal_beacon","bld.spawning_vat","bld.flux_reactor","bld.pulse_turret"];
+for(const kind of kinds){
+  const b=document.createElement("button"),spec=buildingSpec(kind);
+  b.textContent=`${labels[kind]} · 生物质 ${spec.cost.biomass/1000} / 胶 ${spec.cost.neurogel/1000}`;
+  b.disabled=true;b.dataset["game"]="1";
+  b.onclick=()=>{arena?.controller.chooseBuilding(kind);armed=null;el("intent").textContent=`建造 ${labels[kind]}：点击落点（黄色为预览，不代表通过）`;};
+  el("build").append(b);
+}
+function note(value:string):void{logLines=[...logLines,value].slice(-8);el("log").textContent=logLines.join("\n");}
+function controls():void{
+  const active=connected && !arena?.client.observation?.outcome;
+  for(const id of ["select","home","harvest","move","surrender"]) button(id).disabled=!active;
+  for(const b of document.querySelectorAll<HTMLButtonElement>("[data-game]"))b.disabled=!active;
+  button("replay").disabled=!arena?.client.observation?.outcome;
+  button("start").disabled=starting || (connected && !arena?.client.observation?.outcome);
+}
+function view():Viewport{return {...(arena?.ui.camera ?? {x:32,y:32,zoom:1}),width:canvas.clientWidth,height:canvas.clientHeight};}
+function worldPoint(e:PointerEvent|MouseEvent):[number,number]{const r=canvas.getBoundingClientRect();return unproject(view(),e.clientX-r.left,e.clientY-r.top);}
+function display():void{
+  const obs=arena?.client.observation;if(!obs||!arena)return;
+  for(const key of ["biomass","flux","neurogel"] as const)el(key).textContent=(obs.ledger.balance[key]/1000).toFixed(1);
+  el("supply").textContent=obs.supply.join(" / ");el("wave").textContent=String(obs.pve_wave ?? "—");
+  el("clock").textContent=`TICK ${obs.tick}`;
+  const selected=obs.units.filter(u=>arena!.ui.selection.has(u.id));
+  el("selection").textContent=`已选 ${selected.length} 单位${selected.length?` · ${selected.map(u=>`#${u.id}`).join(", ")}`:""}${arena.ui.selectedBuilding!==null?` / 建筑 #${arena.ui.selectedBuilding}`:""}`;
+  el("outcome").textContent=obs.outcome?`终局：${JSON.stringify(obs.outcome)}`:"";
+  if(obs.outcome)el("connection").textContent="已终局 / 可下载回放";
+  if(arena.ui.notices.length){const n=arena.ui.notices.at(-1)!;const text=`拒绝 ${n.code===null?"":`0x${n.code.toString(16)}`} ${n.text}`;if(lastNotice!==n){lastNotice=n;note(text);}}
+  controls();
+}
+async function deadline<T>(pending:Promise<T>,label:string):Promise<T>{
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  try{return await Promise.race([pending,new Promise<never>((_resolve,reject)=>{timer=setTimeout(()=>reject(new Error(`${label}超时，未确认任何成功`)),8000);})]);}
+  finally{clearTimeout(timer);}
+}
+async function start():Promise<void>{
+  starting=true;button("start").disabled=true;el("connection").textContent="创建真实私有 PvE…";
+  try{
+    arena?.dispose();socket?.close();initialized=false;logLines=[];lastNotice=null;
+    // sessionStorage 仅保留本开发服新分配的临时能力，刷新重连而不是悄悄生成无限对局。
+    const saved=sessionStorage.getItem("rynvek.local.practice");
+    if(saved)session=JSON.parse(saved) as typeof session;
+    if(!session || arena?.client.observation?.outcome){
+      const response=await fetch("/api/v1/local/practice",{method:"POST",headers:{"X-Rynvek-Local":"1"}});
+      const body=await response.json() as typeof session & {error?:{message:string}};
+      if(!response.ok)throw new Error(JSON.stringify(body));
+      session=body;sessionStorage.setItem("rynvek.local.practice",JSON.stringify(session));
+    }
+    const info=session!;
+    socket=new WebSocket(`${location.protocol==="https:"?"wss:":"ws:"}//${location.host}/api/v1/worlds/${info.world_id}/stream?format=arena-json`);
+    const ws=socket;
+    await new Promise<void>((resolve,reject)=>{const t=setTimeout(()=>reject(new Error("连接超时")),8000);ws.onopen=()=>{clearTimeout(t);resolve();};ws.onerror=()=>{clearTimeout(t);reject(new Error("连接失败，请检查 Rust 服务"));};});
+    const transport=new WebSocketTransport({
+      send:(raw:string)=>{const message=JSON.parse(raw) as {type:string};ws.send(JSON.stringify(message.type==="hello"?{...message,capability_token:info.token}:message));},
+      close:()=>ws.close(),addEventListener:(_type,listener)=>ws.addEventListener("message",listener),removeEventListener:(_type,listener)=>ws.removeEventListener("message",listener),
+    });
+    arena=createArenaApp(transport,{principalId:info.principal_id,kind:"Human",faction:info.faction});
+    const current=arena;
+    ws.addEventListener("message",e=>{if(typeof e.data!=="string")return;const message=JSON.parse(e.data) as ArenaServerMessage;if(message.type==="ack"&&message.ack)note(`已提交 Tick ${message.tick} · ${message.ack.type}`);});
+    current.client.on(event=>{
+      if(event.type==="observation"){
+        if(!initialized){current.controller.jumpToNexus();current.ui.camera.zoom=1.8;initialized=true;}
+        if(event.observation.outcome)sessionStorage.removeItem("rynvek.local.practice");
+        display();
+      }
+      if(event.type==="error")note(event.error.message);
+    });
+    ws.onclose=()=>{if(socket!==ws)return;connected=false;if(!current.client.observation?.outcome){el("connection").textContent="连接关闭 / 点击开始重连";note("连接已关闭；没有把未确认命令标为成功。");}controls();};
+    await deadline(current.client.connect(),"身份/席位握手");await deadline(current.client.acquireLease("Sovereign"),"控制租约");
+    connected=true;el("connection").textContent="服务器仿真中 / 已获控制租约";note("真实 PvE 已连接，权限租约已确认。初始数据来自服务器。");controls();
+  }catch(error){connected=false;socket?.close();session=null;sessionStorage.removeItem("rynvek.local.practice");el("connection").textContent="启动失败";note(String(error));}
+  finally{starting=false;controls();}
+}
+button("start").onclick=()=>{void start();};
+button("select").onclick=()=>{if(arena?.client.observation){arena.ui.selection=new Set(arena.client.observation.units.filter(u=>u.faction===arena!.client.identity.faction).map(u=>u.id));display();}};
+button("home").onclick=()=>arena?.controller.jumpToNexus();
+for(const [id,order] of [["harvest","Harvest"],["move","Move"]] as const)button(id).onclick=()=>{armed=order;if(arena)arena.ui.buildMode=null;el("intent").textContent=`${order==="Move"?"移动":"采集"}：左键点击目标地块`;};
+button("surrender").onclick=()=>{void arena?.controller.send({type:"surrender"}).then(()=>display());};
+button("replay").onclick=()=>{void(async()=>{try{if(!session)return;const r=await fetch(`/api/v1/matches/${session.match_id}/replay`,{headers:{Authorization:`Bearer ${session.token}`}});if(!r.ok)throw new Error(`回放归档尚未就绪或请求拒绝：${r.status}`);const url=URL.createObjectURL(await r.blob());const a=document.createElement("a");a.href=url;a.download=`${session.match_id}.rreplay`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);note("已下载真实服务器签名回放；此界面未实现回放播放器。");}catch(e){note(String(e));}})();};
+canvas.oncontextmenu=e=>{e.preventDefault();if(!connected)return;const [x,y]=worldPoint(e);armed=null;arena?.router.handlePointer({kind:"click",button:"right",x,y});display();};
+canvas.onpointerdown=e=>{canvas.focus();if(e.button!==0||!connected)return;const r=canvas.getBoundingClientRect();drag={x:e.clientX-r.left,y:e.clientY-r.top,world:worldPoint(e)};canvas.setPointerCapture(e.pointerId);};
+canvas.onpointermove=e=>{pointer=worldPoint(e);el("pointer").textContent=`Tile ${Math.floor(pointer[0])}, ${Math.floor(pointer[1])}${arena?.client.observation?` / 视野 ${fogAt(arena.client.observation,...pointer)}`:""}`;};
+canvas.onpointerup=e=>{if(!drag||!arena)return;const start=drag;drag=null;const point=worldPoint(e);if(armed){void arena.controller.order(armed,point)?.then(()=>display());armed=null;}else if(Math.hypot(point[0]-start.world[0],point[1]-start.world[1])>.5&&!arena.ui.buildMode)arena.router.handlePointer({kind:"drag",button:"left",x:start.world[0],y:start.world[1],x2:point[0],y2:point[1]});else arena.router.handlePointer({kind:"click",button:"left",x:point[0],y:point[1],shift:e.shiftKey});display();};
+canvas.onwheel=e=>{e.preventDefault();if(arena)arena.ui.camera.zoom=Math.min(4,Math.max(.35,arena.ui.camera.zoom*(e.deltaY>0?.85:1.15)));};
+canvas.onkeydown=e=>{if(!arena)return;if(e.key==="Home"){arena.controller.jumpToNexus();e.preventDefault();return;}if(e.key==="Escape")armed=null;if(arena.router.handleKey({key:e.key,ctrlKey:e.ctrlKey,altKey:e.altKey,metaKey:e.metaKey,shiftKey:e.shiftKey}))e.preventDefault();display();};
+const terrainColors=["#27362b","#3b4547","#536c32","#6e3b28","#171d1b"];
+function draw():void{
+  const dpr=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
+  if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle="#070908";ctx.fillRect(0,0,w,h);
+  const obs=arena?.client.observation,terrain=arena?.client.terrain;
+  if(arena&&obs&&terrain){
+    const v=view(),scale=viewScale(v),a=unproject(v,0,h),b=unproject(v,w,0);
+    for(let y=Math.max(0,Math.floor(a[1]));y<Math.min(terrain.height,Math.ceil(b[1]));y++)for(let x=Math.max(0,Math.floor(a[0]));x<Math.min(terrain.width,Math.ceil(b[0]));x++){
+      const fog=fogAt(obs,x,y);if(fog===0)continue;const [sx,sy]=project(v,x,y+1);
+      ctx.globalAlpha=fog===1?1:.32;ctx.fillStyle=terrainColors[terrain.at(x,y)]??"#27362b";ctx.fillRect(sx,sy,scale+.5,scale+.5);
+      if(scale>9){ctx.strokeStyle="#ffffff08";ctx.lineWidth=.5;ctx.strokeRect(sx,sy,scale,scale);}
+    }
+    ctx.globalAlpha=1;
+    for(const building of obs.buildings){const size=buildingSpec(building.kind).footprint,[x,y]=project(v,building.origin[0],building.origin[1]+size);ctx.fillStyle=building.faction===obs.faction?"#3b5040":"#71493b";ctx.fillRect(x+1,y+1,size*scale-2,size*scale-2);ctx.strokeStyle=building.faction===obs.faction?"#a3d65c":"#ff9469";ctx.lineWidth=arena.ui.selectedBuilding===building.id?3:1;ctx.strokeRect(x+2,y+2,size*scale-4,size*scale-4);ctx.fillStyle="#d7e9c7";ctx.font=`${Math.max(9,Math.min(14,scale))}px monospace`;ctx.fillText(labels[building.kind]??building.kind.slice(4),x+4,y+15);if(!building.complete){ctx.fillStyle="#ead686";ctx.fillText(`施工 ${building.build_progress}`,x+3,y+size*scale-5);} }
+    for(const u of obs.units){const [wx,wy]=rawToFloat(u.position),[x,y]=project(v,wx,wy),r=Math.max(3,scale*.35);ctx.fillStyle=u.faction===obs.faction?"#bee78a":"#ff9269";ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y+r);ctx.lineTo(x-r,y+r);ctx.closePath();ctx.fill();if(arena.ui.selection.has(u.id)){ctx.strokeStyle="#e4ff9e";ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y,r+4,0,Math.PI*2);ctx.stroke();}ctx.fillStyle="#253229";ctx.fillRect(x-r,y-r-5,r*2,2);ctx.fillStyle="#a3d65c";ctx.fillRect(x-r,y-r-5,r*2*u.hp_milli/u.max_hp_milli,2);}
+    if(arena.ui.buildMode){const size=buildingSpec(arena.ui.buildMode).footprint,[x,y]=project(v,Math.floor(pointer[0]),Math.floor(pointer[1])+size);ctx.strokeStyle="#ead686";ctx.lineWidth=2;ctx.strokeRect(x,y,size*scale,size*scale);}
+    if(drag){const [x,y]=project(v,...drag.world),[x2,y2]=project(v,...pointer);ctx.strokeStyle="#c8efa0";ctx.strokeRect(x,y,x2-x,y2-y);}
+  }else{ctx.fillStyle="#91a091";ctx.font="16px sans-serif";ctx.textAlign="center";ctx.fillText("开始本地练习，连接真实 ArenaRuntime 世界",w/2,h/2);ctx.textAlign="start";}
+  requestAnimationFrame(draw);
+}
+draw();

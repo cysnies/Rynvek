@@ -36,6 +36,9 @@ importers:
       '@rynvek/arena':
         specifier: workspace:*
         version: link:../../packages/arena
+      '@rynvek/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@rynvek/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -55,6 +58,9 @@ importers:
       typescript:
         specifier: ~5.8.3
         version: 5.8.3
+      vite:
+        specifier: ^7.3.8
+        version: 7.3.8(@types/node@22.20.5)
       vitest:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.5)(jsdom@26.1.0)

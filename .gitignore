@@ -26,3 +26,8 @@ python/rynvek/*.so
 python/rynvek/*.pyd
 # 浸泡测试报告
 /target/soak/
+
+# Web 开发显示层构建产物
+/apps/web-platform/web-dist/
+# 也忽略本机复用依赖的符号链接（目录尾斜杠规则不匹配符号链接）
+node_modules
