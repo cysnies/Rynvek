@@ -64,7 +64,7 @@ export class RemoteStudioSession {
     try{for(let page=0;page<8;page++){
       const r=await this.client.changes(this.view.world_id,this.cursor,signal);
       for(const e of r.patches){if(this.document.allPatches().length>=512&&!this.document.hasPatch(e.patch.patch_id))throw new Error("本地历史已达512补丁，请重新连接清理撤销边界");this.document.integrateCommitted(e.patch,e.revision);count++;}
-      if(JSON.stringify(this.document.allPatches()).length>8*1024*1024)throw new Error("本地创作历史超过8MiB，请重新连接");
+      if(new TextEncoder().encode(JSON.stringify(this.document.allPatches())).byteLength>8*1024*1024)throw new Error("本地创作历史超过8MiB，请重新连接");
       this.cursor=r.to_revision;this.document.acknowledgeRevision(Math.max(this.document.revision,r.to_revision));
       if(r.to_revision>=this.document.revision){this.tick=r.tick;this.stateRoot=r.state_root;}
       more=r.has_more;if(!more)break;
@@ -78,7 +78,7 @@ export class RemoteStudioSession {
     try{
       if(this.document.allPatches().length>=512)throw new Error("本地历史已达512补丁，请重新连接清理撤销边界");
       const edit=make();if(!edit)return null;
-      if(JSON.stringify(this.document.allPatches()).length>8*1024*1024)throw new Error("本地创作历史超过8MiB，请重新连接");
+      if(new TextEncoder().encode(JSON.stringify(this.document.allPatches())).byteLength>8*1024*1024)throw new Error("本地创作历史超过8MiB，请重新连接");
       // 本地CRDT/撤销只在回执后展示为权威；拒绝或网络不确定时整会话失效，禁止假成功。
       const ack=await this.client.apply(this.view.world_id,edit.patch,signal);
       this.document.integrateCommitted(edit.patch,ack.world_revision);
