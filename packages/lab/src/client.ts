@@ -1,19 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/**
- * 路由 17–18 客户端：提交实验并轮询下载 Parquet 结果表。
- *
- * - `17 POST /api/v1/lab/experiments`（`lab.submit`）→ `202` + 实验记录；
- * - `18 GET /api/v1/lab/experiments/{exp_id}/parquet?table=`（`lab.read`）：
- *   产出就绪前返回 `404` / `0x2002 EntityNotFoundOrTombstoned`（消息带状态与进度），
- *   就绪后返回 `application/vnd.apache.parquet`，`ETag` 为 BLAKE3 内容标识，
- *   `x-rynvek-experiment-status` 为实验状态。
- *
- * 失败的实验在路由 18 上同样表现为 `0x2002`，消息中状态为 `failed`；
- * 客户端据此立即停止轮询并抛出 {@link LabApiError}，而不是等到超时。
- */
-
+/** 私有持久Lab作业：显式提交幂等键、结构化状态、代次控制及四表消费。 */
 import { RynvekErrorCode, errorNameOf } from "@rynvek/core";
 
 import { type ExperimentSpec, type VariantSpec, type EcologyContract, toRequestBody } from "./spec.js";
@@ -21,12 +9,14 @@ import { type ExperimentSpec, type VariantSpec, type EcologyContract, toRequestB
 export type LabTable = "runs" | "metrics" | "lineage" | "energy";
 export const LAB_TABLES: readonly LabTable[] = ["runs", "metrics", "lineage", "energy"];
 
-export type ExperimentStatus = "queued" | "running" | "completed" | "failed";
+export type ExperimentStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 /** 服务端实验记录（路由 17 响应体） */
 export interface ExperimentRecord {
   readonly exp_id: string;
-  readonly owner_principal_id: number;
+  readonly owner_principal_id: string;
+  readonly submission_id:string;readonly spec_digest:string;readonly kernel_profile:string;
+  readonly generation:number;readonly attempt:number;readonly lease_expires_at_unix_s:number|null;
   readonly name: string;
   readonly seeds: readonly number[];
   readonly ticks: number;
@@ -132,12 +122,14 @@ export class LabClient {
   }
 
   /** 路由 17：提交实验（先在本地按服务端规则校验） */
-  async submit(spec: ExperimentSpec, signal?:AbortSignal): Promise<ExperimentRecord> {
+  async submit(spec: ExperimentSpec, submissionId:string, signal?:AbortSignal): Promise<ExperimentRecord> {
+    const body={...toRequestBody(spec),submission_id:submissionId};
+    if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(submissionId))throw new Error("submissionId必须是显式UUID；超时后重用同键和原规格");
     const res = await this.#fetch(`${this.#base}/api/v1/lab/experiments`, {
-      ...(signal ? {signal}:{}),
+      ...(signal ? {signal}:{}),cache:"no-store",redirect:"error",credentials:"omit",
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${this.#token}` },
-      body: JSON.stringify(toRequestBody(spec)),
+      body: JSON.stringify(body),
     });
     if (res.status !== 202) throw await this.#error(res);
     return (await res.json()) as ExperimentRecord;
@@ -146,17 +138,29 @@ export class LabClient {
   /** 私有作业状态/进度/四张结果表CID；未知或非所有者均为404。 */
   async getExperiment(expId:string,signal?:AbortSignal):Promise<ExperimentRecord> {
     const res=await this.#fetch(`${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}`,{
-      ...(signal?{signal}:{}),headers:{Authorization:`Bearer ${this.#token}`}
+      ...(signal?{signal}:{}),redirect:"error",credentials:"omit",headers:{Authorization:`Bearer ${this.#token}`},cache:"no-store"
     });
     if(res.status!==200) throw await this.#error(res);
     return await res.json() as ExperimentRecord;
+  }
+
+  /** 服务重启/刷新后从Store重新发现自己的作业；不依赖客户端缓存。 */
+  async listExperiments(offset=0,limit=25,signal?:AbortSignal):Promise<{experiments:ExperimentRecord[];offset:number;limit:number}>{
+    if(!Number.isInteger(offset)||offset<0||offset>512||!Number.isInteger(limit)||limit<1||limit>100)throw new Error("无效作业分页");
+    const res=await this.#fetch(`${this.#base}/api/v1/lab/experiments?offset=${offset}&limit=${limit}`,{...(signal?{signal}:{}),headers:{Authorization:`Bearer ${this.#token}`},cache:"no-store",redirect:"error",credentials:"omit"});
+    if(res.status!==200)throw await this.#error(res);return await res.json() as {experiments:ExperimentRecord[];offset:number;limit:number};
+  }
+  /** 同一operation_id绑定相同动作/代次；不确定结果后原样重试，不生成第二个操作。 */
+  async control(expId:string,op:{operation_id:string;generation:number;action:"cancel"|"retry"},signal?:AbortSignal):Promise<ExperimentRecord>{
+    const res=await this.#fetch(`${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}/control`,{...(signal?{signal}:{}),method:"POST",headers:{Authorization:`Bearer ${this.#token}`,"Content-Type":"application/json"},body:JSON.stringify(op),cache:"no-store",redirect:"error",credentials:"omit"});
+    if(res.status!==200)throw await this.#error(res);return await res.json() as ExperimentRecord;
   }
 
   /** 直接读取同一CAS四表的有界页面；不在浏览器重跑仿真或经浮点解码。 */
   async rows(expId:string,table:LabTable,offset=0,limit=250,signal?:AbortSignal):Promise<LabRows> {
     if(!Number.isSafeInteger(offset)||offset<0||offset>0xffff_ffff||!Number.isInteger(limit)||limit<1||limit>500)throw new Error("无效分页边界");
     const res=await this.#fetch(`${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}/rows?table=${table}&offset=${offset}&limit=${limit}`,{
-      ...(signal?{signal}:{}),headers:{Authorization:`Bearer ${this.#token}`},cache:"no-store"
+      ...(signal?{signal}:{}),redirect:"error",credentials:"omit",headers:{Authorization:`Bearer ${this.#token}`},cache:"no-store"
     });
     if(res.status!==200)throw await this.#error(res);
     const result=await res.json() as LabRows;
@@ -171,8 +175,11 @@ export class LabClient {
 
   /** 路由 18：下载一次；未就绪返回 `{ pending: 消息 }` */
   async tryParquet(expId: string, table: LabTable = "metrics", signal?:AbortSignal): Promise<ParquetTable | { pending: string }> {
+    const record=await this.getExperiment(expId,signal);
+    if(record.status==="queued"||record.status==="running")return {pending:`${record.status} (${record.runs_done}/${record.runs_total} run)`};
+    if(record.status!=="completed")throw new LabApiError(409,0,"LabTerminal",`实验${record.status}：${record.error??"无可下载结果"}`);
     const url = `${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}/parquet?table=${table}`;
-    const res = await this.#fetch(url, { ...(signal?{signal}:{}), cache:"no-store", headers: { Authorization: `Bearer ${this.#token}` } });
+    const res = await this.#fetch(url, { ...(signal?{signal}:{}),redirect:"error",credentials:"omit", cache:"no-store", headers: { Authorization: `Bearer ${this.#token}` } });
     if (res.status === 200) {
       const bytes = new Uint8Array(await res.arrayBuffer());
       if (!isParquet(bytes)) throw new LabApiError(200, 0, "InvalidParquet", "响应体不是 Parquet 文件");
@@ -183,11 +190,7 @@ export class LabClient {
         status: res.headers.get("x-rynvek-experiment-status") ?? "completed",
       };
     }
-    const err = await this.#error(res);
-    if (err.code === RynvekErrorCode.EntityNotFoundOrTombstoned && /`(queued|running)`/.test(err.message)) {
-      return { pending: err.message };
-    }
-    throw err;
+    throw await this.#error(res);
   }
 
   /** 轮询直到结果表就绪（实验失败或实验不存在时立即抛出） */

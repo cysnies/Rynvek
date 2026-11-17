@@ -18,15 +18,21 @@ export function LabWorkspace({fetcher,initialBaseUrl=globalThis.location?.origin
   const [analysis,setAnalysis]=useState<{lineage:LineageRow[];energy:EnergySample[];runs:JsonRow[]}|null>(null);
   const [run,setRun]=useState(0),[sample,setSample]=useState(0),[selected,setSelected]=useState<number|null>(null);
   const [following,setFollowing]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  const [jobs,setJobs]=useState<ExperimentRecord[]>([]),[listOffset,setListOffset]=useState(0);
+  const pending=useRef<{id:string;spec:Parameters<LabClient["submit"]>[0]}|null>(null);
+  const [pendingId,setPendingId]=useState("");
+  const pendingControl=useRef<{id:string;op:Parameters<LabClient["control"]>[1]}|null>(null);
+  const [pendingAction,setPendingAction]=useState("");
+  const forgetPending=()=>{pending.current=null;setPendingId("");pendingControl.current=null;setPendingAction("");};
   const epoch=useRef(0),operation=useRef<AbortController|null>(null);
   useEffect(()=>()=>{epoch.current++;operation.current?.abort();},[]);
   const clear=()=>{setJob(null);setJobId("");setPage(null);setAnalysis(null);setSelected(null);setRun(0);setSample(0);};
-  const disconnect=()=>{epoch.current++;operation.current?.abort();setFollowing(false);setClient(null);setToken("");setServer("");setBusy(false);setError("");clear();};
+  const disconnect=()=>{epoch.current++;operation.current?.abort();setFollowing(false);setClient(null);setToken("");setServer("");setBusy(false);setError("");setJobs([]);setListOffset(0);forgetPending();clear();};
   const connect=()=>{
     try {
       const url=new URL(base);if(!["http:","https:"].includes(url.protocol)||url.username||url.password||url.pathname!=="/"||url.search||url.hash)throw new Error("服务器必须是无凭据/路径/查询的HTTP(S) origin");
       if(!token.trim())throw new Error("需要自己的lab.submit/lab.read权限令牌");
-      epoch.current++;operation.current?.abort();clear();setError("");setFollowing(false);
+      epoch.current++;operation.current?.abort();clear();setJobs([]);setListOffset(0);forgetPending();setError("");setFollowing(false);
       setClient(new LabClient({baseUrl:url.origin,token:token.trim(),...(fetcher?{fetch:fetcher}:{})}));setServer(url.origin);setToken("");
     }catch(e){setError(e instanceof Error?e.message:String(e));}
   };
@@ -38,7 +44,7 @@ export function LabWorkspace({fetcher,initialBaseUrl=globalThis.location?.origin
     finally{if(live())setBusy(false);}
   }
   useEffect(()=>{
-    if(!client||!job||!following||job.status==="completed"||job.status==="failed")return;
+    if(!client||!job||!following||!["queued","running"].includes(job.status))return;
     let stopped=false;let timer:ReturnType<typeof setTimeout>;const controller=new AbortController();const id=job.exp_id;const version=epoch.current;
     const poll=async()=>{
       try{const next=await client.getExperiment(id,controller.signal);if(stopped||epoch.current!==version)return;setJob(next);
@@ -48,8 +54,17 @@ export function LabWorkspace({fetcher,initialBaseUrl=globalThis.location?.origin
     timer=setTimeout(()=>void poll(),1000);return()=>{stopped=true;clearTimeout(timer);controller.abort();};
   },[client,job?.exp_id,job?.status,following]);
   const spec=useMemo(()=>{try{return {value:makeExperiment(draft),error:""};}catch(e){return {value:null,error:e instanceof Error?e.message:String(e)};}},[draft]);
-  const submit=()=>void perform(async(signal,live)=>{if(!client||!spec.value)return;const result=await client.submit(spec.value,signal);if(live()){clear();setJob(result);setJobId(result.exp_id);setFollowing(true);}});
+  const submit=()=>void perform(async(signal,live)=>{if(!client||!spec.value)return;
+    if(!pending.current){pending.current={id:crypto.randomUUID(),spec:spec.value};setPendingId(pending.current.id);}
+    const request=pending.current;const result=await client.submit(request.spec,request.id,signal);
+    if(live()){pending.current=null;setPendingId("");clear();setJob(result);setJobId(result.exp_id);setFollowing(true);}});
   const load=()=>void perform(async(signal,live)=>{if(!client||!jobId.trim())return;const result=await client.getExperiment(jobId.trim(),signal);if(live()){setJob(result);setPage(null);setAnalysis(null);setFollowing(true);}});
+  const discover=(offset=0)=>void perform(async(signal,live)=>{if(!client)return;const result=await client.listExperiments(offset,25,signal);if(live()){setJobs(result.experiments);setListOffset(result.offset);}});
+  const control=(action:"cancel"|"retry")=>void perform(async(signal,live)=>{
+    if(!client||!job)return;if(!pendingControl.current){pendingControl.current={id:job.exp_id,op:{operation_id:crypto.randomUUID(),generation:job.generation,action}};setPendingAction(action);}
+    const request=pendingControl.current;const result=await client.control(request.id,request.op,signal);
+    if(live()){pendingControl.current=null;setPendingAction("");setJob(result);setJobId(result.exp_id);setPage(null);setAnalysis(null);setFollowing(true);}
+  });
   const loadPage=(t:LabTable,offset=0)=>{setTable(t);setPage(null);void perform(async(signal,live)=>{if(!client||!job)return;const result=await client.rows(job.exp_id,t,offset,100,signal);if(live()){setTable(t);setPage(result);}});};
   const analyze=()=>void perform(async(signal,live)=>{
     if(!client||!job)return;
@@ -78,6 +93,19 @@ export function LabWorkspace({fetcher,initialBaseUrl=globalThis.location?.origin
       {!client?<><label>权限令牌<input aria-label="权限令牌" type="password" autoComplete="off" value={token} onChange={e=>setToken(e.target.value)} /></label><Button onClick={connect}>使用此令牌</Button></>:<><span>凭据仅在内存：{server}（权限由服务器核验）</span><Button onClick={disconnect}>断开并清空结果</Button></>}
     </div><p className="lab-hint">需要自己的lab.submit/lab.read；不会自动创建身份、把令牌放进URL/存储或公开研究结果。</p></Panel>
     <div role="alert" className="lab-error">{error}</div>
+    <Panel title="持久作业发现 / 恢复"><div className="lab-pad">
+      <Button disabled={!client||busy} onClick={()=>discover(0)}>发现我的持久作业</Button>
+      <Button disabled={!client||busy||listOffset===0} onClick={()=>discover(Math.max(0,listOffset-25))}>上一页作业</Button>
+      <Button disabled={!client||busy||jobs.length<25||listOffset+25>512} onClick={()=>discover(listOffset+25)}>下一页作业</Button>
+      <ul>{jobs.map(j=><li key={j.exp_id}><Button disabled={busy} onClick={()=>{epoch.current++;operation.current?.abort();setFollowing(false);clear();setJob(j);setJobId(j.exp_id);setFollowing(true);}}>{j.name} · {j.status} · {j.runs_done}/{j.runs_total} · {j.exp_id}</Button></li>)}</ul>
+      <p>断开/刷新不会取消服务端作业。重新连接后点发现，再载入状态；取消撤销租约，计算在Tick边界协作停止。恢复复用已完成run，未完成run从种子重算，不是Tick快照或PG多机灾备。</p>
+      {pendingId?<p>提交结果未对账：{pendingId}，重试固定原规格；改表单不会改这个请求。先发现/对账，勿盲目新建。<Button disabled={busy} onClick={()=>{pending.current=null;setPendingId("");}}>显式放弃本地提交键（不取消服务端）</Button></p>:null}
+      {job?<div><p>代次 {job.generation} · 认领 {job.attempt} · 租约到期 {job.lease_expires_at_unix_s??"无"} · 检查点 {job.runs_done}/{job.runs_total}</p>
+        <Button disabled={busy||!!pendingAction||!["queued","running"].includes(job.status)} onClick={()=>control("cancel")}>取消此作业</Button>
+        <Button disabled={busy||!!pendingAction||!["failed","cancelled"].includes(job.status)} onClick={()=>control("retry")}>显式重试此作业</Button>
+        {pendingAction?<><p>待对账操作：{pendingControl.current?.id} / generation {pendingControl.current?.op.generation}，原请求只作用于此作业。</p><Button disabled={busy} onClick={()=>control(pendingAction as "cancel"|"retry")}>原键对账上次操作</Button><Button disabled={busy} onClick={()=>{pendingControl.current=null;setPendingAction("");}}>显式放弃本地操作键（不更改服务端）</Button></>:null}
+      </div>:null}
+    </div></Panel>
     <Panel title="实验设计 / W3复制扫描"><div className="lab-pad">
       <div className="lab-controls"><label>实验名<input value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})}/></label>
       <label>种子（逗号）<input aria-label="实验种子" value={draft.seeds} onChange={e=>setDraft({...draft,seeds:e.target.value})}/></label>
@@ -86,7 +114,7 @@ export function LabWorkspace({fetcher,initialBaseUrl=globalThis.location?.origin
       <label>玩家<select value={draft.players} onChange={e=>setDraft({...draft,players:Number(e.target.value)})}><option value={1}>1</option><option value={2}>2</option></select></label>
       <label>控制器<select value={draft.policy} onChange={e=>setDraft({...draft,policy:e.target.value as LabDraft["policy"]})}><option value="ecology">合法采集/建槽，不训练</option><option value="economy">经济/防守脚本</option><option value="idle">不下命令</option></select></label></div>
       <div className="lab-scroll"><table><caption>参数为可编辑实验建议，不是规范冻结平衡；零成本明确关闭该项，未配置角色不称已预算化。</caption><thead><tr><th>配置角色</th>{numberFields.map(([k,label])=><th key={k}>{label}</th>)}<th>自然复制</th></tr></thead><tbody>{ROLE_KINDS.map(kind=><tr key={kind}><th><label><input type="checkbox" checked={draft.roles[kind].enabled} onChange={e=>setDraft(d=>({...d,roles:{...d.roles,[kind]:{...d.roles[kind],enabled:e.target.checked}}}))}/>{kind}</label></th>{numberFields.map(([key,label])=><td key={key}><input aria-label={`${kind} ${label}`} type="number" min={0} value={draft.roles[kind].rule[key]} disabled={!draft.roles[kind].enabled} onChange={e=>patchRole(kind,{[key]:Number(e.target.value)})}/></td>)}<td><input aria-label={`${kind}自然复制`} type="checkbox" checked={draft.roles[kind].rule.natural_reproduction} disabled={!draft.roles[kind].enabled} onChange={e=>patchRole(kind,{natural_reproduction:e.target.checked})}/></td></tr>)}</tbody></table></div>
-      <div className="lab-controls"><label>自然复制突变率扫描‰（逗号）<input aria-label="突变率扫描" value={draft.rates} onChange={e=>setDraft({...draft,rates:e.target.value})}/></label><label><input type="checkbox" checked={draft.ablation} onChange={e=>setDraft({...draft,ablation:e.target.checked})}/>增加0‰复制突变消融</label><Button variant="primary" disabled={!client||busy||!spec.value} onClick={submit}>提交真实实验</Button></div>
+      <div className="lab-controls"><label>自然复制突变率扫描‰（逗号）<input aria-label="突变率扫描" value={draft.rates} onChange={e=>setDraft({...draft,rates:e.target.value})}/></label><label><input type="checkbox" checked={draft.ablation} onChange={e=>setDraft({...draft,ablation:e.target.checked})}/>增加0‰复制突变消融</label><Button variant="primary" disabled={!client||busy||!spec.value} onClick={submit}>{pendingId?"原键对账重试提交":"提交真实实验"}</Button></div>
       <p className="lab-hint">扫描覆盖启用自然复制角色的突变率；不是人工适应度。脚本控制不等于自主觅食，当前出生仍需要原RTS人口/设施。指纹含slug/代数，不是遗传距离。</p>
       {spec.error?<p className="lab-error">{spec.error}</p>:<details><summary>将提交的当前权威规格（{(spec.value?.variants?.length??1)*draft.seeds.split(",").length} runs）</summary><pre>{JSON.stringify(spec.value,null,2)}</pre></details>}
     </div></Panel>
