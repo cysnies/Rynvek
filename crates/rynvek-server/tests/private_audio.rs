@@ -6,17 +6,20 @@ use rynvek_server::{audio_package as audio, client, ids::hex};
 use rynvek_world::package::{PackageInput, PackageInputEntry, PackageKind, write_package};
 use serde_json::{Value, json};
 fn pack(manifest: Value, recipes: Value) -> Vec<u8> {
+    pack_samples(manifest, recipes, Vec::new())
+}
+fn pack_samples(manifest: Value, recipes: Value, samples: Vec<Vec<u8>>) -> Vec<u8> {
     write_package(&PackageInput {
         kind: PackageKind::Rpack,
         id: "owner.audio-test".into(),
         version: "1.0.0".into(),
         name: "有界自有配方".into(),
         license: "CC0-1.0".into(),
-        engine_compat: "rynvek-audio-recipes/1".into(),
+        engine_compat: "rynvek-audio-pcm16/2".into(),
         entries: [
             (
                 "audio.json",
-                json!({"schema":"rynvek.audio-pack.v1","runtime":"procedural-recipes/1","role":"soundpack"}),
+                json!({"schema":"rynvek.audio-pack.v2","runtime":"pcm16-recipes/2","role":"soundpack"}),
             ),
             ("manifest.json", manifest),
             ("recipes.json", recipes),
@@ -29,6 +32,12 @@ fn pack(manifest: Value, recipes: Value) -> Vec<u8> {
             media_type: "application/json".into(),
             data: serde_json::to_vec(&v).unwrap(),
         })
+        .chain(samples.into_iter().map(|data| PackageInputEntry {
+            path: format!("samples/{}.wav", hex(blake3::hash(&data).as_bytes())),
+            kind: "data".into(),
+            media_type: "application/octet-stream".into(),
+            data,
+        }))
         .collect(),
     })
     .unwrap()
@@ -68,7 +77,7 @@ fn bounded_data_profile_rejects_code_urls_resources_bus_escape_and_corruption() 
     let mut corrupt = valid.clone();
     *corrupt.last_mut().unwrap() ^= 1;
     assert!(audio::parse(&corrupt).is_err());
-    assert!(audio::parse(&vec![0; 65537]).is_err());
+    assert!(audio::parse(&vec![0; 524289]).is_err());
     assert_ne!(
         audio::signing_message(42, "owner.audio-test", "1.0.0", &valid),
         rynvek_server::agent_package::signing_message(42, "owner.audio-test", "1.0.0", &valid)
@@ -152,7 +161,9 @@ async fn signed_sdk_private_discovery_dependencies_and_actual_arena_audio_consum
     .unwrap();
     driver.abort();
     let _ = driver.await;
-    assert_eq!(result["actualOscHz"], 733);
+    assert_eq!(result["sampleFrames"], 1280);
+    assert_eq!(result["sampleRate"], 16000);
+    assert_eq!(result["actualPan"], 0.25);
     assert_eq!(result["ack"], "building_placed");
     assert_eq!(result["libraryRevocationEnforced"], true);
     let path = "/api/v1/private-hub/audio/owner.audio-main/1.0.0";
@@ -211,4 +222,41 @@ async fn signed_sdk_private_discovery_dependencies_and_actual_arena_audio_consum
     let response=client::send_json("PUT",&format!("{base}/api/v1/private-hub/audio/owner.audio-test/1.0.0"),Some(&alice.token),&json!({"artifact_b64":base64::Engine::encode(&base64::engine::general_purpose::STANDARD,&bytes),"signature":signature})).await.unwrap();
     assert_ne!(response.status, 201);
     server.shutdown().await;
+}
+
+#[test]
+fn pcm_profile_rejects_malformed_compressed_stereo_chunks_and_missing_credits() {
+    let mut wav = vec![0u8; 76];
+    wav[..4].copy_from_slice(b"RIFF");
+    wav[4..8].copy_from_slice(&68u32.to_le_bytes());
+    wav[8..16].copy_from_slice(b"WAVEfmt ");
+    wav[16..20].copy_from_slice(&16u32.to_le_bytes());
+    wav[20..22].copy_from_slice(&1u16.to_le_bytes());
+    wav[22..24].copy_from_slice(&1u16.to_le_bytes());
+    wav[24..28].copy_from_slice(&8000u32.to_le_bytes());
+    wav[28..32].copy_from_slice(&16000u32.to_le_bytes());
+    wav[32..34].copy_from_slice(&2u16.to_le_bytes());
+    wav[34..36].copy_from_slice(&16u16.to_le_bytes());
+    wav[36..40].copy_from_slice(b"data");
+    wav[40..44].copy_from_slice(&32u32.to_le_bytes());
+    let path = format!("samples/{}.wav", hex(blake3::hash(&wav).as_bytes()));
+    let event = json!({"status":"asset","bus":"sfx_world","src":path,"license":"CC0-1.0"});
+    let manifest = json!({"schema":"rynvek.audio-manifest.v1","events":{"building.placed":event}});
+    let parsed = audio::parse(&pack_samples(manifest.clone(), json!({}), vec![wav.clone()])).unwrap();
+    assert_eq!(parsed.samples[&path], wav);
+    assert_eq!(audio::pcm_frames(&wav).unwrap(), 16);
+    for (offset, value) in [(20, 3), (22, 2), (34, 32), (40, 255), (4, 0), (16, 18)] {
+        let mut bad = wav.clone();
+        bad[offset] = value;
+        assert!(audio::pcm_frames(&bad).is_err());
+        assert!(audio::parse(&pack_samples(manifest.clone(), json!({}), vec![bad])).is_err());
+    }
+    let mut extra = wav.clone();
+    extra.extend_from_slice(b"JUNK0000");
+    assert!(audio::pcm_frames(&extra).is_err());
+    let mut by = manifest.clone();
+    by["events"]["building.placed"]["license"] = json!("CC-BY-4.0");
+    assert!(audio::parse(&pack_samples(by.clone(), json!({}), vec![wav.clone()])).is_err());
+    by["events"]["building.placed"]["credit"] = json!("self generated test");
+    assert!(audio::parse(&pack_samples(by, json!({}), vec![wav])).is_ok());
 }

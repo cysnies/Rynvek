@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Signed, private procedural sound banks: bounded data only, never JS/codecs/URLs.
+//! Signed private PCM16/procedural banks: bounded data, no JS/platform codecs/URLs.
 use crate::{
     agent_package::{AgentDependency, AgentLock, credential_free},
     app::AppState,
@@ -12,7 +12,7 @@ use rynvek_world::package::{PackageKind, read_package};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-pub const MAX_ARTIFACT: usize = 64 << 10;
+pub const MAX_ARTIFACT: usize = 512 << 10;
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
@@ -28,6 +28,7 @@ pub struct AudioPackage {
     pub manifest: Value,
     pub recipes: Value,
     pub lock: AgentLock,
+    pub samples: BTreeMap<String, Vec<u8>>,
 }
 pub fn signing_message(owner: u64, id: &str, version: &str, bytes: &[u8]) -> Vec<u8> {
     let mut m = format!("rynvek-private-audio/1\0{owner}\0{id}\0{version}\0").into_bytes();
@@ -70,6 +71,38 @@ pub fn bus(id: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+/// Canonical uncompressed PCM16 mono RIFF only; no platform codecs or metadata chunks.
+pub fn pcm_frames(b: &[u8]) -> ApiResult<usize> {
+    if b.len() < 46 || b.len() > 192_044 {
+        return Err(reject("PCM尺寸越界"));
+    }
+    let u16at = |i| u16::from_le_bytes(b[i..i + 2].try_into().unwrap());
+    let u32at = |i| u32::from_le_bytes(b[i..i + 4].try_into().unwrap());
+    let rate = u32at(24);
+    if &b[..4] != b"RIFF"
+        || &b[8..16] != b"WAVEfmt "
+        || &b[36..40] != b"data"
+        || u32at(4) as usize != b.len() - 8
+        || u32at(16) != 16
+        || u16at(20) != 1
+        || u16at(22) != 1
+        || ![8000, 16000, 22050, 24000, 44100, 48000].contains(&rate)
+        || u32at(28) != rate * 2
+        || u16at(32) != 2
+        || u16at(34) != 16
+        || u32at(40) as usize != b.len() - 44
+        || (b.len() - 44) % 2 != 0
+        || (b.len() - 44) / 2 > rate as usize * 2
+    {
+        return Err(reject("只支持最多2秒规范PCM16 mono WAV，无额外块"));
+    }
+    Ok((b.len() - 44) / 2)
+}
+fn sample_path(path: &str) -> bool {
+    path.strip_prefix("samples/")
+        .and_then(|s| s.strip_suffix(".wav"))
+        .is_some_and(|s| parse_hex::<32>(s).is_some())
+}
 pub fn validate_manifest(v: &Value) -> ApiResult<()> {
     obj(v, &["schema", "events"])?;
     if v["schema"] != "rynvek.audio-manifest.v1" {
@@ -80,9 +113,36 @@ pub fn validate_manifest(v: &Value) -> ApiResult<()> {
         return Err(reject("最多24类既有音频事件"));
     }
     for (id, e) in events {
-        obj(e, &["status", "bus", "gain", "cooldown_ms", "max_voices"])?;
-        if e["status"] != "placeholder" || e["bus"].as_str() != bus(id) || bus(id).is_none() {
-            return Err(reject("当前音频制品仅允许规范程序化事件及其原总线"));
+        obj(
+            e,
+            &[
+                "status",
+                "bus",
+                "gain",
+                "cooldown_ms",
+                "max_voices",
+                "src",
+                "license",
+                "credit",
+            ],
+        )?;
+        if !["placeholder", "asset"].contains(&e["status"].as_str().unwrap_or(""))
+            || e["bus"].as_str() != bus(id)
+            || bus(id).is_none()
+        {
+            return Err(reject("音频制品仅允许规范事件及其原总线"));
+        }
+        if e["status"] == "asset" {
+            if !e["src"].as_str().is_some_and(sample_path)
+                || !["CC0-1.0", "CC-BY-4.0"].contains(&e["license"].as_str().unwrap_or(""))
+                || e.get("credit")
+                    .is_some_and(|c| c.as_str().is_none_or(|s| s.trim().is_empty() || s.len() > 256))
+                || (e["license"] == "CC-BY-4.0" && e.get("credit").is_none())
+            {
+                return Err(reject("采样路径/许可证/署名非法"));
+            }
+        } else if ["src", "license", "credit"].iter().any(|k| e.get(k).is_some()) {
+            return Err(reject("占位事件不可含媒体字段"));
         }
         for (k, lo, hi, int) in [
             ("gain", 0., 1., false),
@@ -145,16 +205,16 @@ pub fn validate_recipes(v: &Value) -> ApiResult<()> {
 }
 pub fn parse(bytes: &[u8]) -> ApiResult<AudioPackage> {
     if bytes.is_empty() || bytes.len() > MAX_ARTIFACT {
-        return Err(reject("音频制品必须1..64KiB"));
+        return Err(reject("音频制品必须1..512KiB"));
     }
     let p = read_package(bytes, Some(PackageKind::Rpack)).map_err(|e| ApiError::new(e.code, e.detail))?;
     if p.manifest.id.len() > 128
         || p.manifest.version.len() > 32
         || p.manifest.name.len() > 128
-        || p.manifest.engine_compat != "rynvek-audio-recipes/1"
-        || p.manifest.entries.len() != 4
+        || p.manifest.engine_compat != "rynvek-audio-pcm16/2"
+        || !(4..=12).contains(&p.manifest.entries.len())
     {
-        return Err(reject("须为当前audio-recipes/1四文件RYPK"));
+        return Err(reject("须为当前audio-pcm16/2数据RYPK"));
     }
     for path in ["audio.json", "manifest.json", "recipes.json", "dependencies.lock"] {
         if !p
@@ -163,18 +223,38 @@ pub fn parse(bytes: &[u8]) -> ApiResult<AudioPackage> {
             .iter()
             .any(|e| e.path == path && e.kind == "data" && e.media_type == "application/json")
         {
-            return Err(reject("音频制品只允许四个规范JSON文件，无源码/URL/媒体解码"));
+            return Err(reject("音频制品须含四个规范JSON，仅另允许受限PCM采样"));
         }
     }
     credential_free(&serde_json::to_string(&p.manifest).unwrap())?;
-    for data in p.files.values() {
+    let mut samples = BTreeMap::new();
+    let mut frames = 0;
+    for entry in &p.manifest.entries {
+        let data = &p.files[&entry.path];
+        if sample_path(&entry.path) {
+            if entry.kind != "data"
+                || entry.media_type != "application/octet-stream"
+                || entry.path != format!("samples/{}.wav", hex(blake3::hash(data).as_bytes()))
+            {
+                return Err(reject("采样类型/内容地址不符"));
+            }
+            frames += pcm_frames(data)?;
+            if samples.len() >= 8 || frames > 192_000 {
+                return Err(reject("采样帧数/数量超限"));
+            }
+            samples.insert(entry.path.clone(), data.clone());
+            continue;
+        }
+        if !["audio.json", "manifest.json", "recipes.json", "dependencies.lock"].contains(&entry.path.as_str()) {
+            return Err(reject("不允许额外条目"));
+        }
         let s = std::str::from_utf8(data).map_err(|_| reject("音频数据须为UTF8"))?;
         credential_free(s)?;
     }
     let profile: Profile =
         serde_json::from_slice(p.file("audio.json").unwrap()).map_err(|_| reject("音频profile非法"))?;
-    if profile.schema != "rynvek.audio-pack.v1"
-        || profile.runtime != "procedural-recipes/1"
+    if profile.schema != "rynvek.audio-pack.v2"
+        || profile.runtime != "pcm16-recipes/2"
         || !["soundpack", "library"].contains(&profile.role.as_str())
     {
         return Err(reject("不支持的音频profile"));
@@ -208,6 +288,7 @@ pub fn parse(bytes: &[u8]) -> ApiResult<AudioPackage> {
         manifest,
         recipes,
         lock,
+        samples,
     })
 }
 pub fn load_artifact(app: &AppState, row: &PrivateArtifactRow) -> ApiResult<Vec<u8>> {
@@ -235,6 +316,7 @@ pub struct ResolvedAudio {
     pub pins: Vec<PrivateArtifactRow>,
     pub manifest: Value,
     pub recipes: Value,
+    pub samples: BTreeMap<String, Vec<u8>>,
 }
 // Bounded DFS; postorder + lock order, then root wins. Diamond nodes applied once.
 pub async fn resolve(app: &AppState, owner: u64, root: AudioPackage) -> ApiResult<ResolvedAudio> {
@@ -246,9 +328,24 @@ pub async fn resolve(app: &AppState, owner: u64, root: AudioPackage) -> ApiResul
     let mut events = serde_json::Map::new();
     let mut recipes = serde_json::Map::new();
     let mut total = 0;
+    let mut samples = BTreeMap::new();
     while let Some((p, depth, exit)) = todo.pop() {
         let key = format!("{}@{}", p.id, p.version);
         if exit {
+            for (key, bytes) in &p.samples {
+                samples.insert(key.clone(), bytes.clone());
+            }
+            if samples.len() > 8
+                || samples
+                    .values()
+                    .map(|b| pcm_frames(b))
+                    .collect::<ApiResult<Vec<_>>>()?
+                    .iter()
+                    .sum::<usize>()
+                    > 192_000
+            {
+                return Err(reject("解析后采样资源超限"));
+            }
             path.remove(&key);
             if !done.insert(key) {
                 continue;
@@ -297,7 +394,7 @@ pub async fn resolve(app: &AppState, owner: u64, root: AudioPackage) -> ApiResul
                 .any(|p: &PrivateArtifactRow| p.package_id == d.id && p.version == d.version)
             {
                 total += bytes.len();
-                if pins.len() >= 8 || total > 256 << 10 {
+                if pins.len() >= 8 || total > 4 << 20 {
                     return Err(reject("音频依赖图资源超限"));
                 }
                 pins.push(row);
@@ -305,8 +402,14 @@ pub async fn resolve(app: &AppState, owner: u64, root: AudioPackage) -> ApiResul
             todo.push((child, depth + 1, false));
         }
     }
+    for event in events.values() {
+        if event["status"] == "asset" && !event["src"].as_str().is_some_and(|path| samples.contains_key(path)) {
+            return Err(reject("精确依赖图缺少采样"));
+        }
+    }
     Ok(ResolvedAudio {
         pins,
+        samples,
         manifest: json!({"schema":"rynvek.audio-manifest.v1","events":events}),
         recipes: Value::Object(recipes),
     })

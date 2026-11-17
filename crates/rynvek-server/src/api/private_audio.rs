@@ -52,7 +52,7 @@ pub async fn list(State(app): State<AppState>, headers: HeaderMap) -> ApiResult<
     let subject = app.require(&headers, CapabilityScope::WorldRead).await?;
     let rows = app.store().private_audios(subject.principal_id).await?;
     Ok(private(
-        json!({"packages":rows.iter().map(metadata).collect::<Vec<_>>(),"visibility":"Private"}),
+        json!({"packages":rows.iter().filter(|r|r.profile["schema"]=="rynvek.audio-pack.v2" && r.profile["runtime"]=="pcm16-recipes/2").map(metadata).collect::<Vec<_>>(),"visibility":"Private"}),
     ))
 }
 pub async fn get(
@@ -76,7 +76,7 @@ pub async fn publish(
     body: Bytes,
 ) -> ApiResult<Response> {
     let subject = app.require(&headers, CapabilityScope::HubPublish).await?;
-    if body.len() > 128 << 10 {
+    if body.len() > 768 << 10 {
         return Err(agent::reject("音频上传请求超过128KiB"));
     }
     let req: Publish = super::parse_json(&body)?;
@@ -120,7 +120,7 @@ pub async fn publish(
     let resolved = agent::resolve(&app, subject.principal_id, package).await?;
     let pins = resolved.pins.clone();
     let _permit = _permit;
-    let report = json!({"trust_level":3,"profile":"procedural-recipes/1","code":false,"network":false,"media_decoders":false,"recipe_events":resolved.recipes.as_object().unwrap().len(),"manifest_events":resolved.manifest["events"].as_object().unwrap().len()});
+    let report = json!({"trust_level":3,"profile":"pcm16-recipes/2","code":false,"network":false,"arbitrary_media_decoders":false,"platform_codecs":false,"bounded_pcm16":true,"sample_count":resolved.samples.len(),"recipe_events":resolved.recipes.as_object().unwrap().len(),"manifest_events":resolved.manifest["events"].as_object().unwrap().len()});
     app.require(&headers, CapabilityScope::HubPublish).await?;
     let cid = app.inner.world_snapshots.put(&bytes)?;
     let row = PrivateArtifactRow {
@@ -205,6 +205,6 @@ pub async fn resolved(
     unchanged(&app, &root, &resolved.pins).await?;
     app.require(&headers, CapabilityScope::WorldRead).await?;
     Ok(private(
-        json!({"root":metadata(&root),"manifest":resolved.manifest,"recipes":resolved.recipes,"visibility":"Private"}),
+        json!({"root":metadata(&root),"manifest":resolved.manifest,"recipes":resolved.recipes,"samples":resolved.samples.iter().map(|(k,v)|(k,base64::engine::general_purpose::STANDARD.encode(v))).collect::<std::collections::BTreeMap<_,_>>(),"visibility":"Private"}),
     ))
 }
