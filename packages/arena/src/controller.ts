@@ -54,8 +54,8 @@ export class ArenaController {
     on("global.toggle_minimap", () => (ui.minimapVisible = !ui.minimapVisible));
     on("global.toggle_neural_overlay", () => (ui.neuralOverlay = !ui.neuralOverlay));
     on("global.toggle_field_overlay", () => (ui.fieldOverlay = !ui.fieldOverlay));
-    on("camera.pan_up", () => this.pan(0, CAMERA_PAN_TILES));
-    on("camera.pan_down", () => this.pan(0, -CAMERA_PAN_TILES));
+    on("camera.pan_up", () => this.pan(0, (ui.camera.yDown ? -1 : 1) * CAMERA_PAN_TILES));
+    on("camera.pan_down", () => this.pan(0, (ui.camera.yDown ? 1 : -1) * CAMERA_PAN_TILES));
     on("camera.pan_left", () => this.pan(-CAMERA_PAN_TILES, 0));
     on("camera.pan_right", () => this.pan(CAMERA_PAN_TILES, 0));
     on("camera.zoom_in", () => this.zoom(2));

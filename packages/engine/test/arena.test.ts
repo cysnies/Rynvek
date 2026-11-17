@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 import { readFileSync } from "node:fs";
-import { ArenaClient, MemoryTransport, type FactionObservation } from "@rynvek/client";
+import { ArenaClient, MemoryTransport, type FactionObservation, type ArenaServerMessage } from "@rynvek/client";
 import { describe, expect, it } from "vitest";
 import { createArenaRenderHost } from "../src/index.js";
 import { FakeCanvas, FakeWorker } from "./fakes.js";
@@ -67,4 +67,20 @@ describe("真实客户端观察到只读 Worker 桥", () => {
       { observation: null, on: () => () => {} }, { ...INIT, gpuMode: "disabled", onError: () => {} })).toThrow(/要求 GPU/);
     expect(canvas.transfers).toBe(0);
   });
+});
+
+it("真实录制welcome经SDK解码后只转发一次地图，顺序先于观察", () => {
+  const recording = JSON.parse(readFileSync(new URL("../../../tests/arena/opening.transcript.json", import.meta.url), "utf8")) as {recv: {to: string; message: ArenaServerMessage}[]}[];
+  const messages = recording.flatMap(x => x.recv).filter(x => x.to === "human:p0").map(x => x.message);
+  const welcome = messages.find(m => m.type === "welcome")!;
+  const observed = messages.find(m => m.type === "observation")!;
+  const {transport, client, worker, renderer} = setup();
+  transport.deliver(welcome); transport.deliver(observed);
+  const map = worker.messages().find(m => m.type === "ARENA_MAP");
+  expect(map).toEqual({type: "ARENA_MAP", worldId: INIT.worldId, map: {width: client.terrain!.width,
+    height: client.terrain!.height, tiles: Array.from(client.terrain!.tiles), tilesHash: client.welcome!.map.tiles_hash}});
+  expect(worker.messages().slice(1).map(m => m.type)).toEqual(["ARENA_MAP", "ARENA_OBSERVATION"]);
+  transport.deliver(observed);
+  expect(worker.messages().filter(m => m.type === "ARENA_MAP")).toHaveLength(1);
+  renderer.dispose(); client.dispose();
 });

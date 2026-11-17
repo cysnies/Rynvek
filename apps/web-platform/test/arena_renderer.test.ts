@@ -5,7 +5,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { ArenaClient, MemoryTransport, type FactionObservation } from "@rynvek/client";
+import { createArenaApp } from "@rynvek/arena";
+import type { ArenaServerMessage } from "@rynvek/client";
 import type { WorkerLike } from "@rynvek/engine";
+import { project, unproject } from "../src/arena-view.js";
 import { mountArenaRenderer } from "../src/arena-renderer.js";
 
 class WorkerStub implements WorkerLike {
@@ -91,4 +94,79 @@ it("缺少OffscreenCanvas在创建Worker前明确拒绝", () => {
     worldId: "0".repeat(32), faction: 0, view, dpr: 1, createWorker, onStatus: vi.fn(), onError: vi.fn(),
   })).toThrow(/OffscreenCanvas/);
   expect(createWorker).not.toHaveBeenCalled();
+});
+
+it("GPU屏幕命中沿用Camera2D的Y向下坐标，不能把上方点击映射为下方命令", () => {
+  const gpuView = {...view, yDown: true};
+  expect(project(gpuView, 34, 35)).toEqual([340, 270]);
+  expect(unproject(gpuView, 340, 270)).toEqual([34, 35]);
+  expect(unproject(gpuView, 320, 210)).toEqual([32, 29]);
+});
+it("GPU选择叠层只传显示状态，去重且卸载后不再发送", () => {
+  const {renderer, worker} = setup();
+  renderer.select([5, 2, 5], null);
+  expect(worker.posted.at(-1)).toEqual({type: "ARENA_SELECTION", worldId: "0".repeat(32), units: [2, 5], building: null});
+  const count = worker.posted.length; renderer.select([2, 5], null); expect(worker.posted).toHaveLength(count);
+  renderer.select([], 7); expect(worker.posted.at(-1)).toMatchObject({units: [], building: 7});
+  renderer.dispose(); const done = worker.posted.length; renderer.select([5], null); expect(worker.posted).toHaveLength(done);
+});
+
+it("真实开局观察的GPU屏幕点选→选择环→地形采集命令复用租约fencing，Ack不改世界", async () => {
+  const recording = JSON.parse(readFileSync(resolve(process.cwd(), "../../tests/arena/opening.transcript.json"), "utf8")) as {recv: {to: string; message: ArenaServerMessage}[]}[];
+  const messages = recording.flatMap(x => x.recv).filter(x => x.to === "human:p0").map(x => x.message);
+  const transport = new MemoryTransport();
+  const app = createArenaApp(transport, {principalId: "human:p0", kind: "Human", faction: 0});
+  transport.deliver(messages.find(m => m.type === "welcome")!);
+  transport.deliver(messages.find(m => m.type === "observation")!);
+  transport.deliver({type: "lease", seq: null, lease: {holder: {id: "human:p0", kind: "Human"}, faction: 0,
+    level: "Sovereign", fencing_token: 77, issued_tick: 0, expires_tick: 10000}});
+  const canvas = document.createElement("canvas"); Object.defineProperty(canvas, "transferControlToOffscreen", {value: () => ({})});
+  const worker = new WorkerStub(); const error = vi.fn();
+  const gpuView = {...view, x: 128, y: 128, zoom: .15, yDown: true};
+  const renderer = mountArenaRenderer(canvas, app.client, {worldId: "0".repeat(32), faction: 0,
+    view: gpuView, dpr: 2, createWorker: () => worker, onStatus: vi.fn(), onError: error});
+  worker.deliver(ready);
+  const obs = app.client.observation!, unit = obs.units.find(u => u.kind === "unit.forager")!;
+  const world = [unit.position[0] / 4294967296, unit.position[1] / 4294967296] as const;
+  const screen = project(gpuView, ...world); const hit = unproject(gpuView, ...screen);
+  app.router.handlePointer({kind: "click", button: "left", x: hit[0], y: hit[1]});
+  expect([...app.ui.selection]).toEqual([unit.id]);
+  renderer.select([...app.ui.selection], app.ui.selectedBuilding);
+  expect(worker.posted.at(-1)).toEqual({type: "ARENA_SELECTION", worldId: "0".repeat(32), units: [unit.id], building: null});
+  const terrain = app.client.terrain!, marsh = terrain.tiles.findIndex(t => t === 2);
+  expect(marsh).toBeGreaterThanOrEqual(0);
+  const target = [marsh % terrain.width + .5, Math.floor(marsh / terrain.width) + .5] as const;
+  const destination = unproject(gpuView, ...project(gpuView, ...target));
+  const before = worker.posted.length;
+  app.router.handlePointer({kind: "click", button: "right", x: destination[0], y: destination[1]});
+  const sent = transport.sent.at(-1)!;
+  expect(sent).toMatchObject({type: "command", fencing_token: 77, command: {type: "issue_order",
+    units: {kind: "ids", value: [unit.id]}, order: "Harvest", target: target.map(x => x * 4294967296)}});
+  if (sent.type !== "command") throw new Error("命令必须走原SDK");
+  transport.deliver({type: "ack", seq: sent.seq, tick: obs.tick + 1, ack: {type: "order_issued", units: 1}});
+  await app.controller.idle(); expect(app.client.observation).toBe(obs); expect(worker.posted).toHaveLength(before);
+  transport.deliver({type: "lease_revoked", faction: 0, by: "other:human"});
+  const count = transport.sent.length;
+  app.router.handlePointer({kind: "click", button: "right", x: destination[0], y: destination[1]});
+  await app.controller.idle(); expect(transport.sent).toHaveLength(count); expect(app.ui.notices.length).toBeGreaterThan(0);
+  expect(worker.posted.some(m => ["START", "STEP", "command"].includes((m as {type: string}).type))).toBe(false);
+  expect(error).not.toHaveBeenCalled(); renderer.dispose(); app.dispose();
+});
+
+it("GPU坐标系的W/方向上键必须向屏幕上方平移，不反转既有2D模式", () => {
+  const app = createArenaApp(new MemoryTransport(), {principalId: "human:p0", kind: "Human", faction: 0});
+  const key = {key: "ArrowUp", ctrlKey: false, altKey: false, metaKey: false, shiftKey: false};
+  const initial = app.ui.camera.y; app.router.handleKey(key); expect(app.ui.camera.y).toBeGreaterThan(initial);
+  app.ui.camera.y = 32; (app.ui.camera as {yDown?: boolean}).yDown = true;
+  app.router.handleKey(key); expect(app.ui.camera.y).toBe(24); app.dispose();
+});
+
+it("超宽高DPI缩放的命中尺度与Rust Camera2D上限512一致", () => {
+  const {worker, renderer} = setup();
+  const wide = {...view, width: 8192, zoom: 4, yDown: true, pixelRatio: 3};
+  renderer.sync(wide, 3);
+  expect(worker.posted.at(-1)).toEqual({type: "SET_CAMERA", centerX: 32, centerY: 32, pxPerCell: 512});
+  const screen = project(wide, 33, 33);
+  expect((screen[0] - wide.width / 2) * 3).toBeCloseTo(512);
+  expect(unproject(wide, ...screen)[1]).toBeCloseTo(33); renderer.dispose();
 });

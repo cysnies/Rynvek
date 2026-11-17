@@ -16,7 +16,7 @@ export interface ArenaRenderOptions extends EngineInitOptions {
 export function createArenaRenderHost(
   worker: WorkerLike,
   canvas: TransferableCanvasLike,
-  client: Pick<ArenaClient, "on" | "observation">,
+  client: Pick<ArenaClient, "on" | "observation"> & Partial<Pick<ArenaClient, "terrain" | "welcome">>,
   options: ArenaRenderOptions,
 ): { host: EngineHost; dispose(): void } {
   if (!/^[0-9a-f]{32}$/i.test(options.worldId) || !Number.isInteger(options.arenaFaction)
@@ -28,12 +28,22 @@ export function createArenaRenderHost(
   const offDegraded = host.on("BACKEND_DEGRADED", (event) => options.onError(new Error(event.reason)));
   try { host.attach(canvas, options); }
   catch (error) { host.shutdown(); throw error; }
+  let mapSent = false;
   const present = (observation: NonNullable<ArenaClient["observation"]>): void => {
     if (observation.faction !== options.arenaFaction) {
       options.onError(new Error("拒绝向渲染 Worker 转发其他阵营观察"));
       return;
     }
-    try { host.send({ type: "ARENA_OBSERVATION", worldId: options.worldId, observation }); }
+    try {
+      // 使用 SDK 已经核验的 welcome 地形，不重新生图；先地图后观察，Worker 再校验。
+      if (!mapSent && client.terrain && client.welcome) {
+        const {width, height, tiles} = client.terrain;
+        host.send({ type: "ARENA_MAP", worldId: options.worldId,
+          map: {width, height, tiles: Array.from(tiles), tilesHash: client.welcome.map.tiles_hash} });
+        mapSent = true;
+      }
+      host.send({ type: "ARENA_OBSERVATION", worldId: options.worldId, observation });
+    }
     catch (error) { options.onError(error instanceof Error ? error : new Error(String(error))); }
   };
   const offObservation = client.on((event) => {

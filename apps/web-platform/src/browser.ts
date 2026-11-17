@@ -16,10 +16,10 @@ const mount=document.querySelector<HTMLDivElement>("#app")!;
 mount.innerHTML=`<header><h1>RYNVEK <span style="color:var(--rv-accent)">ARENA</span></h1><span id="connection" class="chip">等待开始</span><span class="mode muted">本地 PvE 生存 · 服务器权威 · 非排位</span><span id="renderer" class="chip">${gpuRequested?"WebGPU Worker 待连接":"临时 Canvas2D"}</span><button id="start" class="primary">开始本地练习</button></header>
 <main class="layout"><section class="world"><div class="worldbar"><span>SECTOR 42 / <span id="clock">TICK —</span></span><span id="pointer">只读阵营视图</span></div><canvas id="world" tabindex="0" aria-label="Rynvek 战争迷雾地图，左键选择、右键命令"></canvas><div class="metrics"><span class="metric">生物质<b id="biomass">—</b></span><span class="metric">通量<b id="flux">—</b></span><span class="metric">神经胶<b id="neurogel">—</b></span><span class="metric">人口<b id="supply">—</b></span><span class="metric">波次<b id="wave">—</b></span></div></section>
 <aside class="sidebar"><section class="panel"><h2>指挥 / CONTROL</h2><div class="buttons"><button id="select" disabled>全选己方单位</button><button id="home" disabled>主脑居中</button><button id="harvest" disabled>采集 → 点目标</button><button id="move" disabled>移动 → 点目标</button><button disabled title="当前权威协议不提供暂停">暂停未开放</button></div><p id="selection" class="muted">尚未选择</p><p id="intent">开始后，左键点选或拖框；右键移动。黄绿色为营养沼泽，工蜂右键自动采集。</p><p id="outcome" class="outcome"></p></section>
-<section class="panel"><h2>建造 / BUILD</h2><div id="build" class="build"></div><p class="muted">选择建筑后点地图；黄色框仅为落点预览，权限、占地、资源和科技由服务器最终验证。Esc / 右键取消。</p></section>
+<section class="panel"><h2>建造 / BUILD</h2><div id="build" class="build"></div><p class="muted">${gpuRequested?"GPU 建造预览尚未接入；点击仍发真实建造命令，权限、占地和资源由服务器最终验证。":"选择建筑后点地图；黄色框仅为落点预览，权限、占地、资源和科技由服务器最终验证。"}Esc / 右键取消。</p></section>
 <section class="panel"><h2>权威回执 / EVENTS</h2><div id="log" class="log" role="status" aria-live="polite">尚未连接。没有本地随机单位或预演资源。</div><div class="buttons" style="margin-top:12px"><button id="surrender" disabled>结束练习（投降）</button><button id="replay" disabled>下载回放</button></div></section>
 <section class="panel"><h2>操作说明</h2><p>① 开始 → 全选己方单位<br>② 右键附近空地，观察真实位置变化<br>③ 点「采集」再点黄绿地块，观察生物质账本<br>④ 选择「萃取器」放在黄绿地块，或信标放在主脑附近空地；观察资源扣除与施工进度<br>⑤ 在主脑上重复建造会收到实际错误码。</p><p class="muted">滚轮缩放，方向键/WASD 平移，Home 回主脑。黑色未探索、暗色已探索；敌人只来自服务器迷雾裁剪观察。</p></section></aside></main>
-<footer>${gpuRequested?"当前显示：真实 Rust/wgpu + Dedicated Engine Worker / OffscreenCanvas；GPU不可用会显式报错，不静默切换。选择见侧栏，建造落点请看坐标，选择光圈/落点叠层待补。":"当前显示：临时 Canvas2D / 工业像素占位，不是 WebGPU。"} <a href="${gpuRequested?"/arena":"/arena?renderer=webgpu"}">${gpuRequested?"手动重载为临时 Canvas2D":"显式启用 WebGPU Worker"}</a>；生成WASM与软件GPU通过不等于浏览器验收。<br>此显式回环开发服免输入账号，为每局分配临时能力身份；进程内存储，重启丢失。服务器持续推进，关闭页面不等于暂停。神经生态完整闭环、正式美术和浏览器性能未验收。<a href="/api/v1/meta/source-offer" target="_blank" rel="noopener">源码要约</a></footer>`;
+<footer>${gpuRequested?"当前显示：真实 Rust/wgpu + Dedicated Engine Worker / OffscreenCanvas；GPU不可用会显式报错，不静默切换。真实地图与己方选择环走GPU；建造预览和拖框轮廓仍待补，命令以服务器回执为准。":"当前显示：临时 Canvas2D / 工业像素占位，不是 WebGPU。"} <a href="${gpuRequested?"/arena":"/arena?renderer=webgpu"}">${gpuRequested?"手动重载为临时 Canvas2D":"显式启用 WebGPU Worker"}</a>；生成WASM与软件GPU通过不等于浏览器验收。<br>此显式回环开发服免输入账号，为每局分配临时能力身份；进程内存储，重启丢失。服务器持续推进，关闭页面不等于暂停。神经生态完整闭环、正式美术和浏览器性能未验收。<a href="/api/v1/meta/source-offer" target="_blank" rel="noopener">源码要约</a></footer>`;
 const el=(id:string):HTMLElement=>document.getElementById(id)!;
 const button=(id:string):HTMLButtonElement=>el(id) as HTMLButtonElement;
 let canvas=el("world") as HTMLCanvasElement;
@@ -51,7 +51,7 @@ function controls():void{
   button("replay").disabled=!arena?.client.observation?.outcome;
   button("start").disabled=starting || (connected && !arena?.client.observation?.outcome);
 }
-function view():Viewport{return {...(arena?.ui.camera ?? {x:32,y:32,zoom:1}),width:canvas.clientWidth,height:canvas.clientHeight};}
+function view():Viewport{return {...(arena?.ui.camera ?? {x:32,y:32,zoom:1}),width:canvas.clientWidth,height:canvas.clientHeight,yDown:gpuRequested,...(gpuRequested?{pixelRatio:devicePixelRatio||1}:{})};}
 function worldPoint(e:PointerEvent|MouseEvent):[number,number]{const r=canvas.getBoundingClientRect();return unproject(view(),e.clientX-r.left,e.clientY-r.top);}
 function display():void{
   const obs=arena?.client.observation;if(!obs||!arena)return;
@@ -92,6 +92,7 @@ async function start():Promise<void>{
       close:()=>ws.close(),addEventListener:(_type,listener)=>ws.addEventListener("message",listener),removeEventListener:(_type,listener)=>ws.removeEventListener("message",listener),
     });
     arena=createArenaApp(transport,{principalId:info.principal_id,kind:"Human",faction:info.faction});
+    arena.ui.camera.yDown=gpuRequested;
     const current=arena;
     ws.addEventListener("message",e=>{if(typeof e.data!=="string")return;const message=JSON.parse(e.data) as ArenaServerMessage;if(message.type==="ack"&&message.ack)note(`已提交 Tick ${message.tick} · ${message.ack.type}`);});
     current.client.on(event=>{
@@ -137,7 +138,7 @@ if(!gpuRequested&&!ctx){el("renderer").textContent="Canvas2D 不可用";note("�
 window.addEventListener("pagehide",()=>{gpuRenderer?.dispose();arena?.dispose();socket?.close();});
 const terrainColors=["#27362b","#3b4547","#536c32","#6e3b28","#171d1b"];
 function draw():void{
-  if(gpuRequested){gpuRenderer?.sync(view(),devicePixelRatio||1);requestAnimationFrame(draw);return;}
+  if(gpuRequested){gpuRenderer?.sync(view(),devicePixelRatio||1);if(arena)gpuRenderer?.select([...arena.ui.selection],arena.ui.selectedBuilding);requestAnimationFrame(draw);return;}
   if(!ctx)return;
   const dpr=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
   if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}

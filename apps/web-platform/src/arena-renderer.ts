@@ -17,7 +17,7 @@ export interface ArenaRendererOptions {
 
 /** 只管理画布/相机/生命周期；不发游戏命令、不产生世界状态、不自动降为假GPU。 */
 export function mountArenaRenderer(canvas: HTMLCanvasElement,
-  client: Pick<ArenaClient, "on" | "observation">, options: ArenaRendererOptions) {
+  client: Pick<ArenaClient, "on" | "observation"> & Partial<Pick<ArenaClient, "terrain" | "welcome">>, options: ArenaRendererOptions) {
   if (typeof canvas.transferControlToOffscreen !== "function") throw new Error("当前环境不支持 OffscreenCanvas；请手动选择临时 Canvas2D");
   const pixels = (size: number, dpr: number) => Math.max(1, Math.round(size * dpr));
   let width = pixels(options.view.width, options.dpr), height = pixels(options.view.height, options.dpr);
@@ -58,12 +58,21 @@ export function mountArenaRenderer(canvas: HTMLCanvasElement,
     if (disposed) return;
     const w = pixels(view.width, dpr), h = pixels(view.height, dpr);
     if (width !== w || height !== h) { renderer!.host.resize(w, h, dpr); width = w; height = h; }
-    const pxPerCell = viewScale(view) * dpr;
+    const pxPerCell = viewScale({...view, pixelRatio: dpr}) * dpr;
     const key = `${view.x}/${view.y}/${pxPerCell}`;
     if (camera !== key) {
       renderer!.host.send({ type: "SET_CAMERA", centerX: view.x, centerY: view.y, pxPerCell }); camera = key;
     }
   };
   sync(options.view, options.dpr);
-  return { sync, dispose };
+  let selection = "";
+  const select = (units: readonly number[], building: number | null) => {
+    if (disposed) return;
+    const ids = [...new Set(units)].sort((a, b) => a - b);
+    const key = JSON.stringify([ids, building]);
+    if (key === selection) return;
+    renderer!.host.send({type: "ARENA_SELECTION", worldId: options.worldId, units: ids, building});
+    selection = key;
+  };
+  return { sync, select, dispose };
 }
