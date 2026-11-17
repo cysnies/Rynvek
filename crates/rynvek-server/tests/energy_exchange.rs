@@ -317,8 +317,8 @@ async fn run_energy_contract(params: ForagerEcologyContract, expect_death: bool)
                 let born = *original
                     .units
                     .keys()
-                    .find(|id| !old_ids.contains(id))
-                    .expect("真实Actor孵化必须出生");
+                    .find(|id| !old_ids.contains(id) && !original.ecology.as_ref().unwrap().births.contains_key(id))
+                    .expect("真实Actor孵化必须出生，不能拿自然子代冒充生产完成");
                 let a = &original.ecology.as_ref().unwrap().bodies[&born].account;
                 assert!(
                     a.received_q >= u64::from(params.birth_energy_milli) * 4000,
@@ -328,6 +328,24 @@ async fn run_energy_contract(params: ForagerEcologyContract, expect_death: bool)
                 assert_eq!(a.unfunded_q, 0);
                 assert_eq!(original.units[&born].order.kind, rynvek_rts::OrderKind::HoldPosition);
             }
+        }
+    }
+    if !expect_death {
+        let eco = original.ecology.as_ref().unwrap();
+        assert!(
+            !eco.births.is_empty(),
+            "真实认证Actor须由进食亲本自然出生，不能只保存配置或跑孤立模拟"
+        );
+        assert!(eco.bodies.values().all(|b| b.account.is_conserved()));
+        let replayed = restored(&server, world_id).await;
+        assert_eq!(
+            replayed.ecology, original.ecology,
+            "亲本转出/子代收入/谱系必须随真实WAL恢复"
+        );
+        assert_eq!(replayed.state_root(), host.status().state_root);
+        let observation = serde_json::to_string(&original.observe(rynvek_rts::FactionId(0)).unwrap()).unwrap();
+        for field in ["transferred_q", "parent_genome", "child_genome", "allocated_q"] {
+            assert!(!observation.contains(field), "观察输出不得泄露私有谱系/能量");
         }
     }
     server.shutdown().await;

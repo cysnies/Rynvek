@@ -54,7 +54,8 @@ fn unfunded_brain_cannot_commit_then_real_uptake_funds_resumption() {
     assert_eq!(a.stored_q, 0);
     let (x, y) = w.units[&id].tile();
     w.fields.set(rynvek_rts::FieldId::Nutrient, x, y, 5120);
-    w.run(20);
+    // 当前规则先积累亲本/子代出生预算，不能沿用旧20Tick即可转出全部盈余的假设。
+    w.run(40);
     assert_ne!(w.units[&id].brain.state_root(), before);
     let a = &w.ecology.as_ref().unwrap().bodies[&id].account;
     assert!(a.dissipated_q > 0);

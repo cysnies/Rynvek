@@ -39,15 +39,16 @@ fn world(cost: u32, reserve: u32) -> (ArenaWorld, rynvek_rts::EntitySerial) {
 
 #[test]
 fn real_uptake_then_basal_exhaustion_causes_terminal_conserved_death() {
-    let (mut w, id) = world(1000, 0);
+    // 当前规则保留出生预算，不能再靠资源导出制造提前死亡；两Tick真实代谢仍须耗尽一格收入。
+    let (mut w, id) = world(2000, 0);
     let tile = w.units[&id].tile();
     w.step();
     assert!(w.units.contains_key(&id));
     let a = &w.ecology.as_ref().unwrap().bodies[&id].account;
     assert_eq!(a.received_q, 15625);
-    assert_eq!(a.dissipated_q, 4000, "基础费必须真实支付而非只加参数");
-    assert_eq!(a.exported_q, 8000);
-    assert_eq!(a.stored_q, 3625);
+    assert_eq!(a.dissipated_q, 8000, "基础费必须真实支付而非只加参数");
+    assert_eq!(a.exported_q, 0);
+    assert_eq!(a.stored_q, 7625);
     assert!(a.is_conserved());
     assert_eq!(w.fields.get(FieldId::Nutrient, tile.0.into(), tile.1.into()), 0);
     w.step();
@@ -57,8 +58,8 @@ fn real_uptake_then_basal_exhaustion_causes_terminal_conserved_death() {
     );
     let dead = w.ecology.as_ref().unwrap().remains[&id].account.clone();
     assert_eq!(dead.stored_q, 0);
-    assert_eq!(dead.dissipated_q, 7625);
-    assert_eq!(dead.exported_q, 8000);
+    assert_eq!(dead.dissipated_q, 15625);
+    assert_eq!(dead.exported_q, 0);
     assert_eq!(dead.returned_q, 0);
     assert!(dead.is_conserved());
     // 场减少的一个量子严格等于资源转出+热耗；不能从躯体购买价制造遗骸营养。
@@ -71,7 +72,7 @@ fn real_uptake_then_basal_exhaustion_causes_terminal_conserved_death() {
 
 #[test]
 fn failed_transaction_rolls_back_basal_charge_and_death_before_retry() {
-    let (mut w, id) = world(1000, 0);
+    let (mut w, id) = world(2000, 0);
     w.step();
     let mut a = ArenaRuntime::new([82; 16], w);
     let mut control = a.clone();
@@ -91,7 +92,7 @@ fn failed_transaction_rolls_back_basal_charge_and_death_before_retry() {
 
 #[test]
 fn snapshot_restores_activated_basal_contract_across_the_death_boundary() {
-    let (mut w, id) = world(1000, 0);
+    let (mut w, id) = world(2000, 0);
     w.step();
     let mut a = ArenaRuntime::new([83; 16], w);
     let cp = a.checkpoint().unwrap();
@@ -228,25 +229,25 @@ fn exhausted_activated_body_cannot_be_checkpointed_as_alive() {
 }
 
 #[test]
-fn zero_reserve_resource_export_cannot_leave_an_exhausted_live_body() {
+fn zero_basal_reserve_still_retains_real_birth_budget_without_minting() {
     let (mut w, id) = world(1000, 0);
     let tile = w.units[&id].tile();
-    // 冻结采集率允许真实摄取32格量子；代谢后余量恰可全部转出，不是手工注资。
+    // 当前统一规则仍保留真实出生预算；不再用旧版零预留导出耗尽个体。
     w.fields.set(FieldId::Nutrient, tile.0, tile.1, 32);
     w.step();
     assert!(
-        !w.units.contains_key(&id),
-        "零预留导出耗尽也必须在本Tick退役，不能留下可恢复的零能活体"
+        w.units.contains_key(&id),
+        "基础代谢零预留不等于放弃出生预算，不得再把原池全部转走"
     );
-    let a = &w.ecology.as_ref().unwrap().remains[&id].account;
+    let a = &w.ecology.as_ref().unwrap().bodies[&id].account;
     assert_eq!(a.received_q, 500000);
     assert_eq!(a.dissipated_q, 4000);
-    assert_eq!(a.exported_q, 496000);
-    assert_eq!((a.stored_q, a.returned_q), (0, 0));
+    assert_eq!(a.exported_q, 0);
+    assert_eq!((a.stored_q, a.returned_q), (496000, 0));
     assert!(a.is_conserved());
     let runtime = ArenaRuntime::new([86; 16], w);
     let cp = runtime.checkpoint().unwrap();
     let restored = ArenaRuntime::restore([86; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
     assert_eq!(runtime.state_root(), restored.state_root());
-    assert!(!restored.units.contains_key(&id));
+    assert!(restored.units.contains_key(&id));
 }
