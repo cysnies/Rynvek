@@ -363,20 +363,30 @@ pub struct CanonicalWorldState {
 impl CanonicalWorldState {
     /// 聚合全部分层子根计算最终 256-bit BLAKE3 世界状态根
     pub fn state_root(&self) -> Blake3Hash {
-        let mut h = Hasher::new();
-        h.update(b"RYNVEK_CANONICAL_WORLD_STATE_V2");
-        h.update(&self.tick.to_le_bytes());
-        h.update(&self.config_root.0);
-        h.update(&self.entity_root.0);
-        h.update(&self.neural_root.0);
-        h.update(&self.field_root.0);
-        h.update(&self.economy_root.0);
-        h.update(&self.evolution_root.0);
-        h.update(&self.visibility_root.0);
-        h.update(&self.rng_root.0);
-        h.update(&self.scheduled_event_root.0);
-        h.update(&self.parent_commit_root.0);
-        Blake3Hash(*h.finalize().as_bytes())
+        Blake3Hash(rynvek_journal::CommitManifest::canonical_state_root(
+            self.tick,
+            self.parent_commit_root.0,
+            self.commit_sub_roots(),
+            self.commit_domains(),
+        ))
+    }
+    pub(crate) fn commit_sub_roots(&self) -> rynvek_journal::CommitSubRoots {
+        rynvek_journal::CommitSubRoots {
+            entity_root_hash: self.entity_root.0,
+            field_root_hash: self.field_root.0,
+            neural_root_hash: self.neural_root.0,
+            economy_root_hash: self.economy_root.0,
+            rng_root_hash: self.rng_root.0,
+        }
+    }
+
+    pub(crate) fn commit_domains(&self) -> rynvek_journal::CanonicalDomains {
+        rynvek_journal::CanonicalDomains {
+            config: self.config_root.0,
+            evolution: self.evolution_root.0,
+            visibility: self.visibility_root.0,
+            scheduled_events: self.scheduled_event_root.0,
+        }
     }
 }
 
@@ -701,7 +711,8 @@ impl ArenaWorld {
         }
     }
 
-    pub(crate) fn invalidate_flow(&mut self) {
+    /// 地形或占地变化后使派生流场缓存失效，不修改权威状态。
+    pub fn invalidate_flow(&mut self) {
         self.flow_cache.clear();
         self.flow_order.clear();
     }

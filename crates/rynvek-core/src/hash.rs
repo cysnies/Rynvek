@@ -14,10 +14,26 @@ pub const BLAKE3_DIGEST_LEN: usize = 32;
 
 /// 32 字节 BLAKE3-256 摘要
 #[repr(transparent)]
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    bytemuck::Pod,
+    bytemuck::Zeroable,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct Blake3Hash(pub [u8; BLAKE3_DIGEST_LEN]);
 
 impl Blake3Hash {
+    /// 全零状态根，用于创世提交的前驱占位。
+    pub const ZERO: Self = Self([0; BLAKE3_DIGEST_LEN]);
+
     /// 计算一段字节的 BLAKE3-256 摘要
     pub fn of(bytes: &[u8]) -> Self {
         Self(*blake3::hash(bytes).as_bytes())

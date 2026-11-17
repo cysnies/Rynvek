@@ -173,25 +173,23 @@ fn verify_snapshot_file_envelope(
     let mut f = File::open(path).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?;
     let mut prefix = [0u8; 96];
     f.read_exact(&mut prefix)
-        .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
     if &prefix[0..4] != b"RYSS" {
         return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
     }
     let version = u16::from_le_bytes([prefix[4], prefix[5]]);
-    if version != 1 {
+    if version != 1 && version != 2 {
         return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
     }
     let tick = u64::from_le_bytes(prefix[32..40].try_into().unwrap());
     let payload_bytes = u64::from_le_bytes(prefix[48..56].try_into().unwrap());
     let file_state_root: [u8; 32] = prefix[64..96].try_into().unwrap();
     if tick != expected_tick || file_state_root != expected_state_root {
-        return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+        return Err(RynvekErrorCode::Blake3ChecksumMismatch);
     }
-    let meta = f
-        .metadata()
-        .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+    let meta = f.metadata().map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
     if meta.len() < 96 + payload_bytes {
-        return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+        return Err(RynvekErrorCode::Blake3ChecksumMismatch);
     }
     Ok(())
 }

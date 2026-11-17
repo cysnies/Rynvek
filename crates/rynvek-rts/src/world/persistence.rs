@@ -4,7 +4,8 @@
 //! `ArenaWorld` 的 `.rsnap` 全世界分块快照读写与 `.rjournal` WAL 崩溃恢复闭环（审计报告 §4）。
 //!
 //! 分块映射：
-//! - `ENTS`：由存活建筑与单位序号构造的 `EntityRegistry`；
+//! - `ENTI`：旧工具兼容用计数注册表，不作为 Arena 权威实体根；
+//! - `CMIT`：显式 RYC2 十域清单；`MAPT`：实际地形格、尺寸与种子；
 //! - `NEUR`：全部存活单位的四种脑模型（`GatedMLP` / `LIF` / `Izhikevich` / `CTRNN`）动态内部状态；
 //! - `CONF`：`MatchConfig` 与自定义地形尺寸；
 //! - `COMP`：全部建筑与单位的宏观组件快照（不含脑内部动态态，后者从 `NEUR` 精确恢复）；
@@ -21,15 +22,16 @@ use std::path::Path;
 use rynvek_core::{Blake3Hash, RynvekErrorCode};
 use rynvek_ecs::EntityRegistry;
 use rynvek_journal::{
-    CommitManifest, CommitSubRoots, CrashRecoveryStateMachine, JournalCommandRecord, JournalRecord, JournalWriter,
-    RecoveryInput, RecoveryOutput,
+    CommitManifest, CrashRecoveryStateMachine, JournalCommandRecord, JournalRecord, JournalWriter, RecoveryInput,
+    RecoveryOutput,
 };
 use rynvek_snapshot::{
-    COMP_TAG, CONF_TAG, ECON_TAG, EVOL_TAG, FILD_TAG, FOGW_TAG, RNGS_TAG, ROOT_TAG, SnapshotCustomChunk,
-    SnapshotReader, SnapshotWriteOutput, SnapshotWriter,
+    CMIT_TAG, COMP_TAG, CONF_TAG, ECON_TAG, EVOL_TAG, FILD_TAG, FOGW_TAG, MAPT_TAG, RNGS_TAG, ROOT_TAG,
+    SnapshotCustomChunk, SnapshotReader, SnapshotWriteOutput, SnapshotWriter,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::arena_map::ArenaMap;
 use crate::brain::UnitBrain;
 use crate::combat::Defense;
 use crate::commands::RtsCommand;
@@ -44,6 +46,7 @@ use crate::nav::{HpaGraph, NavGrid};
 use crate::pve::PveDirector;
 use crate::resources::ResourceLedger;
 use crate::tech::TechSet;
+use crate::terrain::TerrainTileKind;
 use crate::world::{ArenaWorld, Building, CanonicalWorldState, Faction, MatchConfig, MatchOutcome, Order, Unit};
 
 /// 单位宏观组件快照（不含 `brain` 内部动态态，`brain` 由 `Genome` 重建后再由 `NEUR` 块无损恢复）
@@ -127,13 +130,21 @@ struct ConfChunkDto {
     pub map_height: u32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct MapChunkDto {
+    width: u32,
+    height: u32,
+    seed: u64,
+    tiles: Vec<TerrainTileKind>,
+}
+
 fn to_chunk<T: Serialize>(tag: [u8; 4], val: &T) -> Result<SnapshotCustomChunk, RynvekErrorCode> {
-    let payload = serde_json::to_vec(val).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+    let payload = serde_json::to_vec(val).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
     Ok(SnapshotCustomChunk { tag, payload })
 }
 
 fn from_chunk<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, RynvekErrorCode> {
-    serde_json::from_slice(bytes).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)
+    serde_json::from_slice(bytes).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)
 }
 
 impl ArenaWorld {
@@ -144,7 +155,7 @@ impl ArenaWorld {
         world_revision: u64,
         parent_state_root: [u8; 32],
     ) -> Result<(Vec<u8>, SnapshotWriteOutput), RynvekErrorCode> {
-        let mut reg = EntityRegistry::new(u16::from_le_bytes([world_id[0], world_id[1]]));
+        let mut reg = EntityRegistry::new(u16::from_le_bytes([world_id[0], world_id[1]]).into());
         for _ in 0..(self.buildings.len() + self.units.len()) {
             reg.spawn(1)?;
         }
@@ -229,6 +240,21 @@ impl ArenaWorld {
         };
 
         let extra_chunks = vec![
+            SnapshotCustomChunk {
+                tag: CMIT_TAG,
+                payload: self
+                    .to_commit_manifest(world_id, world_revision, parent_state_root)
+                    .encode(),
+            },
+            to_chunk(
+                MAPT_TAG,
+                &MapChunkDto {
+                    width: self.map.width,
+                    height: self.map.height,
+                    seed: self.map.seed,
+                    tiles: self.map.tiles.clone(),
+                },
+            )?,
             to_chunk(CONF_TAG, &conf)?,
             to_chunk(COMP_TAG, &comp)?,
             to_chunk(FILD_TAG, &fild)?,
@@ -261,53 +287,81 @@ impl ArenaWorld {
         let target = path.as_ref();
         let (bytes, out) = self.encode_snapshot(world_id, world_revision, parent_state_root)?;
         let tmp_path = target.with_extension("rsnap.tmp");
-        std::fs::write(&tmp_path, &bytes).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
-        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        use std::io::Write;
+        let mut file = std::fs::File::create(&tmp_path).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+        file.write_all(&bytes)
+            .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+        file.sync_all().map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+        drop(file);
+        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+        // 同步目录元数据，让文件替换在断电恢复后仍然可见。
+        let parent = target
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        std::fs::File::open(parent)
+            .and_then(|dir| dir.sync_all())
+            .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         Ok(out)
     }
 
     /// 从 `.rsnap` 字节流完整恢复 `ArenaWorld` 并强制核验 `CanonicalWorldState` 与 `state_hash()`
     pub fn decode_snapshot(bytes: &[u8]) -> Result<Self, RynvekErrorCode> {
         let read = SnapshotReader::read_bytes(bytes)?;
+        // 旧通用快照保留在低层读取器；Arena 不把缺失地形和规范根的 v1 解释成完整恢复。
+        if read.header.format_version != 2 {
+            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
+        }
         let conf: ConfChunkDto = from_chunk(
             read.find_chunk(CONF_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let comp: CompChunkDto = from_chunk(
             read.find_chunk(COMP_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let fild: FildChunkDto = from_chunk(
             read.find_chunk(FILD_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let econ: Vec<EconFactionDto> = from_chunk(
             read.find_chunk(ECON_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let evol: EvolChunkDto = from_chunk(
             read.find_chunk(EVOL_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let fogw: Vec<FogFactionDto> = from_chunk(
             read.find_chunk(FOGW_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let rngs: RngsChunkDto = from_chunk(
             read.find_chunk(RNGS_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
         let expected_canonical: CanonicalWorldState = from_chunk(
             read.find_chunk(ROOT_TAG)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?,
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
         )?;
 
-        let map = if conf.map_width == conf.config.map_size.side_tiles()
-            && conf.map_height == conf.config.map_size.side_tiles()
+        let terrain: MapChunkDto = from_chunk(
+            read.find_chunk(MAPT_TAG)
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
+        )?;
+        if terrain.width == 0
+            || terrain.height == 0
+            || terrain.width != conf.map_width
+            || terrain.height != conf.map_height
+            || (terrain.width as usize).checked_mul(terrain.height as usize) != Some(terrain.tiles.len())
         {
-            crate::arena_map::ArenaMap::generate(conf.config.map_size, conf.config.map_seed)
-        } else {
-            crate::arena_map::ArenaMap::generate_custom(conf.map_width, conf.map_height, conf.config.map_seed)
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+        }
+        let map = ArenaMap {
+            width: terrain.width,
+            height: terrain.height,
+            seed: terrain.seed,
+            tiles: terrain.tiles,
         };
         let mut nav = NavGrid::from_terrain(map.width, map.height, &map.tiles);
         let mut buildings = BTreeMap::new();
@@ -353,12 +407,12 @@ impl ArenaWorld {
         }
 
         if econ.len() != evol.factions.len() || econ.len() != fogw.len() {
-            return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+            return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
         let mut factions = Vec::with_capacity(econ.len());
         for ((ec, ev), fg) in econ.into_iter().zip(evol.factions).zip(fogw) {
             if ec.id != ev.id || ec.id != fg.id {
-                return Err(RynvekErrorCode::SnapshotChunkChecksumFailed);
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             factions.push(Faction {
                 id: ec.id,
@@ -400,7 +454,20 @@ impl ArenaWorld {
         }
 
         let actual_canonical = world.canonical_state_with_parent(expected_canonical.parent_commit_root);
-        if actual_canonical != expected_canonical {
+        let expected_commit = world.to_commit_manifest(
+            read.header.world_id,
+            read.header.world_revision,
+            expected_canonical.parent_commit_root.0,
+        );
+        let saved_commit = CommitManifest::decode(
+            read.find_chunk(CMIT_TAG)
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?,
+        )?;
+        if actual_canonical != expected_canonical
+            || actual_canonical.state_root().0 != read.state_root
+            || expected_commit != saved_commit
+            || world.tick != read.header.tick
+        {
             return Err(RynvekErrorCode::Blake3ChecksumMismatch);
         }
         Ok(world)
@@ -420,18 +487,13 @@ impl ArenaWorld {
         parent_commit_hash: [u8; 32],
     ) -> CommitManifest {
         let c = self.canonical_state_with_parent(Blake3Hash(parent_commit_hash));
-        CommitManifest::new(
+        CommitManifest::new_canonical(
             world_id,
             self.tick,
             world_revision,
             parent_commit_hash,
-            CommitSubRoots {
-                entity_root_hash: c.entity_root.0,
-                field_root_hash: c.field_root.0,
-                neural_root_hash: c.neural_root.0,
-                economy_root_hash: c.economy_root.0,
-                rng_root_hash: c.rng_root.0,
-            },
+            c.commit_sub_roots(),
+            c.commit_domains(),
         )
     }
 
@@ -560,7 +622,9 @@ mod tests {
                 world.apply_command(FactionId(0), &cmd).unwrap();
             }
             rev += 1;
-            world.step_with_journal(&mut writer, world_id, rev, &mut parent).unwrap();
+            world
+                .step_with_journal(&mut writer, world_id, rev, &mut parent)
+                .unwrap();
         }
         writer.append_torn_bytes(&[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
 

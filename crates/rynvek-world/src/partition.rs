@@ -65,8 +65,11 @@ impl PartitionCoord {
     pub const fn from_tile(profile: WorldProfile, tx: u32, ty: u32) -> Self {
         let parts = profile.side_partitions() as u32;
         let span = profile.side_tiles() / parts;
-        let px = (tx / span).min(parts - 1) as u16;
-        let py = (ty / span).min(parts - 1) as u16;
+        let raw_x = tx / span;
+        let raw_y = ty / span;
+        // 保持 const 求值兼容，边界夹紧语义与 min(parts - 1) 一致。
+        let px = if raw_x < parts { raw_x } else { parts - 1 } as u16;
+        let py = if raw_y < parts { raw_y } else { parts - 1 } as u16;
         Self { px, py }
     }
 }

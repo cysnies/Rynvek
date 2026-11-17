@@ -24,6 +24,8 @@ use rynvek_core::error::RynvekErrorCode;
 pub const SNAPSHOT_HEADER_LEN: usize = 64;
 pub const SNAPSHOT_MAGIC: [u8; 4] = *b"RYSS";
 pub const SNAPSHOT_VERSION: u16 = 1;
+/// 规范十域世界快照；必须携带 `CMIT` 清单。
+pub const CANONICAL_SNAPSHOT_VERSION: u16 = 2;
 /// flags bit0：载荷为 Zstd 压缩
 pub const SNAPSHOT_FLAG_ZSTD: u16 = 1 << 0;
 
@@ -80,7 +82,7 @@ impl SnapshotFileHeader {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
         let format_version = u16::from_le_bytes([bytes[4], bytes[5]]);
-        if format_version != SNAPSHOT_VERSION {
+        if ![SNAPSHOT_VERSION, CANONICAL_SNAPSHOT_VERSION].contains(&format_version) {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
         Ok(Self {

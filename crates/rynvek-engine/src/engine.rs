@@ -450,6 +450,11 @@ impl Engine {
             }
             return;
         }
+        // 复用 CPU 主时钟的场步频：第 1、4、7……Tick 更新，不能每 Tick 偷跑。
+        // 脏态上传仍优先执行，否则非场 Tick 的用户编辑会滞留在 GPU 镜像之外。
+        if !self.sim.clock.is_field_step_due() {
+            return;
+        }
         gpu.diag.reset(queue);
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("rynvek.engine.tick"),
@@ -786,7 +791,7 @@ impl Engine {
             self.last_tick,
             self.camera.lod(),
             self.layer_mask,
-            &[&EntityProvider],
+            &[&EntityProvider::default()],
         );
         let field = FieldOverlay {
             buffer: gpu.mirror.channel_buffer(self.heatmap_channel),

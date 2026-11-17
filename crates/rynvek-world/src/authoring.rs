@@ -5,8 +5,8 @@
 //!
 //! 线上 JSON 表示与 `@rynvek/studio` 的 `patch.ts` 严格逐字节对齐：
 //! - `LiveEditSafetyClass`：Class 0 (`HotSafePresentation`) / Class 1 (`TickBoundarySafe`) / Class 2 (`EpochBoundarySafe`) / Class 3 (`RequiresForkRestart`)；
-//! - `WorldPatchOp`：支持 `SetWorldParam`、`PaintTerrainRect`、`UpsertSeedGenome`、`UpdateRuleModule` 与 `RemoveEntityTemplate`；
-//! - `apply_patch_to_arena`：将补丁操作真实作用于权威 `ArenaWorld`（如 `PaintTerrainRect` 实时更新地形格、重算导航网格代价与 HPA* 连通区并刷新流场缓存），消除仅做内存文档记录而未驱动底层引擎的断层。
+//! - `WorldPatchOp`：定义 `SetWorldParam`、`PaintTerrainRect`、`UpsertSeedGenome`、`UpdateRuleModule` 与 `RemoveEntityTemplate`；
+//! - `WorldPatch::apply_to_arena`：支持地形和明确列出的资源发放；其余操作在接通前显式拒绝，整包先校验后应用。
 
 use rynvek_core::error::RynvekErrorCode;
 use rynvek_rts::nav::Rect;
@@ -76,12 +76,8 @@ impl WorldPatchOp {
                     _ => LiveEditSafetyClass::RequiresForkRestart,
                 }
             }
-            Self::PaintTerrainRect { .. } | Self::RemoveEntityTemplate { .. } => {
-                LiveEditSafetyClass::TickBoundarySafe
-            }
-            Self::UpsertSeedGenome { .. } | Self::UpdateRuleModule { .. } => {
-                LiveEditSafetyClass::EpochBoundarySafe
-            }
+            Self::PaintTerrainRect { .. } | Self::RemoveEntityTemplate { .. } => LiveEditSafetyClass::TickBoundarySafe,
+            Self::UpsertSeedGenome { .. } | Self::UpdateRuleModule { .. } => LiveEditSafetyClass::EpochBoundarySafe,
         }
     }
 }
@@ -125,11 +121,9 @@ impl WorldPatch {
         Ok(())
     }
 
-    /// 将补丁真实作用于运行中的 `ArenaWorld`：
-    /// - `PaintTerrainRect`：修改地图地形格、同步更新 `NavGrid` 可通行度、增量更新 `HpaGraph` 并清空流场缓存；
-    /// - `SetWorldParam`：支持调整 `economy.starter_biomass_bonus` 等运行时参数；
-    /// - `UpsertSeedGenome`：当提供 JSON 编码的 `Genome` 时直接更新各阵营基因池；
-    /// - 若补丁为 `RequiresForkRestart`，则在 `report.requires_fork` 中标记由上层世界分支管理器派生新 Fork。
+    /// 将已支持的操作原子应用到 Arena：地形涂刷和正整数生物质发放。
+    /// 基因、规则、模板及其他参数尚未接通，返回 `PluginCapabilityDenied`，不伪报成功。
+    /// 此入口不会替代服务器的排队、权限、修订与 Tick 边界调度。
     pub fn apply_to_arena(&self, world: &mut ArenaWorld) -> Result<PatchApplyReport, RynvekErrorCode> {
         self.validate_safety()?;
         if self.safety_class == LiveEditSafetyClass::EpochBoundarySafe
@@ -143,6 +137,47 @@ impl WorldPatch {
         };
         if report.requires_fork {
             return Ok(report);
+        }
+
+        // 预检整包：所有会失败的输入检查必须先于任何权威状态修改。
+        let mut total_tiles = 0u32;
+        for op in &self.operations {
+            match op {
+                WorldPatchOp::PaintTerrainRect {
+                    x0,
+                    y0,
+                    width,
+                    height,
+                    tile_kind,
+                } => {
+                    if *x0 < 0
+                        || *y0 < 0
+                        || *width == 0
+                        || *height == 0
+                        || (*x0 as u32).checked_add(*width).is_none_or(|x| x > world.map.width)
+                        || (*y0 as u32).checked_add(*height).is_none_or(|y| y > world.map.height)
+                    {
+                        return Err(RynvekErrorCode::DimensionMismatch);
+                    }
+                    if *tile_kind > 4 {
+                        return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
+                    }
+                    total_tiles = total_tiles
+                        .checked_add(width.checked_mul(*height).ok_or(RynvekErrorCode::DimensionMismatch)?)
+                        .ok_or(RynvekErrorCode::DimensionMismatch)?;
+                }
+                WorldPatchOp::SetWorldParam {
+                    key_path,
+                    new_value_json,
+                } if key_path == "economy.grant_biomass_milli" => {
+                    let amount: i64 =
+                        serde_json::from_str(new_value_json).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?;
+                    if amount <= 0 {
+                        return Err(RynvekErrorCode::DimensionMismatch);
+                    }
+                }
+                _ => return Err(RynvekErrorCode::PluginCapabilityDenied),
+            }
         }
 
         for op in &self.operations {
@@ -178,11 +213,8 @@ impl WorldPatch {
                         }
                     }
                     // 重建受影响区域的导航网格并保留现有建筑占地阻挡
-                    let mut nav = rynvek_rts::nav::NavGrid::from_terrain(
-                        world.map.width,
-                        world.map.height,
-                        &world.map.tiles,
-                    );
+                    let mut nav =
+                        rynvek_rts::nav::NavGrid::from_terrain(world.map.width, world.map.height, &world.map.tiles);
                     for b in world.buildings.values() {
                         let r = b.rect();
                         for by in r.y0..r.y1 {
@@ -201,6 +233,7 @@ impl WorldPatch {
                             y1: uy1,
                         },
                     );
+                    world.invalidate_flow();
                 }
                 WorldPatchOp::SetWorldParam {
                     key_path,
@@ -217,15 +250,9 @@ impl WorldPatch {
                     }
                     report.params_updated += 1;
                 }
-                WorldPatchOp::UpsertSeedGenome { .. } => {
-                    report.genomes_updated += 1;
-                }
-                WorldPatchOp::UpdateRuleModule { .. } => {
-                    report.rules_updated += 1;
-                }
-                WorldPatchOp::RemoveEntityTemplate { .. } => {
-                    report.templates_removed += 1;
-                }
+                WorldPatchOp::UpsertSeedGenome { .. }
+                | WorldPatchOp::UpdateRuleModule { .. }
+                | WorldPatchOp::RemoveEntityTemplate { .. } => return Err(RynvekErrorCode::PluginCapabilityDenied),
             }
         }
         Ok(report)
@@ -262,5 +289,106 @@ mod tests {
         assert_eq!(report.tiles_modified, 16);
         assert_eq!(world.map.tile(100, 100), TerrainTileKind::ConductiveBasalt);
         assert_ne!(world.state_hash(), before, "修改地形后世界状态根必须立即反映变更");
+    }
+    fn patch_with(operations: Vec<WorldPatchOp>) -> WorldPatch {
+        WorldPatch {
+            patch_id: [2; 16],
+            base_authoring_revision: 0,
+            hlc: HlcTimestamp::default(),
+            safety_class: LiveEditSafetyClass::EpochBoundarySafe,
+            operations,
+        }
+    }
+
+    fn paint() -> WorldPatchOp {
+        WorldPatchOp::PaintTerrainRect {
+            x0: 100,
+            y0: 100,
+            width: 1,
+            height: 1,
+            tile_kind: 4,
+        }
+    }
+
+    #[test]
+    fn unsupported_patch_operations_must_not_report_success_or_partially_apply() {
+        let unsupported = [
+            WorldPatchOp::SetWorldParam {
+                key_path: "field.diffusion".into(),
+                new_value_json: "123".into(),
+            },
+            WorldPatchOp::UpsertSeedGenome {
+                genome_slug: "test".into(),
+                genome_bytes_b64: "e30=".into(),
+            },
+            WorldPatchOp::UpdateRuleModule {
+                module_id: "test".into(),
+                ts_source: "export {}".into(),
+                compiled_rir_blake3: [0; 32],
+            },
+            WorldPatchOp::RemoveEntityTemplate {
+                template_id: "test".into(),
+            },
+        ];
+        for op in unsupported {
+            let mut world = ArenaWorld::new(MatchConfig::duel(42));
+            let before = world.state_hash();
+            assert!(
+                patch_with(vec![paint(), op]).apply_to_arena(&mut world).is_err(),
+                "未接通操作不能伪报成功"
+            );
+            assert_eq!(world.state_hash(), before, "补丁失败必须保留原始世界");
+        }
+    }
+
+    #[test]
+    fn invalid_later_terrain_operation_rolls_back_the_whole_patch() {
+        let mut world = ArenaWorld::new(MatchConfig::duel(42));
+        let before = world.state_hash();
+        let invalid = WorldPatchOp::PaintTerrainRect {
+            x0: -1,
+            y0: 0,
+            width: 1,
+            height: 1,
+            tile_kind: 0,
+        };
+        assert!(patch_with(vec![paint(), invalid]).apply_to_arena(&mut world).is_err());
+        assert_eq!(world.state_hash(), before, "不得留下前半段地形修改");
+    }
+
+    #[test]
+    fn invalid_biomass_grants_fail_before_mutation() {
+        for value in ["oops", "-1", "0", "1.5"] {
+            let mut world = ArenaWorld::new(MatchConfig::duel(42));
+            let before = world.state_hash();
+            let grant = WorldPatchOp::SetWorldParam {
+                key_path: "economy.grant_biomass_milli".into(),
+                new_value_json: value.into(),
+            };
+            assert!(patch_with(vec![paint(), grant]).apply_to_arena(&mut world).is_err());
+            assert_eq!(world.state_hash(), before);
+        }
+    }
+
+    #[test]
+    fn real_patch_survives_snapshot_restore_and_continuation() {
+        let mut world = ArenaWorld::new(MatchConfig::duel(42));
+        let grant = WorldPatchOp::SetWorldParam {
+            key_path: "economy.grant_biomass_milli".into(),
+            new_value_json: "1000".into(),
+        };
+        let before = world.state_hash();
+        let report = patch_with(vec![paint(), grant]).apply_to_arena(&mut world).unwrap();
+        assert_eq!(report.tiles_modified, 1);
+        assert_eq!(report.params_updated, 1);
+        assert_ne!(world.state_hash(), before);
+        let (bytes, _) = world.encode_snapshot([2; 16], 1, [0; 32]).unwrap();
+        let mut restored = ArenaWorld::decode_snapshot(&bytes).unwrap();
+        for _ in 0..12 {
+            assert_eq!(restored.state_hash(), world.state_hash());
+            world.step();
+            restored.step();
+        }
+        assert_eq!(restored.state_hash(), world.state_hash());
     }
 }

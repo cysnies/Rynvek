@@ -29,6 +29,8 @@ pub const ECON_TAG: [u8; 4] = *b"ECON";
 pub const EVOL_TAG: [u8; 4] = *b"EVOL";
 pub const FOGW_TAG: [u8; 4] = *b"FOGW";
 pub const RNGS_TAG: [u8; 4] = *b"RNGS";
+pub const CMIT_TAG: [u8; 4] = *b"CMIT";
+pub const MAPT_TAG: [u8; 4] = *b"MAPT";
 pub const ROOT_TAG: [u8; 4] = *b"ROOT";
 
 /// Zstd 默认压缩级别（规范 10.1：level 3）
@@ -110,6 +112,12 @@ impl SnapshotWriter {
         neur: Option<&NeurChunk>,
         extra_chunks: &[SnapshotCustomChunk],
     ) -> Result<(Vec<u8>, SnapshotWriteOutput), RynvekErrorCode> {
+        let mut tags = std::collections::BTreeSet::from([ENTS_TAG, *b"ENTS", NEUR_TAG]);
+        for chunk in extra_chunks {
+            if !tags.insert(chunk.tag) {
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+            }
+        }
         let ents_bytes = registry.encode_snapshot_bytes();
         let entity_root = registry.state_root_blake3();
 
@@ -122,22 +130,35 @@ impl SnapshotWriter {
             write_chunk(&mut uncompressed, NEUR_TAG, &n_bytes);
             chunk_count = chunk_count
                 .checked_add(1)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?;
         }
 
         for extra in extra_chunks {
             write_chunk(&mut uncompressed, extra.tag, &extra.payload);
             chunk_count = chunk_count
                 .checked_add(1)
-                .ok_or(RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+                .ok_or(RynvekErrorCode::Blake3ChecksumMismatch)?;
         }
 
         let sub = compute_snapshot_sub_roots(entity_root, neur, extra_chunks);
-        let commit = CommitManifest::new(world_id, tick, world_revision, parent_state_root, sub);
+        let commit = if let Some(chunk) = extra_chunks.iter().find(|c| c.tag == CMIT_TAG) {
+            let commit = CommitManifest::decode(&chunk.payload)?;
+            if commit.canonical_domains.is_none()
+                || commit.world_id != world_id
+                || commit.tick != tick
+                || commit.world_revision != world_revision
+                || commit.parent_commit_hash != parent_state_root
+            {
+                return Err(RynvekErrorCode::Blake3ChecksumMismatch);
+            }
+            commit
+        } else {
+            CommitManifest::new(world_id, tick, world_revision, parent_state_root, sub)
+        };
 
         let compressed = zstd::bulk::compress(&uncompressed, SNAPSHOT_ZSTD_LEVEL)
-            .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
-        let header = SnapshotFileHeader::new(
+            .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+        let mut header = SnapshotFileHeader::new(
             world_id,
             tick,
             world_revision,
@@ -146,6 +167,9 @@ impl SnapshotWriter {
             true,
         );
 
+        if commit.canonical_domains.is_some() {
+            header.format_version = crate::header::CANONICAL_SNAPSHOT_VERSION;
+        }
         let mut file_bytes = Vec::with_capacity(SNAPSHOT_HEADER_LEN + 32 + compressed.len());
         file_bytes.extend_from_slice(&header.encode());
         file_bytes.extend_from_slice(&commit.state_root_hash);
@@ -208,12 +232,12 @@ impl SnapshotWriter {
             extra_chunks,
         )?;
         let tmp_path = target.with_extension("rsnap.tmp");
-        let mut f = File::create(&tmp_path).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        let mut f = File::create(&tmp_path).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         f.write_all(&bytes)
-            .map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
-        f.sync_all().map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+            .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
+        f.sync_all().map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         drop(f);
-        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::SnapshotChunkChecksumFailed)?;
+        std::fs::rename(&tmp_path, target).map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
         Ok(out)
     }
 }
