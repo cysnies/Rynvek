@@ -11,14 +11,17 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@rynvek/core": "workspace:*"
+    "@rynvek/core": "workspace:*",
+    "@noble/hashes": "^2.0.1"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

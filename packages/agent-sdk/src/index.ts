@@ -127,3 +127,5 @@ export function validateToolBatch(batch: readonly AgentToolCall[]): void {
     if (!(AGENT_TOOL_NAMES as readonly string[]).includes(call.name)) invalid(`未知智能体工具：${call.name}`);
   }
 }
+
+export * from "./private-agent.js";
