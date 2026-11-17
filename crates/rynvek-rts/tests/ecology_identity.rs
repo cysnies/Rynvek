@@ -9,6 +9,7 @@ fn config() -> MatchConfig {
     c.ecology = Some(ForagerEcologyContract {
         basal_cost_micro_per_tick: 1000,
         reserve_ticks: 4,
+        birth_energy_milli: 1000,
     });
     c
 }
@@ -17,12 +18,13 @@ fn config() -> MatchConfig {
 fn whole_current_contract_is_bound_and_transaction_cannot_reprice_it() {
     let w = ArenaWorld::new(config());
     let root = w.canonical_state().config_root;
-    for variant in 0..3 {
+    for variant in 0..4 {
         let mut changed = w.clone();
         match variant {
             0 => changed.config.ecology = None,
             1 => changed.config.ecology.as_mut().unwrap().basal_cost_micro_per_tick += 1,
-            _ => changed.config.ecology.as_mut().unwrap().reserve_ticks += 1,
+            2 => changed.config.ecology.as_mut().unwrap().reserve_ticks += 1,
+            _ => changed.config.ecology.as_mut().unwrap().birth_energy_milli += 1,
         }
         assert_ne!(changed.canonical_state().config_root, root);
         let mut runtime = ArenaRuntime::new([91; 16], w.clone());
@@ -53,7 +55,7 @@ fn resealed_snapshot_rejects_cross_contract_and_unsupported_arena_format() {
     let w = ArenaWorld::new(config());
     let (bytes, _) = w.encode_snapshot([92; 16], 0, [0; 32]).unwrap();
     let read = SnapshotReader::read_bytes(&bytes).unwrap();
-    for variant in 0..5 {
+    for variant in 0..6 {
         let mut chunks = read.custom_chunks.clone();
         let conf = chunks.iter_mut().find(|c| c.tag == CONF_TAG).unwrap();
         let mut v: serde_json::Value = serde_json::from_slice(&conf.payload).unwrap();
@@ -66,7 +68,8 @@ fn resealed_snapshot_rejects_cross_contract_and_unsupported_arena_format() {
             3 => {
                 v.as_object_mut().unwrap().remove("arena_format");
             }
-            _ => v["arena_format"] = serde_json::json!("rynvek-arena/2"),
+            4 => v["arena_format"] = serde_json::json!("rynvek-arena/3"),
+            _ => v["config"]["ecology"]["birth_energy_milli"] = serde_json::json!(1001),
         }
         conf.payload = serde_json::to_vec(&v).unwrap();
         let (forged, _) = SnapshotWriter::write_bytes_with_chunks(

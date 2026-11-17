@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 显式Forager契约统一局部摄食、实际脉冲预算与首次真实摄食后的生存成本。
-//! 出生池始终为空；摄食从既有环境场扣款，不杜撰出生禀赋或给其他角色断供。
+//! 显式Forager契约统一局部摄食、实际脉冲预算与首次有来源供能后的生存成本。
+//! 孵化槽出生从原Biomass池另行实扣；其他出生来源不猜测，摄食继续等额扣环境场。
 use super::ArenaWorld;
 use crate::{EntitySerial, FieldId, UnitKind};
 use rynvek_neural::metabolism::EnergyAccount;
@@ -11,16 +11,21 @@ use std::collections::BTreeMap;
 
 pub const ECOL_TAG: [u8; 4] = *b"ECOL";
 
-/// 数值为显式实验参数，并非原v1冻结平衡；首次摄食由原账本received_q推导。
+/// 数值为显式实验参数，并非原v1冻结平衡；首次有来源收入由原账本received_q推导。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ForagerEcologyContract {
     pub basal_cost_micro_per_tick: u32,
     pub reserve_ticks: u32,
+    /// 仅孵化槽出生的玩家Forager；完成时从阵营Biomass另行实扣，不重算原建造价。
+    pub birth_energy_milli: u32,
 }
 
 impl ForagerEcologyContract {
     pub fn validate(self) -> Result<(), &'static str> {
+        if self.birth_energy_milli == 0 {
+            return Err("孵化出生能量必须显式大于0，由真实生产池支付");
+        }
         if self.basal_cost_micro_per_tick == 0 {
             return Err("实验基础代谢成本必须显式大于0");
         }

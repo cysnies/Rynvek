@@ -10,6 +10,7 @@ fn budget_world() -> (ArenaWorld, rynvek_rts::EntitySerial) {
     config.ecology = Some(ForagerEcologyContract {
         basal_cost_micro_per_tick: 1000,
         reserve_ticks: 4,
+        birth_energy_milli: 1000,
     });
     let mut w = ArenaWorld::with_map(
         config,

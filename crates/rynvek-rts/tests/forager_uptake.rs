@@ -4,7 +4,7 @@
 use rynvek_rts::{ArenaMap, ArenaWorld, MatchConfig, TerrainTileKind, UnitKind};
 fn world() -> ArenaWorld {
     let mut c = serde_json::to_value(MatchConfig::pve(57, 1)).unwrap();
-    c["ecology"] = serde_json::json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4});
+    c["ecology"] = serde_json::json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000});
     ArenaWorld::with_map(
         serde_json::from_value(c).unwrap(),
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),
@@ -107,9 +107,9 @@ fn real_vat_birth_pays_production_once_then_feeds_from_local_field_and_restores(
     let body = &runtime.ecology.as_ref().unwrap().bodies[&born].account;
     assert!(body.received_q > 0, "孵化当Tick无需Harvest即可从已有局部营养首摄食");
     assert_eq!(
-        body.received_q % 15_625,
+        (body.received_q - 1000 * 4000) % 15_625,
         0,
-        "收入只能是实际环境场量子，不附加免费出生费"
+        "扣除真实生产池支付的出生预算后，额外收入只能是环境场量子"
     );
     assert_eq!(body.unfunded_q, 0);
     assert!(body.is_conserved());

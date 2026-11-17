@@ -158,14 +158,46 @@ impl ArenaWorld {
     fn run_vat(&mut self, id: EntitySerial) {
         let b = self.buildings.get_mut(&id).expect("存在");
         let Some(job) = b.queue.front_mut() else { return };
-        job.remaining_ticks = job.remaining_ticks.saturating_sub(1);
-        if job.remaining_ticks > 0 {
+        if job.remaining_ticks > 1 {
+            job.remaining_ticks -= 1;
             return;
         }
-        let job = b.queue.pop_front().expect("非空");
-        let (faction, rect) = (b.faction, b.rect());
+        let (faction, rect, unit) = (b.faction, b.rect(), b.queue.front().expect("非空").unit);
+        let birth_milli = self
+            .config
+            .ecology
+            .filter(|_| unit == UnitKind::Forager && !faction.is_wild())
+            .map_or(0, |c| i64::from(c.birth_energy_milli));
+        // 出生前唯一付款点：不预扣第二份托管状态，不依靠造价或免费移动制造启动能量。
+        // 不足时队首停在最后一Tick，保留原生产造价及取消退款语义，不扣能量也不弹队。
+        if birth_milli > 0
+            && !self
+                .faction_mut(faction)
+                .expect("玩家阵营")
+                .ledger
+                .try_consume(ResourceKind::Biomass, birth_milli)
+        {
+            return;
+        }
+        let job = self
+            .buildings
+            .get_mut(&id)
+            .expect("存在")
+            .queue
+            .pop_front()
+            .expect("非空");
         let spot = self.free_tile_around(rect);
-        self.spawn_unit(faction, job.unit, job.genome, Vec2::tile_center(spot.0, spot.1));
+        let child = self.spawn_unit(faction, job.unit, job.genome, Vec2::tile_center(spot.0, spot.1));
+        if birth_milli > 0 {
+            // 原既有精确映射：1 milli Biomass = 4000 q，与个体向阵营转出互为转移。
+            self.ecology
+                .as_mut()
+                .expect("显式契约")
+                .bodies
+                .get_mut(&child)
+                .expect("出生同步建账")
+                .account = rynvek_neural::metabolism::EnergyAccount::from_milli(birth_milli);
+        }
     }
 
     /// 占地外圈最近的可通行 Tile（按环距、再按 `(y, x)` 升序）

@@ -9,6 +9,7 @@ fn world() -> ArenaWorld {
     config.ecology = Some(ForagerEcologyContract {
         basal_cost_micro_per_tick: 1000,
         reserve_ticks: 4,
+        birth_energy_milli: 1000,
     });
     ArenaWorld::with_map(
         config,
@@ -158,7 +159,8 @@ fn retired_arena_snapshot_is_explicitly_unsupported() {
 #[test]
 fn ranked_cannot_opt_into_an_uncertified_ecology_version() {
     let mut value = serde_json::to_value(MatchConfig::duel(42)).unwrap();
-    value["ecology"] = serde_json::json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4});
+    value["ecology"] =
+        serde_json::json!({"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000});
     assert!(serde_json::from_value::<MatchConfig>(value).is_err());
 }
 
