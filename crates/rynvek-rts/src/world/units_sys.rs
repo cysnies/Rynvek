@@ -229,7 +229,11 @@ impl ArenaWorld {
                 .is_some_and(|f| f.techs.contains(TechId::HebbianPlasticity));
             let u = self.units.get_mut(&id).expect("存在");
             u.modulators = m;
-            u.actions = u.brain.step_epoch(&x, m.0, plasticity);
+            let (actions, spikes) = u.brain.step_epoch_metered(&x, m.0, plasticity);
+            u.actions = actions;
+            if let Some(ecology) = &mut self.ecology {
+                ecology.bodies.get_mut(&id).expect("存活个体").pending_spikes = spikes;
+            }
         }
     }
 
@@ -452,6 +456,9 @@ impl ArenaWorld {
         for id in ids {
             let u = &self.units[&id];
             let spec = unit_spec(u.kind);
+            if self.ecology.is_some() && u.defense.hp_milli <= 0 {
+                continue;
+            }
             if spec.harvest_milli_per_s == 0 || u.faction.is_wild() {
                 continue;
             }
@@ -469,6 +476,16 @@ impl ArenaWorld {
             let avail = self.fields.get(FieldId::Nutrient, tx as i64, ty as i64) as i32;
             let take = avail.min(budget);
             if take <= 0 {
+                continue;
+            }
+            if let Some(ecology) = &mut self.ecology {
+                let accepted = ecology
+                    .bodies
+                    .get_mut(&id)
+                    .expect("存活个体")
+                    .account
+                    .receive_field_raw(take as u32);
+                self.fields.add(FieldId::Nutrient, tx, ty, -(accepted as i32));
                 continue;
             }
             self.fields.add(FieldId::Nutrient, tx, ty, -take);

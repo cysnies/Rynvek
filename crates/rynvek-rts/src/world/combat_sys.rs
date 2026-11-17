@@ -391,8 +391,20 @@ impl ArenaWorld {
                 .faction(u.faction)
                 .map(|f| f.modifiers().corpse_recycle_percent)
                 .unwrap_or(75);
+            if let Some(ecology) = &mut self.ecology {
+                let mut account = ecology.bodies.remove(&id).expect("死亡前存在个体账本").account;
+                account.prepare_remains(recycle as u32);
+                let (x, y) = u.tile();
+                ecology.remains.insert(
+                    id,
+                    super::ecology::RemainsEnergy {
+                        cell: (x.min(self.map.width - 1), y.min(self.map.height - 1)),
+                        account,
+                    },
+                );
+            }
             let nutrient_milli = unit_spec(u.kind).cost.biomass * recycle / 100;
-            if let Some((tx, ty)) = u.position.tile() {
+            if let Some((tx, ty)) = u.position.tile().filter(|_| self.ecology.is_none()) {
                 let (tx, ty) = (tx.min(self.map.width - 1), ty.min(self.map.height - 1));
                 self.fields
                     .add(FieldId::Nutrient, tx, ty, (nutrient_milli * 256 / 1000) as i32);

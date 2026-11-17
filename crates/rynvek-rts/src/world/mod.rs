@@ -17,6 +17,7 @@
 //! 所有集合以 `BTreeMap<EntitySerial, _>` 保存并按序号遍历；随机性只来自 Philox。
 
 mod combat_sys;
+pub mod ecology;
 mod economy;
 mod match_sys;
 mod persistence;
@@ -77,6 +78,7 @@ pub enum MatchMode {
 
 /// 对局配置
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "MatchConfigWire")]
 pub struct MatchConfig {
     pub mode: MatchMode,
     pub map_size: ArenaMapSize,
@@ -85,6 +87,37 @@ pub struct MatchConfig {
     pub world_seed: u64,
     /// 玩家阵营数：PvP 固定 2；PvE 为 1 或 2
     pub players: u8,
+    /// 显式、未认证的 PvE 规则版本；缺省绝不默默升级旧世界或排位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ecology: Option<ecology::EcologyVersion>,
+}
+
+#[derive(Deserialize)]
+struct MatchConfigWire {
+    mode: MatchMode,
+    map_size: ArenaMapSize,
+    map_seed: u64,
+    world_seed: u64,
+    players: u8,
+    #[serde(default)]
+    ecology: Option<ecology::EcologyVersion>,
+}
+
+impl TryFrom<MatchConfigWire> for MatchConfig {
+    type Error = &'static str;
+    fn try_from(w: MatchConfigWire) -> Result<Self, Self::Error> {
+        if w.ecology.is_some() && w.mode != MatchMode::PveSurvival {
+            return Err("未认证的能量规则不能进入PvP/排位");
+        }
+        Ok(Self {
+            mode: w.mode,
+            map_size: w.map_size,
+            map_seed: w.map_seed,
+            world_seed: w.world_seed,
+            players: w.players,
+            ecology: w.ecology,
+        })
+    }
 }
 
 impl MatchConfig {
@@ -95,6 +128,7 @@ impl MatchConfig {
             map_seed,
             world_seed: map_seed,
             players: 2,
+            ecology: None,
         }
     }
 
@@ -105,6 +139,7 @@ impl MatchConfig {
             map_seed,
             world_seed: map_seed,
             players,
+            ecology: None,
         }
     }
 }
@@ -403,6 +438,7 @@ pub struct ArenaWorld {
     pub factions: Vec<Faction>,
     pub buildings: BTreeMap<EntitySerial, Building>,
     pub units: BTreeMap<EntitySerial, Unit>,
+    pub ecology: Option<ecology::EcologyState>,
     flow_cache: BTreeMap<(u32, u32), FlowField>,
     flow_order: VecDeque<(u32, u32)>,
     pub pve: Option<PveDirector>,
@@ -436,10 +472,15 @@ impl ArenaWorld {
             config.mode == MatchMode::PveSurvival || config.players == 2,
             "PvP_Ranked 需要 2 个阵营"
         );
+        assert!(
+            config.ecology.is_none() || config.mode == MatchMode::PveSurvival,
+            "能量规则尚未认证，不允许PvP"
+        );
         let nav = NavGrid::from_terrain(map.width, map.height, &map.tiles);
         let hpa = HpaGraph::build(&nav);
         let fields = FieldGrid::for_terrain(map.width, map.height, &map.tiles);
         let mut world = Self {
+            ecology: config.ecology.map(|_| ecology::EcologyState::default()),
             pve: (config.mode == MatchMode::PveSurvival).then(|| PveDirector::new(config.world_seed)),
             config,
             nav,
@@ -636,6 +677,9 @@ impl ArenaWorld {
             actions: [0; 6],
             harvest_remainder: 0,
         };
+        if let Some(ecology) = &mut self.ecology {
+            ecology.bodies.insert(id, ecology::BodyEnergy::default());
+        }
         self.units.insert(id, u);
         self.events.push(RtsEvent::UnitSpawned { id, faction, kind });
         id
@@ -1137,9 +1181,11 @@ impl ArenaWorld {
         }
         self.step_movement();
         self.step_harvest();
+        self.step_metabolism();
         self.step_combat();
         self.step_environment();
         self.step_deaths();
+        self.step_ecology_returns();
         self.tick += 1;
         if self.tick % FOG_UPDATE_INTERVAL_TICKS == 0 {
             self.update_fog();
@@ -1220,6 +1266,9 @@ impl ArenaWorld {
             h.update(&self.map.height.to_le_bytes());
             h.update(&self.map.seed.to_le_bytes());
             h.update(&self.map.tiles_hash().0);
+            if self.config.ecology.is_some() {
+                h.update(b"energy_exchange_v1");
+            }
             Blake3Hash(*h.finalize().as_bytes())
         };
 
@@ -1315,6 +1364,10 @@ impl ArenaWorld {
                 for a in u.actions {
                     h.update(&a.to_le_bytes());
                 }
+            }
+            if let Some(ecology) = &self.ecology {
+                h.update(b"energy_exchange_v1");
+                h.update(&serde_json::to_vec(ecology).expect("能量账本仅含整数与有序键"));
             }
             Blake3Hash(*h.finalize().as_bytes())
         };
