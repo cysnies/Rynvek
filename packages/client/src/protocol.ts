@@ -156,7 +156,17 @@ export interface BuildingView {
   readonly build_progress: number;
   readonly queue: readonly UnitKind[];
   readonly research: TechId | null;
+  /** 当前科研剩余 tick；缺省或 null 表示该建筑没有进行中的科研。 */
+  readonly research_remaining_ticks?: number | null;
+  /** 定向繁育进度。只含兵种与剩余 tick，不含子代基因组。 */
+  readonly breeding?: BreedingView | null;
   readonly beacon: BeaconConfig | null;
+}
+
+/** 与 Rust `BreedingView` 对齐的公开繁育观测。 */
+export interface BreedingView {
+  readonly unit: UnitKind;
+  readonly remaining_ticks: number;
 }
 
 export interface BuildingGhost {
