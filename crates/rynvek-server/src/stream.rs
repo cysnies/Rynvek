@@ -77,7 +77,11 @@ async fn handshake(
         .get_world(world_id)
         .await?
         .ok_or_else(|| ApiError::not_found("世界不存在"))?;
-    authorize(
+    let custom=app.store().custom_room(world_id).await?.is_some();
+    if custom && !crate::api::multiplayer::can_connect(app,&subject,&world).await? {
+        return Err(ApiError::forbidden("自创房间席位未确认、已关闭或身份权限不足"));
+    }
+    if !custom { authorize(
         &subject,
         CapabilityScope::WorldConnect,
         &Resource::World {
@@ -86,7 +90,7 @@ async fn handshake(
             visibility: world.visibility,
         },
     )
-    .map_err(ApiError::from)?;
+    .map_err(ApiError::from)?; }
     let handle = app
         .registry()
         .by_world(&world_id)

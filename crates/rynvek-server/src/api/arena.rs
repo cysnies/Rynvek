@@ -142,6 +142,7 @@ pub async fn run(State(app): State<AppState>, headers: HeaderMap, Path(id): Path
     };
     let host = app
         .attach_world_host(MatchSpec {
+                custom: false,
             match_id: row.match_id,
             world_id: world.world_id,
             league: League::Human,

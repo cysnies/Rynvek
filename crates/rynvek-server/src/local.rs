@@ -95,6 +95,7 @@ pub async fn practice(
         .await?;
     let host = app
         .attach_world_host(MatchSpec {
+                custom: false,
             match_id,
             world_id,
             league: League::Human,

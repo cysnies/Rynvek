@@ -120,6 +120,7 @@ async fn run_energy_contract(params: RoleEnergyContract, expect_death: bool) {
     let host = server
         .state
         .attach_world_host(MatchSpec {
+                custom: false,
             match_id,
             world_id,
             league: League::Human,

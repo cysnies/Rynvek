@@ -100,6 +100,8 @@ pub struct SeatSpec {
 /// 对局规格
 #[derive(Clone, Debug)]
 pub struct MatchSpec {
+    /// 受持久自创房间准入治理；不将自创PvP计入排位。
+    pub custom: bool,
     pub match_id: WireUuid,
     pub world_id: WireUuid,
     pub league: League,
@@ -193,6 +195,7 @@ pub struct QueryReply {
 }
 
 enum HostMsg {
+    CloseCustom { reply: oneshot::Sender<()> },
     /// 仅内部已准入HTTP调用。无连接/命令/租约，沿同Actor一致边界读取fog投影。
     Observe { faction: u8, reply: oneshot::Sender<Result<serde_json::Value, ApiError>> },
     Patch {
@@ -242,6 +245,7 @@ pub struct MatchHandle {
 impl std::fmt::Debug for HostMsg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
+            Self::CloseCustom { .. } => "CloseCustom",
             Self::Observe { .. } => "Observe",
             Self::Patch { .. } => "Patch",
             Self::Join { .. } => "Join",
@@ -259,6 +263,11 @@ fn ended() -> ApiError {
 }
 
 impl MatchHandle {
+    pub(crate) async fn close_custom(&self) -> Result<(), ApiError> {
+        let (reply,rx)=oneshot::channel();
+        if self.tx.send(HostMsg::CloseCustom {reply}).await.is_err() {return Ok(())}
+        rx.await.map_err(|_|ended())
+    }
     pub(crate) async fn observe_faction(&self, faction: u8) -> Result<serde_json::Value, ApiError> {
         let (reply, rx) = oneshot::channel();
         self.tx.send(HostMsg::Observe { faction, reply }).await.map_err(|_| ended())?;
@@ -551,6 +560,7 @@ impl Host {
         rx.close();
         while let Some(m) = rx.recv().await {
             match m {
+                HostMsg::CloseCustom {reply}=>{let _=reply.send(());}
                 HostMsg::Observe { reply, .. } => { let _ = reply.send(Err(ended())); }
                 HostMsg::Patch { reply, .. } => {
                     let _ = reply.send(Err(ended()));
@@ -601,8 +611,26 @@ impl Host {
         }));
     }
 
+    async fn custom_authorized(&mut self) -> bool {
+        if !self.spec.custom {return true}
+        let valid=if let Some(c)=&self.committer {c.store.custom_live(self.spec.world_id,self.spec.match_id,c.fencing_token).await.unwrap_or(false)}else{false};
+        if !valid {self.abort("自创房间准入/身份或世界fence已失效")}
+        valid
+    }
     async fn on_msg(&mut self, msg: HostMsg) {
+        if let HostMsg::CloseCustom {reply}=msg {self.abort("自创席位撤销/离开：整局中止，禁止热换玩家");let _=reply.send(());return;}
+        if !self.custom_authorized().await {
+            match msg {
+                HostMsg::Observe {reply,..}=>{let _=reply.send(Err(ended()));}
+                HostMsg::Patch {reply,..}=>{let _=reply.send(Err(ended()));}
+                HostMsg::Join {reply,..}=>{let _=reply.send(Err(ended()));}
+                HostMsg::Advance {reply,..}=>{let _=reply.send(Err(ended()));}
+                _=>{}
+            }
+            return;
+        }
         match msg {
+            HostMsg::CloseCustom {..}=>unreachable!(),
             HostMsg::Observe { faction, reply } => {
                 let world = &self.session.world;
                 let result = if let Some(observation) = world.observe(FactionId(faction)) { Ok(serde_json::json!({
@@ -767,6 +795,7 @@ impl Host {
     fn drop_conn(&mut self, conn: u64) {
         if let Some(c) = self.conns.remove(&conn) {
             if !self.conns.values().any(|o| o.principal_id == c.principal_id) {
+                if self.spec.custom && self.state==MatchState::Lobby {self.joined.remove(&c.principal_id);}
                 // 离座但保留闸门绑定与租约：断线重连（ResumeToken）后可继续
                 self.session.leave(&c.principal_id.to_string());
             }
@@ -919,7 +948,8 @@ impl Host {
             }
             _ => {}
         }
-        if self.state != MatchState::Running {
+        let lobby_lease=self.spec.custom && self.state==MatchState::Lobby && matches!(env.payload,ArenaClientMessage::AcquireLease{..}|ArenaClientMessage::ReleaseLease{..});
+        if self.state != MatchState::Running && !lobby_lease {
             return self.reject(
                 conn,
                 principal_id,
@@ -1169,6 +1199,7 @@ impl Host {
     }
 
     async fn tick_once(&mut self) {
+        if !self.custom_authorized().await {return}
         if self.state != MatchState::Running {
             return;
         }
@@ -1428,6 +1459,10 @@ impl Host {
     fn abort(&mut self, reason: &str) {
         if self.state.is_terminal() {
             return;
+        }
+        if self.spec.custom {
+            self.scheduled.clear();
+            for seat in &self.spec.seats {self.session.revoke_seat(&seat.principal_id.to_string(),u32::from(seat.faction));self.gate.unbind(seat.principal_id);}
         }
         self.audit(None, "match.aborted", serde_json::json!({ "reason": reason }));
         self.transition(MatchState::Aborted);

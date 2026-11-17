@@ -526,6 +526,7 @@ impl AppState {
             .await?;
         let handle = host::spawn_runtime(
             MatchSpec {
+                custom: false,
                 match_id,
                 world_id,
                 league: pairing.league,

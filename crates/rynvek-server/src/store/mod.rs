@@ -278,6 +278,18 @@ pub struct ObserverGrant {
     pub active: bool,
 }
 
+/// 每个自创PvP世界一份冻结席位生命周期；关闭后须显式fork/新建，不热换玩家或抹历史。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomRoom {
+    pub world_id: WireUuid,
+    pub version: WireUuid,
+    pub guest_id: u64,
+    pub match_id: WireUuid,
+    pub accepted: bool,
+    pub active: bool,
+    pub closed: bool,
+}
+
 /// 存储后端（枚举分发，避免 `dyn` + async trait 的装箱开销与额外依赖）
 #[derive(Clone, Debug)]
 pub enum Store {
@@ -351,6 +363,17 @@ impl Store {
 
     pub async fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {
         dispatch!(self.append_commit(commit, expected_fencing_token))
+    }
+
+    pub async fn custom_live(&self, world: WireUuid, match_id: WireUuid, fence: u64) -> StoreResult<bool> {
+        dispatch!(self.custom_live(world, match_id, fence))
+    }
+    pub async fn custom_room(&self, world: WireUuid) -> StoreResult<Option<CustomRoom>> {
+        dispatch!(self.custom_room(world))
+    }
+    /// CAS房间；首次激活同时插入完整MatchRow/participants，关闭同时轮换世界fence。
+    pub async fn save_custom_room(&self, room: CustomRoom, expected: Option<WireUuid>, activation: Option<(MatchRow, Vec<ParticipantRow>)>) -> StoreResult<()> {
+        dispatch!(self.save_custom_room(room, expected, activation))
     }
 
     pub async fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<ObserverGrant>> {

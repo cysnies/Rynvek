@@ -183,7 +183,38 @@ impl PostgresStore {
             .get(0);
         if !exists { c.batch_execute(POSTGRES_SCHEMA_SQL).await.map_err(db_err)?; }
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0002_observer_grants.sql")).await.map_err(db_err)?;
+        c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0003_custom_rooms.sql")).await.map_err(db_err)?;
         Ok(!exists)
+    }
+
+    pub async fn custom_live(&self, world: WireUuid, match_id: WireUuid, fence: u64) -> StoreResult<bool> {
+        let c=self.client.lock().await;
+        let row=c.query_opt("SELECT r.room_json::text,w.fencing_token,p.status,g.status FROM world_custom_rooms r JOIN worlds w ON w.world_id=r.world_id JOIN principals p ON p.principal_id=w.owner_principal_id JOIN principals g ON g.principal_id=r.guest_id WHERE r.world_id=$1::text::uuid", &[&uuid_text(&world)]).await.map_err(db_err)?;
+        let Some(row)=row else{return Ok(false)};
+        let room:super::CustomRoom=serde_json::from_str(&row.get::<_,String>(0)).map_err(|_|corrupt("自创房间"))?;
+        Ok(room.active&&!room.closed&&room.match_id==match_id&&u(row.get(1))==fence&&row.get::<_,i16>(2)==0&&row.get::<_,i16>(3)==0)
+    }
+    pub async fn custom_room(&self, world: WireUuid) -> StoreResult<Option<super::CustomRoom>> {
+        let c=self.client.lock().await;
+        c.query_opt("SELECT room_json::text FROM world_custom_rooms WHERE world_id=$1::text::uuid", &[&uuid_text(&world)]).await.map_err(db_err)?
+            .map(|r|serde_json::from_str(&r.get::<_,String>(0)).map_err(|_|corrupt("当前自创房间"))).transpose()
+    }
+    pub async fn save_custom_room(&self, room: super::CustomRoom, expected: Option<WireUuid>, activation: Option<(MatchRow, Vec<ParticipantRow>)>) -> StoreResult<()> {
+        let mut c=self.client.lock().await;let tx=c.transaction().await.map_err(db_err)?;
+        tx.query_one("SELECT world_id::text FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE", &[&uuid_text(&room.world_id)]).await.map_err(db_err)?;
+        let previous=tx.query_opt("SELECT version::text FROM world_custom_rooms WHERE world_id=$1::text::uuid", &[&uuid_text(&room.world_id)]).await.map_err(db_err)?;
+        let actual=previous.map(|r|parse_uuid(r.get(0))).transpose()?;
+        if actual!=expected {return Err(crate::transactions::conflict("房间版本冲突，请刷新"))}
+        if let Some((row,parts))=activation {
+            tx.execute("INSERT INTO matches (match_id,world_id,game_mode,ruleset_blake3,map_seed,match_state,total_ticks) VALUES ($1::text::uuid,$2::text::uuid,$3,$4,$5,$6,$7)", &[&uuid_text(&row.match_id),&uuid_text(&row.world_id),&row.game_mode,&row.ruleset_blake3.as_slice(),&i(row.map_seed),&row.match_state.as_str(),&i(row.total_ticks)]).await.map_err(db_err)?;
+            for p in parts {tx.execute("INSERT INTO match_participants (match_id,faction_id,principal_id,controller_league,final_score) VALUES ($1::text::uuid,$2,$3,$4,$5)", &[&uuid_text(&p.match_id),&p.faction_id,&i(p.principal_id),&p.controller_league.as_str(),&p.final_score]).await.map_err(db_err)?;}
+        }
+        if room.closed {
+            tx.execute("UPDATE worlds SET fencing_token=fencing_token+1 WHERE world_id=$1::text::uuid", &[&uuid_text(&room.world_id)]).await.map_err(db_err)?;
+            tx.execute("UPDATE matches SET match_state='Aborted' WHERE match_id=$1::text::uuid AND match_state NOT IN ('Completed','Aborted')", &[&uuid_text(&room.match_id)]).await.map_err(db_err)?;
+        }
+        tx.execute("INSERT INTO world_custom_rooms (world_id,version,guest_id,room_json) VALUES ($1::text::uuid,$2::text::uuid,$3,$4::text::jsonb) ON CONFLICT (world_id) DO UPDATE SET version=EXCLUDED.version,guest_id=EXCLUDED.guest_id,room_json=EXCLUDED.room_json", &[&uuid_text(&room.world_id),&uuid_text(&room.version),&i(room.guest_id),&serde_json::to_string(&room).expect("当前房间可序列化")]).await.map_err(db_err)?;
+        tx.commit().await.map_err(db_err)
     }
 
     pub async fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<super::ObserverGrant>> {

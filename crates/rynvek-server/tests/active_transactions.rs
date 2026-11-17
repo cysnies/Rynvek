@@ -76,6 +76,7 @@ impl Fixture {
             .await
             .unwrap();
         let spec = MatchSpec {
+                custom: false,
             match_id,
             world_id,
             league: League::Human,

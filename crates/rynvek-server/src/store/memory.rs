@@ -21,6 +21,7 @@ struct Tables {
     principals: BTreeMap<u64, PrincipalRow>,
     organizations: BTreeMap<u64, OrgRow>,
     worlds: BTreeMap<WireUuid, WorldRow>,
+    custom_rooms: BTreeMap<WireUuid, super::CustomRoom>,
     observers: BTreeMap<(WireUuid, u64), super::ObserverGrant>,
     world_commits: BTreeMap<(WireUuid, u64), CommitRow>,
     packages: BTreeMap<String, PackageRow>,
@@ -49,6 +50,32 @@ fn missing_fk(what: &str) -> ApiError {
 }
 
 impl MemoryStore {
+    pub fn custom_live(&self, world: WireUuid, match_id: WireUuid, fence: u64) -> StoreResult<bool> {
+        let t=self.lock();
+        Ok(t.custom_rooms.get(&world).is_some_and(|r|r.active&&!r.closed&&r.match_id==match_id
+            && t.worlds.get(&world).is_some_and(|w|w.fencing_token==fence && t.principals.get(&w.owner_principal_id).is_some_and(|p|p.status==PrincipalStatus::Active))
+            && t.principals.get(&r.guest_id).is_some_and(|p|p.status==PrincipalStatus::Active)))
+    }
+    pub fn custom_room(&self, world: WireUuid) -> StoreResult<Option<super::CustomRoom>> {
+        Ok(self.lock().custom_rooms.get(&world).cloned())
+    }
+    pub fn save_custom_room(&self, room: super::CustomRoom, expected: Option<WireUuid>, activation: Option<(MatchRow, Vec<ParticipantRow>)>) -> StoreResult<()> {
+        let mut t=self.lock();
+        if !t.worlds.contains_key(&room.world_id) || !t.principals.contains_key(&room.guest_id) {return Err(missing_fk("自创世界或主体"))}
+        if t.custom_rooms.get(&room.world_id).map(|r|r.version)!=expected {return Err(conflict("房间版本冲突，请刷新"))}
+        let next_fence=t.worlds[&room.world_id].fencing_token.checked_add(1).ok_or_else(||conflict("fence溢出"))?;
+        if let Some((row,parts))=activation {
+            if t.matches.contains_key(&row.match_id) || row.match_id!=room.match_id || row.world_id!=room.world_id || parts.len()!=2
+                || parts.iter().any(|p|p.match_id!=row.match_id || !t.principals.contains_key(&p.principal_id)) {return Err(conflict("冻结完整参赛席位失败"))}
+            for p in parts {t.match_participants.insert((p.match_id,p.faction_id),p);}
+            t.matches.insert(row.match_id,row);
+        }
+        if room.closed {
+            t.worlds.get_mut(&room.world_id).unwrap().fencing_token=next_fence;
+            if let Some(row)=t.matches.get_mut(&room.match_id) {if !row.match_state.is_terminal(){row.match_state=super::MatchState::Aborted;}}
+        }
+        t.custom_rooms.insert(room.world_id,room);Ok(())
+    }
     pub fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<super::ObserverGrant>> {
         Ok(self.lock().observers.values().filter(|g| g.world_id == world && g.active).cloned().collect())
     }
