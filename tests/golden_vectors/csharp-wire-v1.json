@@ -1,0 +1,11 @@
+{
+  "auth_message_hex": "72796e76656b2d617574682f3100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1fffffffffffffffff",
+  "tool_names": [
+    "query_visible_clusters",
+    "sample_regional_fields",
+    "issue_strategic_intent",
+    "configure_signal_beacon",
+    "queue_vat_production",
+    "trigger_crucible_breeding"
+  ]
+}

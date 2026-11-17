@@ -1,0 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 The Rynvek Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors><IsPackable>false</IsPackable></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Rynvek.Client/Rynvek.Client.csproj" /><None Include="../../../tests/golden_vectors/csharp-wire-v1.json" Link="csharp-wire-v1.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+</Project>
