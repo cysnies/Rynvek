@@ -3,8 +3,8 @@
 
 """Rynvek Lab：本地批量多随机种子实验与 Parquet 谱系文件。
 
-实验规格与 ``POST /api/v1/lab/experiments`` 的实验部分相同；三张结果表
-（``runs`` / ``metrics`` / ``lineage``）的列结构与服务端 ``GET .../parquet?table=`` 完全一致，
+实验规格与 ``POST /api/v1/lab/experiments`` 的实验部分相同；四张结果表
+（``runs`` / ``metrics`` / ``lineage`` / ``energy``）的列结构与服务端 ``GET .../parquet?table=`` 完全一致，
 同一规格在本地与服务端产出逐字节相同的 Parquet 文件。
 """
 
@@ -21,8 +21,17 @@ import pyarrow.parquet as pq
 
 from rynvek import _native
 
-TableName = Literal["runs", "metrics", "lineage"]
-TABLES: tuple[TableName, ...] = ("runs", "metrics", "lineage")
+TableName = Literal["runs", "metrics", "lineage", "energy"]
+TABLES: tuple[TableName, ...] = ("runs", "metrics", "lineage", "energy")
+
+
+@dataclass(frozen=True)
+class EcologyContract:
+    """显式Forager生态实验参数，不提供无来源能量默认值。"""
+
+    basal_cost_micro_per_tick: int
+    reserve_ticks: int
+    birth_energy_milli: int
 
 
 @dataclass(frozen=True)
@@ -32,7 +41,8 @@ class Variant:
     label: str
     mode: Literal["pve", "duel"] = "pve"
     players: int | None = None
-    policy: Literal["idle", "economy"] = "economy"
+    policy: Literal["idle", "economy", "ecology"] = "economy"
+    ecology: EcologyContract | None = None
 
 
 @dataclass(frozen=True)
@@ -57,7 +67,7 @@ def sweep(name: str, seeds: Iterable[int], ticks: int, variants: Iterable[Varian
 
 
 class ExperimentResult:
-    """实验结果（三张 Arrow 表）。"""
+    """实验结果（四张 Arrow 表）。"""
 
     def __init__(self, native: _native.Experiment) -> None:
         self._native = native
@@ -79,6 +89,10 @@ class ExperimentResult:
     @property
     def lineage(self) -> pa.Table:
         return self.table("lineage")
+
+    @property
+    def energy(self) -> pa.Table:
+        return self.table("energy")
 
     def parquet(self, table: TableName) -> bytes:
         """Parquet 字节（ZSTD；可直接作为 CAS 内容寻址）。"""
@@ -118,6 +132,7 @@ def read_parquet(data: bytes) -> pa.Table:
 __all__ = [
     "TABLES",
     "ExperimentResult",
+    "EcologyContract",
     "ExperimentSpec",
     "Variant",
     "read_parquet",

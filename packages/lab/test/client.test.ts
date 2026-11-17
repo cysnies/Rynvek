@@ -95,13 +95,20 @@ describe("LabClient", () => {
     await expect(c.waitForParquet("e", { signal: ac.signal })).rejects.toThrow("取消");
   });
 
-  it("downloadAll 下载三张表；非 Parquet 响应被拒绝", async () => {
-    const { fetch } = scripted([ready, ready, ready]);
+  it("downloadAll 下载四张表；非 Parquet 响应被拒绝", async () => {
+    const { fetch } = scripted([ready, ready, ready, ready]);
     const all = await new LabClient({ baseUrl: "http://srv", token: "t", fetch }).downloadAll("e", { sleep: noSleep });
-    expect(Object.keys(all).sort()).toEqual(["lineage", "metrics", "runs"]);
+    expect(Object.keys(all).sort()).toEqual(["energy", "lineage", "metrics", "runs"]);
     const bad = scripted([() => new Response("nope", { status: 200 })]);
     await expect(new LabClient({ baseUrl: "http://srv", token: "t", fetch: bad.fetch }).tryParquet("e")).rejects.toThrow(
       "Parquet",
     );
   });
+});
+
+it("结构化实验状态可直接用于工作台而不解析404消息",async()=>{
+  const {fetch,calls}=scripted([()=>new Response(JSON.stringify({exp_id:"e/1",status:"completed",tables:{energy:"a".repeat(64)}}),{status:200})]);
+  const job=await new LabClient({baseUrl:"http://srv",token:"t",fetch}).getExperiment("e/1");
+  expect(job.status).toBe("completed");
+  expect(calls[0]?.url).toBe("http://srv/api/v1/lab/experiments/e%2F1");
 });

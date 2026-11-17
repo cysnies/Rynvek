@@ -4,8 +4,8 @@
 //! 路由 `17`–`18`：Rynvek Lab 批量多种子演化实验。
 //!
 //! - `17` 校验规格与配额后登记任务（`queued`），后台执行器在并发槽可用时转为 `running`，
-//!   调用 `rynvek_rts::lab::run_experiment`（run 级多线程并行），把 `runs` / `metrics` / `lineage`
-//!   三张表编码为 Parquet 写入 CAS 后转为 `completed`；
+//!   调用 `rynvek_rts::lab::run_experiment`（run 级多线程并行），把 `runs` / `metrics` / `lineage` / `energy`
+//!   四张表编码为 Parquet 写入 CAS 后转为 `completed`；
 //! - `18` 在产出就绪前返回 `0x2002`（消息中带当前状态与进度），就绪后下载 `?table=`（缺省 `metrics`）。
 //!
 //! 实验结果完全确定：同一规格总是得到逐字节相同的 Parquet，CAS 标识可直接用于复现性比对。
@@ -179,27 +179,12 @@ async fn execute(app: AppState, id: String) {
     .await;
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ParquetQuery {
-    #[serde(default)]
-    table: Option<String>,
-}
-
-/// `18 GET /api/v1/lab/experiments/{exp_id}/parquet`（`lab.read`；`?table=runs|metrics|lineage`）
-pub async fn parquet(
-    State(app): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-    Query(q): Query<ParquetQuery>,
-) -> ApiResult<Response> {
-    let subject = app.require(&headers, CapabilityScope::LabRead).await?;
-    let table = match q.table.as_deref() {
-        None => LabTable::Metrics,
-        Some(t) => LabTable::parse(t).ok_or_else(|| ApiError::bad_request("table 必须是 runs / metrics / lineage"))?,
-    };
+// 状态与四表下载统一使用相同的所有者校验，不泄露其他主体的作业存在性。
+async fn owned_experiment(app: &AppState, headers: &HeaderMap, id: &str) -> ApiResult<Experiment> {
+    let subject = app.require(headers, CapabilityScope::LabRead).await?;
     let exp = app
         .experiments()
-        .get(&id)
+        .get(id)
         .cloned()
         .ok_or_else(|| ApiError::not_found("实验不存在"))?;
     // 非所有者与 "不存在" 返回相同错误
@@ -214,6 +199,34 @@ pub async fn parquet(
     {
         return Err(ApiError::not_found("实验不存在"));
     }
+    Ok(exp)
+}
+
+pub async fn status(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
+    let exp = owned_experiment(&app, &headers, &id).await?;
+    Ok(([(header::CACHE_CONTROL, "private, no-store")], Json(exp)).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ParquetQuery {
+    #[serde(default)]
+    table: Option<String>,
+}
+
+/// `18 GET /api/v1/lab/experiments/{exp_id}/parquet`（`lab.read`；`?table=runs|metrics|lineage|energy`）
+pub async fn parquet(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(q): Query<ParquetQuery>,
+) -> ApiResult<Response> {
+    let exp = owned_experiment(&app, &headers, &id).await?;
+    let table = match q.table.as_deref() {
+        None => LabTable::Metrics,
+        Some(t) => {
+            LabTable::parse(t).ok_or_else(|| ApiError::bad_request("table 必须是 runs / metrics / lineage / energy"))?
+        }
+    };
     let cid = exp
         .tables
         .get(table.name())
@@ -231,6 +244,7 @@ pub async fn parquet(
     Ok((
         [
             (header::CONTENT_TYPE, "application/vnd.apache.parquet".to_owned()),
+            (header::CACHE_CONTROL, "private, no-store".to_owned()),
             (
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"{}.{}.parquet\"", exp.exp_id, table.name()),

@@ -21,7 +21,14 @@ export const MAX_NAME_CHARS = 128;
 export const MAX_LABEL_CHARS = 64;
 
 export type LabMode = "pve" | "duel";
-export type PolicyKind = "idle" | "economy";
+export type PolicyKind = "idle" | "economy" | "ecology";
+
+/** 当前Forager供能/出生实验契约；数值必须显式，不是生物学默认常数。 */
+export interface ForagerEcologyContract {
+  readonly basal_cost_micro_per_tick: number;
+  readonly reserve_ticks: number;
+  readonly birth_energy_milli: number;
+}
 
 /** 实验变体（一组对照条件） */
 export interface VariantSpec {
@@ -30,6 +37,7 @@ export interface VariantSpec {
   /** 玩家阵营数；缺省 PvE 为 1、双人局为 2 */
   readonly players?: number;
   readonly policy?: PolicyKind;
+  readonly ecology?: ForagerEcologyContract | null;
 }
 
 /** 实验规格 */
@@ -43,7 +51,7 @@ export interface ExperimentSpec {
 }
 
 /** 服务端基线变体 */
-export const BASELINE_VARIANT: Required<Omit<VariantSpec, "players">> = {
+export const BASELINE_VARIANT: Required<Omit<VariantSpec, "players" | "ecology">> = {
   label: "baseline",
   mode: "pve",
   policy: "economy",
@@ -98,6 +106,23 @@ export function validateSpec(spec: ExperimentSpec): void {
     }
     if (labels.has(v.label)) throw new SpecError(`变体 label 重复：${v.label}`);
     labels.add(v.label);
+    if (v.policy==="ecology" && v.ecology==null) throw new SpecError("ecology策略必须提供显式生态契约");
+    if (v.ecology != null) {
+      if ((v.mode ?? "pve") !== "pve") throw new SpecError("生态实验只允许显式PvE变体");
+      const c=v.ecology;
+      if(typeof c!=="object"||Array.isArray(c)) throw new SpecError("生态契约必须是对象");
+      const allowed=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli"];
+      if (Object.keys(c).some(k=>!allowed.includes(k))) throw new SpecError("未知生态契约字段");
+      for (const [key,value] of Object.entries(c)) {
+        if (!Number.isInteger(value) || value<0 || value>0xffff_ffff || (key!=="reserve_ticks" && value===0)) {
+          throw new SpecError(`生态参数${key}超出u32合法范围`);
+        }
+      }
+      if (allowed.some(key=>!Object.prototype.hasOwnProperty.call(c,key))) throw new SpecError("生态契约必须完整显式配置");
+      if (BigInt(c.basal_cost_micro_per_tick)*BigInt(c.reserve_ticks)*4n > (1n<<64n)-1n) {
+        throw new SpecError("实验代谢预留超出精确能量表示范围");
+      }
+    }
     const p = playerCount(v);
     const ok = (v.mode ?? "pve") === "pve" ? p === 1 || p === 2 : p === 2;
     if (!ok) throw new SpecError(`变体 ${v.label} 的 players=${p} 与模式不符`);
@@ -131,6 +156,7 @@ export function toRequestBody(spec: ExperimentSpec): Record<string, unknown> {
       if (v.mode !== undefined) o["mode"] = v.mode;
       if (v.players !== undefined) o["players"] = v.players;
       if (v.policy !== undefined) o["policy"] = v.policy;
+      if (v.ecology !== undefined) o["ecology"] = v.ecology===null?null:{...v.ecology};
       return o;
     });
   }

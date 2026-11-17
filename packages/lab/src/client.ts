@@ -16,10 +16,10 @@
 
 import { RynvekErrorCode, errorNameOf } from "@rynvek/core";
 
-import { type ExperimentSpec, toRequestBody } from "./spec.js";
+import { type ExperimentSpec, type VariantSpec, type ForagerEcologyContract, toRequestBody } from "./spec.js";
 
-export type LabTable = "runs" | "metrics" | "lineage";
-export const LAB_TABLES: readonly LabTable[] = ["runs", "metrics", "lineage"];
+export type LabTable = "runs" | "metrics" | "lineage" | "energy";
+export const LAB_TABLES: readonly LabTable[] = ["runs", "metrics", "lineage", "energy"];
 
 export type ExperimentStatus = "queued" | "running" | "completed" | "failed";
 
@@ -31,7 +31,7 @@ export interface ExperimentRecord {
   readonly seeds: readonly number[];
   readonly ticks: number;
   readonly sample_every: number;
-  readonly variants: readonly { label: string; mode: string; players: number | null; policy: string }[];
+  readonly variants: readonly (Omit<VariantSpec,"players"|"ecology"> & {players:number|null;ecology:ForagerEcologyContract|null})[];
   readonly status: ExperimentStatus;
   readonly submitted_at_unix_s: number;
   readonly started_at_unix_s: number | null;
@@ -136,6 +136,15 @@ export class LabClient {
     return (await res.json()) as ExperimentRecord;
   }
 
+  /** 私有作业状态/进度/四张结果表CID；未知或非所有者均为404。 */
+  async getExperiment(expId:string):Promise<ExperimentRecord> {
+    const res=await this.#fetch(`${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}`,{
+      headers:{Authorization:`Bearer ${this.#token}`}
+    });
+    if(res.status!==200) throw await this.#error(res);
+    return await res.json() as ExperimentRecord;
+  }
+
   /** 路由 18：下载一次；未就绪返回 `{ pending: 消息 }` */
   async tryParquet(expId: string, table: LabTable = "metrics"): Promise<ParquetTable | { pending: string }> {
     const url = `${this.#base}/api/v1/lab/experiments/${encodeURIComponent(expId)}/parquet?table=${table}`;
@@ -176,13 +185,14 @@ export class LabClient {
     }
   }
 
-  /** 等待并下载全部三张表 */
+  /** 等待并下载全部四张表 */
   async downloadAll(expId: string, opts: Omit<WaitOptions, "table"> = {}): Promise<Record<LabTable, ParquetTable>> {
     const metrics = await this.waitForParquet(expId, { ...opts, table: "metrics" });
-    const [runs, lineage] = await Promise.all([
+    const [runs, lineage, energy] = await Promise.all([
       this.waitForParquet(expId, { ...opts, table: "runs" }),
       this.waitForParquet(expId, { ...opts, table: "lineage" }),
+      this.waitForParquet(expId, { ...opts, table: "energy" }),
     ]);
-    return { runs, metrics, lineage };
+    return { runs, metrics, lineage, energy };
   }
 }

@@ -784,3 +784,47 @@ async fn ryn1_private_checkpoint_survives_host_recreation() {
     assert_eq!(current.latest_state_root, expected.state_root());
     second.shutdown().await;
 }
+
+#[tokio::test]
+async fn ecology_lab_exports_private_real_lineage_energy_and_structured_status() {
+    let server = start_server(false).await;
+    let base = server.base_url();
+    let owner = register(&base, "ecology-lab-owner", "human", 41).await;
+    let other = register(&base, "ecology-lab-other", "human", 42).await;
+    let spec = json!({"name":"自然家谱","seeds":[57],"ticks":600,"sample_every":300,
+    "variants":[{"label":"自然复制","policy":"ecology","ecology":{
+      "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
+    }}]});
+    let response = send(
+        &base,
+        "POST",
+        "/api/v1/lab/experiments",
+        Some(&owner.token),
+        spec.clone(),
+    )
+    .await;
+    assert_eq!(response.status, 202, "{}", String::from_utf8_lossy(&response.body));
+    let job = response.json().unwrap();
+    assert_eq!(job["variants"][0]["ecology"], spec["variants"][0]["ecology"]);
+    let path = format!("/api/v1/lab/experiments/{}", job["exp_id"].as_str().unwrap());
+    assert_error(&get(&base, &path, Some(&other.token)).await, 404, 0x2002);
+    let pq = format!("{path}/parquet");
+    let energy = wait_parquet(&base, &format!("{pq}?table=energy"), Some(&owner.token)).await;
+    assert_eq!(&energy[..4], b"PAR1");
+    let status = get(&base, &path, Some(&owner.token)).await;
+    assert_eq!(status.status, 200);
+    assert_eq!(status.header("cache-control"), Some("private, no-store"));
+    let job = status.json().unwrap();
+    assert_eq!(job["status"], "completed");
+    assert_eq!(job["runs_done"], 1);
+    assert_eq!(job["tables"].as_object().unwrap().len(), 4);
+    let lineage = get(&base, &format!("{pq}?table=lineage"), Some(&owner.token)).await;
+    assert_eq!(lineage.status, 200);
+    assert_eq!(lineage.header("cache-control"), Some("private, no-store"));
+    assert_error(
+        &get(&base, &format!("{pq}?table=energy"), Some(&other.token)).await,
+        404,
+        0x2002,
+    );
+    server.shutdown().await;
+}

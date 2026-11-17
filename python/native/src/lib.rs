@@ -43,8 +43,9 @@ fn parse_policy(name: &str) -> PyResult<PolicyKind> {
     match name {
         "idle" => Ok(PolicyKind::Idle),
         "economy" => Ok(PolicyKind::Economy),
+        "ecology" => Ok(PolicyKind::Ecology),
         other => Err(PyValueError::new_err(format!(
-            "未知策略 {other:?}（可选 idle / economy）"
+            "未知策略 {other:?}（可选 idle / economy / ecology）"
         ))),
     }
 }
@@ -249,7 +250,7 @@ impl ArenaSim {
     }
 }
 
-/// Lab 实验结果（三张冻结列结构的表）
+/// Lab 实验结果（四张当前列结构的表）
 #[pyclass(module = "rynvek._native", frozen)]
 #[derive(Debug)]
 pub struct Experiment {
@@ -258,8 +259,9 @@ pub struct Experiment {
 
 impl Experiment {
     fn batch_of(&self, table: &str) -> PyResult<RecordBatch> {
-        let t = LabTable::parse(table)
-            .ok_or_else(|| PyValueError::new_err(format!("未知表 {table:?}（可选 runs / metrics / lineage）")))?;
+        let t = LabTable::parse(table).ok_or_else(|| {
+            PyValueError::new_err(format!("未知表 {table:?}（可选 runs / metrics / lineage / energy）"))
+        })?;
         arrow_io::table_batch(&self.result, t).map_err(arrow_err)
     }
 }

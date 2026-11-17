@@ -73,6 +73,7 @@ export interface SweepAxes {
   readonly mode?: readonly LabMode[];
   readonly policy?: readonly PolicyKind[];
   readonly players?: readonly number[];
+  readonly ecology?: readonly import("./spec.js").ForagerEcologyContract[];
 }
 
 const playersValid = (mode: LabMode, p: number): boolean => (mode === "pve" ? p === 1 || p === 2 : p === 2);
@@ -90,7 +91,12 @@ export function sweep(axes: SweepAxes): VariantSpec[] {
     for (const policy of policies) {
       for (const p of players) {
         if (!playersValid(mode, p)) continue;
-        out.push({ label: `${mode}-${policy}-p${p}`, mode, policy, players: p });
+        for (const [i,ecology] of (axes.ecology??[undefined]).entries()) {
+          if (ecology!==undefined && mode!=="pve") continue;
+          if (policy==="ecology" && ecology===undefined) continue;
+          out.push({ label: `${mode}-${policy}-p${p}${axes.ecology===undefined?"":`-e${i}`}`, mode, policy, players:p,
+            ...(ecology===undefined?{}:{ecology}) });
+        }
       }
     }
   }

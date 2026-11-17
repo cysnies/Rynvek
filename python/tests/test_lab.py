@@ -37,8 +37,9 @@ def test_tables_have_frozen_schemas(result) -> None:
     assert metrics.schema.field("state_root").type == pa.binary(32)
     # 每 60 Tick 采样一次（含第 300 Tick）：PvE 1 名玩家、双人局 2 名玩家
     assert metrics.num_rows == 2 * 5 * 1 + 2 * 5 * 2
+    assert result.energy.schema.field("stored_q").type == pa.decimal128(38, 0)
     assert result.lineage.num_rows > 0
-    assert result.lineage.column_names == ["run", "faction", "slug", "unit", "generation", "first_seen_tick"]
+    assert result.lineage.column_names == ["run", "faction", "slug", "unit", "generation", "entity", "parent", "origin", "born_tick", "genome", "parent_genome", "allocated_q"]
 
 
 def test_final_state_roots_match_tick_by_tick_simulation(result) -> None:
@@ -55,7 +56,7 @@ def test_final_state_roots_match_tick_by_tick_simulation(result) -> None:
 
 def test_parquet_is_byte_reproducible(result, tmp_path: Path) -> None:
     again = run_experiment(SPEC.to_json())
-    for table in ("runs", "metrics", "lineage"):
+    for table in ("runs", "metrics", "lineage", "energy"):
         data = result.parquet(table)
         assert data[:4] == b"PAR1" and data == again.parquet(table)
         assert read_parquet(data).equals(result.table(table))

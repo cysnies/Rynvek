@@ -39,6 +39,7 @@ describe("与 Rust rynvek_rts::lab 对齐", () => {
     expect(schema("runs_schema")).toEqual(TABLE_COLUMNS.runs);
     expect(schema("metrics_schema")).toEqual(TABLE_COLUMNS.metrics);
     expect(schema("lineage_schema")).toEqual(TABLE_COLUMNS.lineage);
+    expect(schema("energy_schema")).toEqual(TABLE_COLUMNS.energy);
   });
 });
 
@@ -96,4 +97,13 @@ describe("planRuns / toRequestBody", () => {
     });
     expect(() => toRequestBody({ name: "", seeds: [1], ticks: 1 })).toThrow(SpecError);
   });
+});
+
+it("生态扫描只接受完整显式PvE契约，不把缺省规则偷偷开启",()=>{
+  const ecology={basal_cost_micro_per_tick:1000,reserve_ticks:4,birth_energy_milli:1000};
+  const spec={name:"生态",seeds:[57],ticks:60,variants:[{label:"x",policy:"ecology" as const,ecology}]};
+  expect(toRequestBody(spec)).toMatchObject({variants:[{ecology}]});
+  expect(()=>validateSpec({...spec,variants:[{...spec.variants[0]!,mode:"duel"}]})).toThrow();
+  expect(()=>validateSpec({...spec,variants:[{label:"x",policy:"ecology"}]})).toThrow();
+  expect(()=>validateSpec({...spec,variants:[{...spec.variants[0]!,ecology:{...ecology,reserve_ticks:0xffff_ffff,basal_cost_micro_per_tick:0xffff_ffff}}]})).toThrow();
 });
