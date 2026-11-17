@@ -70,4 +70,4 @@ pnpm --dir apps/web-platform exec tsc --noEmit
 
 ## 第三十八批后续消费
 
-新增只读`GET worlds/{id}/authoring/lab-model`同样复用当前Studio源码准入并在返回前重验permit；复制已允许读取的参数模型子集，不授予WorldRead/全快照或控制。原`/lab`与SDK可显式导入、扫描并消费原Engine持久作业四表，见[LAB_PARAMETER_EXPERIMENTS.md](LAB_PARAMETER_EXPERIMENTS.md)。上文一般模型Lab未接及kernel/2是第三十七批历史边界；现行kernel/3。已经授权导出的源副本不能追溯收回。下一完整生命成本及音频/视觉欠项继续，不因协作或实验切片称全项目完成。
+新增只读`GET worlds/{id}/authoring/lab-model`同样复用当前Studio源码准入并在返回前重验permit；复制已允许读取的参数模型子集，不授予WorldRead/全快照或控制。原`/lab`与SDK可显式导入、扫描并消费原Engine持久作业四表，见[LAB_PARAMETER_EXPERIMENTS.md](LAB_PARAMETER_EXPERIMENTS.md)。上文一般模型Lab未接及kernel/2是第三十七批历史边界；第三十八批当时kernel/3；第三十九批现行kernel/4、Arena/11见[LIFE_ACTIVITY_COSTS.md](LIFE_ACTIVITY_COSTS.md)。已经授权导出的源副本不能追溯收回。已有四类动作成本已实付，下一正式音频采样/空间化和视觉制品，通用生长/材料/计算仍欠，不因协作或实验切片称全项目完成。

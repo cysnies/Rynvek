@@ -5,6 +5,26 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第三十九批：已有权威动作的真实生命成本（从main 5da6ee1继续）
+
+**主体继续，整体未完成。** 已实现发射、护盾/Weaver治疗、Spitter真实危害场分泌、设施出生/自然分裂合成四类已有动作的实付链，而不是只添加收费项。设计值显式可改，不冒称原规范冻结；通用生长/物质体量、EMIT一般分泌、规则/连续神经计算及野生供能仍未实现。详细价目、原子性、数学与入口见[LIFE_ACTIVITY_COSTS.md](LIFE_ACTIVITY_COSTS.md)。下一优先正式音频采样/空间化与视觉制品，不无限磨生命治理。
+
+主体代码HEAD：`af54aacbfb861c2bb119047605394defe4b46c7b`（核心`d6cc63b`、SDK`390f8d3`、工作台`af54aac`）；其后文档提交不改变可执行行为，最终推送HEAD见同一项目Page/本次交付回执。
+
+### 真实入口与范围
+
+- `/studio`创建私有PvE的完整`ecology.roles`或对已配置角色提交原参数补丁 → 原Actor/Epoch修订 →「在Arena运行当前世界」：原生产/真实战斗/修复/分泌执行。`/lab`自然生命W3表单显式启用角色、编辑五项新参数 → 原持久实验及四表分析。TS/Python严格合约同步；标准无生态RTS/排位和未配置/野生角色不强启生命收费。C#可连接已有世界，生态创建参数/类型化Lab仍欠，本批未扩展或重跑.NET。
+- 每发身体费只在有有效活目标、可发射且弹药可付时收，闪避不退真实发射费；欠费不启动新冷却/伤害。护盾按自付、治疗按真实活供体付费，均以实际恢复milli计，满量/死源不收；环境伤害先统一结算，稳定序供体不叠加超原光环速率。
+- 分泌实际受原Hazard量程与余额限制，按容纳raw收费，饱和不收、缺钱减量/留残余；不把Hazard价格说成Nutrient能量含量，也不称通用EMIT已实现。设施出生一次实扣birth投入+合成费，合成热耗不变成启动池；自然分裂由亲本付合成并转入子体原投入，HP/护盾拆分不免费复制体量。全部预检后执行，不足不发生/不计账。
+- 真实动作热耗子账`attack_q/repair_q/secretion_q/synthesis_q`已包含在原总dissipated内，不双算；活体/遗骸均保留并入ECOL规范根/快照/WAL。后半Tick恰好耗尽也唯一退役，不留下零池幽灵。Lab四个Decimal128精确列与UI/BigInt实际消费，出生冻结合成费有恢复交叉校验。
+- Arena/11、CURRENT_11、Lab kernel/4；WAL/2框架不变。旧快照/不完整旧合约拒绝、旧kernel run检查点不混算，无自动兼容层或历史数据删除。参数实体profile仍无原生身体/谱系/生命账，不臆造指标。
+
+### 必要验证与未验
+
+39个不同直接用例通过（新增6，重复运行不累计）：原Engine动作5、真实建设/出生队列合成1、600 Tick原Lab谱系/合成热耗/确定Parquet四表1、本机认证HTTP完整价目创建/补丁/私有恢复及owner隔离1、受影响TS规格/精确列25、原React Lab组件6。包含真实文件快照/WAL撕裂尾恢复与死亡后热账；HTTP是协议/恢复快验，不声称本批又跑了Node SDK→Worker完整链或真人浏览器。
+
+rts受影响tests及server tests必要类型编译、Lab build、web tsc --noEmit、Python包装器语法和diff检查通过。未跑workspace/Clippy/license/SBOM/soak/CI轮询；文件撕裂尾/MemoryStore HTTP不是硬杀/PG多机/断电灾备。真实浏览器/GPU/硬件听验/PG实库/并发SQL/长稳、Python扩展/pyarrow及.NET本批未验；无新依赖/公共发行/外部部署/策略绕过，Pi仍仅既有设计借鉴未引源码。
+
 ## 第三十八批：一般参数模型持久Lab/W3与真实四表（从main cd34b4e继续）
 
 **主体继续，整体未完成。** 已闭合真实Studio源捕获 → 不可变有界参数模型/精确单轴×seed扫描 → 原Engine Phase07 → 原持久Lab作业/fenced完整run恢复 → 私有四表 → 原UI/TS SDK真实消费。不是toy runner、只有schema的面板或任意W3/TS/rpack/物理ECS。入口/规格/命令/边界详见[LAB_PARAMETER_EXPERIMENTS.md](LAB_PARAMETER_EXPERIMENTS.md)。
@@ -508,7 +528,7 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 
 ```json
 {"roles":{
-  "unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50},
+  "unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":100,"repair_cost_micro_per_milli":1,"secretion_cost_micro_per_field_raw":1,"birth_synthesis_milli":10,"activity_reserve_milli":10,"replication_mutation_rate_permille":50},
   "unit.striker":{"basal_cost_micro_per_tick":100,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":100,"synapse_maintenance_micro_per_tick":1,"natural_reproduction":false,"replication_mutation_rate_permille":50}
 }}
 ```
@@ -543,7 +563,7 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 ```json
 {"name":"自然家谱","seeds":[57],"ticks":600,"sample_every":300,
  "variants":[{"label":"自然复制","policy":"ecology","ecology":{
- "roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"replication_mutation_rate_permille":50}}}}]}
+ "roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":100,"repair_cost_micro_per_milli":1,"secretion_cost_micro_per_field_raw":1,"birth_synthesis_milli":10,"activity_reserve_milli":10,"replication_mutation_rate_permille":50}}}}]}
 ```
 
 ### 当前事实与数据边界
@@ -565,7 +585,7 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 
 | 顺序 | 可执行工作 | 完成时应有的实际证据 |
 | --- | --- | --- |
-| 已推进，仍有边界 | 第二十批已统一六角色配置，接通其他角色真实供能及运动/突触维护；继续补未覆盖生命成本 | 生物合成/生长、攻击/修复/分泌、野生与非脉冲计算等仍需显式规则；不冒充物质总守恒 |
+| 已推进，仍有边界 | 第二十/三十九批已统一六角色配置与真实供给/运动/维护及发射/修复/分泌/出生合成实付 | 通用生长/材料体量、EMIT、野生与非脉冲/规则计算仍欠；不冒充完整生态或物质总守恒 |
 | 已推进，仍有边界 | 第二十一批已挂载Lab真实工作台并消费W3自然突变规则；第三十三批补持久作业治理，一般W3规则仍欠 | 真四表、自然谱系图、BigInt能量曲线、seed/网格/消融、私有进度/下载已接通；规模上限/控制器干预明确 |
 | 已推进，仍有边界 | 第二十二批已挂载Studio参数/共享基因/动作规则/目录删除与权威撤销；一般TS/rpack/模板/协作流仍欠 | 当前只支持显式绑定范围，不伪称所有参数/编辑器完成 |
 | 已推进，仍有边界 | 第二十三批已有Studio世界运行/重连/节点上下文恢复、完整运行WAL私有签名重演 | 真实单人PvE/原Actor；前置编辑过程/多人席位/客户端独立验签/持久抽帧索引仍欠 |
@@ -584,7 +604,8 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 | 已推进，仍有边界 | 第三十六批非既有角色参数实体模板/实例/绑定、原Engine执行、规范root/COMP/WAL与Studio/SDK | 有界I32/Q8_8/Bool RuleGraph，不是任意TS/rpack或物理ECS；Arena/10旧格式拒绝；第三十八批已接有界模型Lab，仍非任意脚本 |
 | 已推进，仍有边界 | 第三十七批所有者定向源码编辑准入、原日志协作/选择性撤销、撤权与断线重连 | 单权威链/显式同步非离线多主；PG/浏览器未验，presence/光标/大历史索引仍欠 |
 | 已推进，仍有边界 | 第三十八批一般参数模型→持久Lab/W3扫描→原四表/UI SDK真实消费 | 无原生身体/自然谱系/生命账；bounded RuleGraph不是任意TS/rpack，真HTTP/同Store重建非PG灾备 |
-| 下一主体优先 | 完整生命成本，再正式音频采样/空间化与视觉制品 | 显式来源/计价→原池真实支付→行动/死亡/根恢复，不无限磨Lab或治理 |
+| 已推进，仍有边界 | 第三十九批真实发射、护盾/治疗、Spitter分泌与出生合成实付、规范根/WAL与Lab精确子账 | 显式玩家角色；不是一般生长/材料合成或EMIT/连续计算计价，真实PG/硬件仍未验 |
+| 下一主体优先 | 正式音频采样/空间化，再视觉registry/制品 | 受限真实制品→私有校验/发现/下载→原Arena消费，手势与fog边界保留，不生成无关音乐资产 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付一般参数模型从真实Studio源到原Engine/持久Lab扫描/私有四表/UI SDK的消费链；下一优先完整生命成本，再正式采样/空间化与视觉制品等欠项，不宣称整个Arena、项目、全生态、W3一般规则或所有生命周期成本已经完成。每个可交付阶段普通 commit/push 后继续上述缺口，只有真实阻塞才请求最小用户动作。
+本阶段交付已有四类原生动作从明确价格/真实来源到原池支付、实际作用、死亡/规范根/WAL恢复及Lab子账/UI SDK的完整段；下一正式音频采样/空间化与视觉制品，通用生长/材料/计算等欠项仍保留。不要将这批可用动作链称为全生态或全项目完成。每个可交付阶段普通commit/push后继续主体，只有真实阻塞才请求最小用户动作。

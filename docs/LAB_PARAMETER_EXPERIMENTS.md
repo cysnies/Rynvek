@@ -86,3 +86,7 @@ pnpm --filter @rynvek/web-platform exec tsc -p tsconfig.build.json --noEmit
 恢复验证是**同MemoryStore+真实私有文件CAS重建AppState/HTTP服务**，首个完整run检查点为原Engine真实计算并手工登记；不是实际硬杀worker、Memory跨OS进程持久化或PG多机灾备。生产跨进程仍需原PG/持久共享CAS/稳定鉴权。未连接实PG、多机/故障分区/断电/长稳未验；实际浏览器/GPU-WASM/物理硬件未验。没有全workspace/Clippy/license/SBOM/soak/CI轮询、WASM/Vite重建、外部发行/部署、新依赖或网络绕过。
 
 下一优先完整生命成本（攻击/修复/分泌/生长合成及仍缺计算计价），随后正式音频采样/空间化、视觉registry/制品；一般规则世界/TS-rpack/.rview、独立Agent赛道/真实LLM与协作presence等仍欠。Pi仍MIT设计借鉴未引代码；主体齐后集中全面验收，持续任务不关闭。
+
+## 第三十九批现行格式与下一主体
+
+原生身体实际动作成本升级为Arena/11、CURRENT_11与Lab kernel/4，旧run检查点不混算；参数实体仍无原生身体、谱系及生命账，不受该成本域计费。上文kernel/3、Arena/10与下一生命成本是第三十八批历史边界，现行详见[LIFE_ACTIVITY_COSTS.md](LIFE_ACTIVITY_COSTS.md)。下一优先正式音频采样/空间化与视觉制品，通用生长/材料/计算仍欠，整体未完成。
