@@ -724,3 +724,146 @@ async fn studio_arena_recovery_keeps_same_match_and_prefence_wal() {
     resumed.shutdown().await;
     original.shutdown().await;
 }
+
+/// 仅本机两个注册夹具；不联系外部对手、不向真实服务发布对局。
+#[tokio::test]
+async fn ranked_entry_discovers_real_identity_cancels_and_reconnects_authorized_seat() {
+    use rynvek_server::client;
+    let server = local_server().await;
+    let base = server.base_url();
+    let path = format!("{base}/api/v1/matches/queue");
+    let alice = register(&base, "rank-entry-a", "human", 101).await;
+    let bob = register(&base, "rank-entry-b", "human", 102).await;
+    let bot = register(&base, "rank-entry-agent", "agent", 103).await;
+    assert_eq!(client::get(&path, None).await.unwrap().status, 401);
+    assert_eq!(client::get(&path, Some(&bot.token)).await.unwrap().status, 403);
+    let context = client::get(&path, Some(&alice.token)).await.unwrap();
+    assert_eq!(context.header("cache-control"), Some("private, no-store"));
+    let context = context.json().unwrap();
+    assert_eq!(context["principal_id"], alice.principal_id.to_string());
+    assert_eq!(context["status"], "idle");
+    let req = json!({"league":"human", "ruleset_hash":context["ruleset_hash"]});
+    let poll = json!({"poll":true,"league":"human", "ruleset_hash":context["ruleset_hash"]});
+    let cancel = json!({"cancel":true,"league":"human", "ruleset_hash":context["ruleset_hash"]});
+    assert_eq!(
+        client::send_json("POST", &path, Some(&alice.token), &poll)
+            .await
+            .unwrap()
+            .json()
+            .unwrap()["status"],
+        "not_queued"
+    );
+    assert_eq!(server.state.matchmaker().len(), 0);
+    assert_eq!(
+        client::send_json("POST", &path, Some(&alice.token), &req)
+            .await
+            .unwrap()
+            .status,
+        202
+    );
+    assert_eq!(
+        client::get(&path, Some(&alice.token)).await.unwrap().json().unwrap()["status"],
+        "queued"
+    );
+    assert_eq!(
+        client::send_json("POST", &path, Some(&alice.token), &cancel)
+            .await
+            .unwrap()
+            .json()
+            .unwrap()["status"],
+        "cancelled"
+    );
+    client::send_json("POST", &path, Some(&alice.token), &req)
+        .await
+        .unwrap();
+    // 并发的刷新与第二身份入队只发布一个宿主，取消后返回实际已配对席位。
+    let (_, b) = tokio::join!(
+        client::send_json("POST", &path, Some(&alice.token), &poll),
+        client::send_json("POST", &path, Some(&bob.token), &req)
+    );
+    let b = b.unwrap().json().unwrap();
+    assert_eq!(b["principal_id"], bob.principal_id.to_string());
+    let a = client::send_json("POST", &path, Some(&alice.token), &cancel)
+        .await
+        .unwrap()
+        .json()
+        .unwrap();
+    assert_eq!(a["status"], "matched");
+    assert_eq!(a["match_id"], b["match_id"]);
+    assert_eq!(a["mode"], "PvP_Ranked");
+    assert_ne!(a["faction"], b["faction"]);
+    assert_eq!(server.state.registry().active_count(), 1);
+    let host = server
+        .state
+        .registry()
+        .by_world(&a["world_id"].as_str().unwrap().parse().unwrap())
+        .unwrap();
+    let mut wa = json_connect(&server, &a, &alice.token, a["faction"].as_u64().unwrap() as u32).await;
+    assert_eq!(recv_type(&mut wa, "welcome").await["faction"], a["faction"]);
+    let mut wb = json_connect(&server, &b, &bob.token, b["faction"].as_u64().unwrap() as u32).await;
+    assert_eq!(recv_type(&mut wb, "welcome").await["faction"], b["faction"]);
+    host.wait_for(|s| s.state == rynvek_server::store::MatchState::Running)
+        .await;
+    let obs_b = recv_type(&mut wb, "observation").await;
+    let enemy = obs_b["observation"]["units"][0]["id"].clone();
+    send_json(&mut wa, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
+    let fence = recv_type(&mut wa, "lease").await["lease"]["fencing_token"].clone();
+    send_json(&mut wa,json!({"type":"command","seq":2,"fencing_token":fence,"command":{"type":"issue_order","units":{"kind":"ids","value":[enemy]},"order":"Move","target":[0,0]}})).await;
+    host.wait_for(|s| s.pending_inputs == 1).await;
+    host.advance(1).await.unwrap();
+    assert!(
+        recv_type(&mut wa, "ack").await["error"].is_object(),
+        "不得指挥另一真实席位的单位"
+    );
+    // 同身份重连取代旧连接；浏览器不保存旧租约，先由服务器重新确认。
+    // 原租约按既有协议可保留到过期；不把同身份续租伪称撤销。
+    let mut again = json_connect(&server, &a, &alice.token, a["faction"].as_u64().unwrap() as u32).await;
+    recv_type(&mut again, "welcome").await;
+    send_json(
+        &mut again,
+        json!({"type":"command","seq":3,"fencing_token":0,"command":{"type":"surrender"}}),
+    )
+    .await;
+    host.wait_for(|s| s.pending_inputs == 1).await;
+    host.advance(1).await.unwrap();
+    assert!(recv_type(&mut again, "ack").await["error"].is_object());
+    send_json(&mut again, json!({"type":"acquire_lease","seq":4,"level":"Sovereign"})).await;
+    let new_fence = recv_type(&mut again, "lease").await["lease"]["fencing_token"].clone();
+    send_json(
+        &mut again,
+        json!({"type":"release_lease","seq":6,"fencing_token":new_fence}),
+    )
+    .await;
+    recv_type(&mut again, "lease").await;
+    send_json(&mut again, json!({"type":"acquire_lease","seq":7,"level":"Sovereign"})).await;
+    let latest = recv_type(&mut again, "lease").await["lease"]["fencing_token"].clone();
+    assert_ne!(latest, new_fence);
+    send_json(
+        &mut again,
+        json!({"type":"command","seq":8,"fencing_token":new_fence,"command":{"type":"surrender"}}),
+    )
+    .await;
+    host.wait_for(|s| s.pending_inputs == 1).await;
+    host.advance(1).await.unwrap();
+    assert!(recv_type(&mut again, "ack").await["error"].is_object());
+    let new_fence = latest;
+    send_json(
+        &mut again,
+        json!({"type":"command","seq":5,"fencing_token":new_fence,"command":{"type":"surrender"}}),
+    )
+    .await;
+    host.wait_for(|s| s.pending_inputs == 1).await;
+    host.advance(1).await.unwrap();
+    assert_eq!(recv_type(&mut again, "ack").await["ack"]["type"], "surrendered");
+    host.wait_for(|s| s.state.is_terminal()).await;
+    assert_eq!(
+        client::send_json("POST", &path, Some(&alice.token), &poll)
+            .await
+            .unwrap()
+            .json()
+            .unwrap()["status"],
+        "not_queued"
+    );
+    assert_eq!(server.state.matchmaker().len(), 0);
+    server.shutdown().await;
+}

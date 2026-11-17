@@ -29,12 +29,18 @@ struct QueueRequest {
     /// `true` 表示离队
     #[serde(default)]
     cancel: bool,
+    /// 仅刷新已有队列，不得在终局或未知身份离队后重新入队。
+    #[serde(default)]
+    poll: bool,
 }
 
 fn matched_json(app: &AppState, h: &MatchHandle, principal_id: u64) -> serde_json::Value {
     let status = h.status();
     serde_json::json!({
         "status": "matched",
+        "principal_id": principal_id.to_string(),
+        "mode": h.mode,
+        "tick": status.tick,
         "faction": h.seats.get(&principal_id),
         "match_id": h.match_id.to_string(),
         "world_id": h.world_id.to_string(),
@@ -46,8 +52,19 @@ fn matched_json(app: &AppState, h: &MatchHandle, principal_id: u64) -> serde_jso
 
 /// `10 POST /api/v1/matches/queue`（`match.play`）
 ///
-/// 幂等：已在进行中对局里的主体直接得到该对局；否则入队并立即尝试配对。客户端以相同请求轮询。
-pub async fn queue(State(app): State<AppState>, headers: HeaderMap, body: Bytes) -> ApiResult<Response> {
+/// 幂等：活动主体返回原对局；显式入队才新建队列成员。后续用 `poll=true` 刷新，不能终局后自动重入。
+pub async fn queue(state: State<AppState>, headers: HeaderMap, body: Bytes) -> ApiResult<Response> {
+    let mut response = queue_inner(state, headers, body).await?;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, "private, no-store".parse().expect("固定头"));
+    response
+        .headers_mut()
+        .insert(header::VARY, "Authorization".parse().expect("固定头"));
+    Ok(response)
+}
+
+async fn queue_inner(State(app): State<AppState>, headers: HeaderMap, body: Bytes) -> ApiResult<Response> {
     let subject = app.require(&headers, CapabilityScope::MatchPlay).await?;
     let req: QueueRequest = super::parse_json(&body)?;
     let league = League::parse(&req.league)
@@ -66,14 +83,20 @@ pub async fn queue(State(app): State<AppState>, headers: HeaderMap, body: Bytes)
         ));
     }
     let pid = subject.principal_id;
+    let _gate = app.inner.matchmaking_gate.lock().await;
+    if let Some(h) = app.registry().active_for(pid) {
+        // 取消不能撤销已经配对的对局；明确回报实际席位而非假离队。
+        return Ok(Json(matched_json(&app, &h, pid)).into_response());
+    }
     if req.cancel {
         let removed = app.matchmaker().cancel(pid);
-        return Ok(
-            Json(serde_json::json!({ "status": if removed { "cancelled" } else { "not_queued" } })).into_response(),
-        );
+        return Ok(Json(serde_json::json!({
+            "status": if removed { "cancelled" } else { "not_queued" }
+        }))
+        .into_response());
     }
-    if let Some(h) = app.registry().active_for(pid) {
-        return Ok(Json(matched_json(&app, &h, pid)).into_response());
+    if req.poll && !app.matchmaker().is_queued(pid) {
+        return Ok(Json(serde_json::json!({"status":"not_queued"})).into_response());
     }
     let rating = app.store().get_rating(pid, league).await?;
     let now = unix_now_s();
@@ -110,6 +133,30 @@ pub async fn queue(State(app): State<AppState>, headers: HeaderMap, body: Bytes)
             "league": league,
             "position": position,
             "rating": rating.rating,
+        })),
+    )
+        .into_response())
+}
+
+/// 已认证的人类排位入口上下文；只读，不入队、不分配身份、不创建对手。
+/// 可刷新后找回当前席位；队列与活动宿主仍为本节点进程内状态。
+pub async fn queue_context(State(app): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
+    let subject = app.require(&headers, CapabilityScope::MatchPlay).await?;
+    authorize(&subject, CapabilityScope::MatchPlay, &league_resource(League::Human)).map_err(ApiError::from)?;
+    let _gate = app.inner.matchmaking_gate.lock().await;
+    let active = app.registry().active_for(subject.principal_id);
+    let queued = app.matchmaker().is_queued(subject.principal_id);
+    Ok((
+        [
+            (header::CACHE_CONTROL, "private, no-store"),
+            (header::VARY, "Authorization"),
+        ],
+        Json(serde_json::json!({
+            "principal_id": subject.principal_id.to_string(),
+            "league": "human",
+            "ruleset_hash": hex(&arena_ruleset_hash()),
+            "status": if active.is_some() { "matched" } else if queued { "queued" } else { "idle" },
+            "active": active.as_ref().map(|h| matched_json(&app, h, subject.principal_id)),
         })),
     )
         .into_response())

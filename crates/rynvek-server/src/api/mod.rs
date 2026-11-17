@@ -60,7 +60,10 @@ pub fn router(state: AppState) -> Router {
             post(worlds::compile_authoring_rule),
         )
         .route("/api/v1/worlds/{world_id}/stream", get(worlds::stream))
-        .route("/api/v1/matches/queue", post(matches::queue))
+        .route(
+            "/api/v1/matches/queue",
+            post(matches::queue).get(matches::queue_context),
+        )
         .route("/api/v1/matches/{match_id}", get(matches::get_match))
         .route("/api/v1/matches/{match_id}/replay", get(matches::replay))
         .route(

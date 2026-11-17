@@ -230,6 +230,7 @@ pub struct MatchHandle {
     pub match_id: WireUuid,
     pub world_id: WireUuid,
     pub league: League,
+    pub mode: rynvek_rts::world::MatchMode,
     /// principal_id → 阵营（入场时客户端据此填写 `ClientHello.faction`）
     pub seats: BTreeMap<u64, u8>,
     tx: mpsc::Sender<HostMsg>,
@@ -370,6 +371,7 @@ pub fn spawn_runtime(
         state_root: runtime.state_root(),
     });
     let handle = MatchHandle {
+        mode: spec.config.mode,
         match_id: spec.match_id,
         world_id: spec.world_id,
         league: spec.league,

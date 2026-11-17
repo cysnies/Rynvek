@@ -162,6 +162,8 @@ pub struct AppInner {
     pub tokens: RwLock<TokenAuthority>,
     pub challenges: Mutex<AuthChallenges>,
     pub matchmaker: Mutex<Matchmaker>,
+    /// 配对到宿主发布期间串行化查询/取消，避免报告虚假离队或重复建局。
+    pub matchmaking_gate: tokio::sync::Mutex<()>,
     pub registry: Mutex<MatchRegistry>,
     pub experiments: Mutex<BTreeMap<String, Experiment>>,
     /// Lab 执行并发槽
@@ -223,6 +225,7 @@ impl AppState {
                 tokens: RwLock::new(TokenAuthority::new(signer.clone())),
                 challenges: Mutex::new(AuthChallenges::new().map_err(ApiError::from)?),
                 matchmaker: Mutex::new(Matchmaker::new()),
+                matchmaking_gate: tokio::sync::Mutex::new(()),
                 registry: Mutex::new(MatchRegistry::default()),
                 experiments: Mutex::new(BTreeMap::new()),
                 lab_slots: Arc::new(tokio::sync::Semaphore::new(config.lab_max_concurrent.max(1))),
