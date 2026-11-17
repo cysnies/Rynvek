@@ -169,6 +169,18 @@ fn lif_batch_gpu_matches_cpu_bit_exact() {
             gpu_energy[i].receive_field_raw(1);
             let a = cpu[i].spike_ring.iter().filter(|r| **r & 1 != 0).count() as u32;
             let b = gpu_view[i].spike_ring.iter().filter(|r| **r & 1 != 0).count() as u32;
+            // 预算许可也从真实下载发放计价；不足时账户完全不变。
+            // 这里只验证CPU/GPU输出的同一许可判断，不声称GPU候选回滚核已实现。
+            let mut cpu_budget = cpu_energy[i].clone();
+            let mut gpu_budget = gpu_energy[i].clone();
+            let before = cpu_budget.clone();
+            let admitted = cpu_budget.try_charge_spikes(a, cost);
+            assert_eq!(admitted, gpu_budget.try_charge_spikes(b, cost));
+            assert_eq!(cpu_budget, gpu_budget);
+            if !admitted {
+                assert_eq!(cpu_budget, before);
+            }
+            assert!(cpu_budget.is_conserved());
             assert_eq!(
                 cpu_energy[i].charge_spikes(a, cost),
                 gpu_energy[i].charge_spikes(b, cost)

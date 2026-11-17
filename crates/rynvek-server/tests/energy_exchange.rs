@@ -26,6 +26,15 @@ async fn restored(server: &RunningServer, world_id: WireUuid) -> ArenaRuntime {
 
 #[tokio::test]
 async fn explicit_pve_energy_version_is_authoritative_private_and_replayable() {
+    run_energy_version("energy_exchange_v1", EcologyVersion::EnergyExchangeV1).await;
+}
+
+#[tokio::test]
+async fn explicit_forager_budget_version_uses_real_actor_and_wal() {
+    run_energy_version("forager_budget_v2", EcologyVersion::ForagerBudgetV2).await;
+}
+
+async fn run_energy_version(name: &str, version: EcologyVersion) {
     let server = start_server(false).await;
     let base = server.base_url();
     let owner = register(&base, "energy-owner", "human", 101).await;
@@ -34,12 +43,19 @@ async fn explicit_pve_energy_version_is_authoritative_private_and_replayable() {
         "POST",
         &url,
         Some(&owner.token),
-        &json!({"title":"禁止排位换规则","template":"arena_duel","ecology":"energy_exchange_v1"}),
+        &json!({"title":"禁止排位换规则","template":"arena_duel","ecology":name}),
     )
     .await
     .unwrap();
     assert_eq!(forbidden.status, 400);
-    let created = client::send_json("POST", &url,Some(&owner.token), &json!({"title":"真实能量交换","template":"arena_pve","map_seed":57,"visibility":"Public","ecology":"energy_exchange_v1"})).await.unwrap();
+    let created = client::send_json(
+        "POST",
+        &url,
+        Some(&owner.token),
+        &json!({"title":"真实能量交换","template":"arena_pve","map_seed":57,"visibility":"Public","ecology":name}),
+    )
+    .await
+    .unwrap();
     assert_eq!(created.status, 201, "{:?}", created.json());
     let world_id: WireUuid = created.json().unwrap()["world_id"].as_str().unwrap().parse().unwrap();
     let match_id = rynvek_server::ids::new_uuid_v7();
@@ -74,7 +90,7 @@ async fn explicit_pve_energy_version_is_authoritative_private_and_replayable() {
         .await
         .unwrap();
     let mut config = MatchConfig::pve(57, 1);
-    config.ecology = Some(EcologyVersion::EnergyExchangeV1);
+    config.ecology = Some(version);
     let host = server
         .state
         .attach_world_host(MatchSpec {
@@ -202,4 +218,74 @@ async fn explicit_pve_energy_version_is_authoritative_private_and_replayable() {
         0
     );
     server.shutdown().await;
+}
+
+#[test]
+fn budget_denial_and_real_refeeding_survive_serialized_tick_wal() {
+    use rynvek_rts::commands::{RtsCommand, UnitSelector};
+    use rynvek_rts::{ArenaMap, ArenaWorld, FactionId, TerrainTileKind, UnitKind};
+    use rynvek_server::transactions::TickRecord;
+    let mut cfg = MatchConfig::pve(57, 1);
+    cfg.ecology = Some(EcologyVersion::ForagerBudgetV2);
+    let mut world = ArenaWorld::with_map(
+        cfg,
+        ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),
+    );
+    let id = *world.units.iter().find(|(_, u)| u.kind == UnitKind::Forager).unwrap().0;
+    let u = world.units.get_mut(&id).unwrap();
+    let mut g = u.genome.clone();
+    g.model = rynvek_rts::genome::seed_genome_spec(UnitKind::Striker).model;
+    g.w_in.fill(256);
+    let n = g.n_hid as usize;
+    let harvest = rynvek_rts::genome::action::HARVEST;
+    g.w_out[harvest * n..(harvest + 1) * n].fill(512);
+    u.brain = rynvek_rts::brain::UnitBrain::from_genome(&g).unwrap();
+    u.genome = g;
+    let target = u.position;
+    world
+        .apply_command(
+            FactionId(0),
+            &RtsCommand::IssueOrder {
+                units: UnitSelector::Archetype(Some(UnitKind::Forager)),
+                order: rynvek_rts::OrderKind::Harvest,
+                target,
+            },
+        )
+        .unwrap();
+    let before = world.units[&id].brain.state_root();
+    let mut original = ArenaRuntime::new([76; 16], world);
+    let cp = original.checkpoint().unwrap();
+    let mut replay = ArenaRuntime::restore([76; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
+    for step in 0..13 {
+        let base_revision = original.revision();
+        let base_root = original.state_root();
+        let target_tick = original.tick + 1;
+        let mut next = original.candidate_tick().unwrap();
+        next.finish_tick().unwrap();
+        let record = TickRecord {
+            format: "rynvek-tick/1".into(),
+            base_revision,
+            base_root,
+            target_tick,
+            tick: next.tick,
+            revision: next.revision(),
+            state_root: next.state_root(),
+            inputs: vec![],
+        };
+        let bytes = serde_json::to_vec(&record).unwrap();
+        let saved: TickRecord = serde_json::from_slice(&bytes).unwrap();
+        replay = saved.replay(&replay).unwrap();
+        assert_eq!(replay.state_root(), next.state_root());
+        if step == 0 {
+            assert_eq!(next.units[&id].brain.state_root(), before);
+            assert_eq!(next.ecology.as_ref().unwrap().bodies[&id].account.dissipated_q, 0);
+        }
+        original = next;
+    }
+    let a = &original.ecology.as_ref().unwrap().bodies[&id].account;
+    assert!(a.received_q > 0);
+    assert!(a.dissipated_q > 0);
+    assert_eq!(a.unfunded_q, 0);
+    assert!(a.is_conserved());
+    assert_ne!(original.units[&id].brain.state_root(), before);
 }
