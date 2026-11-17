@@ -31,3 +31,6 @@ pub mod provider;
 pub use engine::{Engine, EngineConfig, EngineError, EngineStats, FaultInjection};
 pub use protocol::{ComputeBackendKind, EngineCommand, EngineEvent, GpuMode};
 pub use provider::{ArenaVisualizationProvider, EntityProvider, WorldRuntime};
+
+/// 与服务器共用的 Arena 领域权威事务。
+pub use rynvek_rts::ArenaRuntime;

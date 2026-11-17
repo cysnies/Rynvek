@@ -39,6 +39,7 @@ pub mod nav;
 pub mod observation;
 pub mod pve;
 pub mod resources;
+pub mod runtime;
 pub mod tech;
 pub mod terrain;
 pub mod units;
@@ -53,3 +54,5 @@ pub use world::{
     ArenaWorld, BreedJob, Building, CanonicalWorldState, Faction, MatchConfig, MatchMode, MatchOutcome, Order,
     ProductionJob, RecordedCommand, RtsEvent, Unit, VictoryReason,
 };
+
+pub use runtime::{ArenaRuntime, RuntimeCheckpoint};

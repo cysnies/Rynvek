@@ -125,9 +125,21 @@ impl WorldPatch {
     /// 基因、规则、模板及其他参数尚未接通，返回 `PluginCapabilityDenied`，不伪报成功。
     /// 此入口不会替代服务器的排队、权限、修订与 Tick 边界调度。
     pub fn apply_to_arena(&self, world: &mut ArenaWorld) -> Result<PatchApplyReport, RynvekErrorCode> {
+        self.apply_at_boundary(world, world.tick)
+    }
+
+    /// 主时钟调度入口：只接受当前边界或下一 Tick 的 Phase 01 边界。
+    pub fn apply_at_boundary(
+        &self,
+        world: &mut ArenaWorld,
+        effective_tick: u64,
+    ) -> Result<PatchApplyReport, RynvekErrorCode> {
         self.validate_safety()?;
+        if effective_tick != world.tick && world.tick.checked_add(1) != Some(effective_tick) {
+            return Err(RynvekErrorCode::SimulationInvariantViolated);
+        }
         if self.safety_class == LiveEditSafetyClass::EpochBoundarySafe
-            && world.tick % (rynvek_core::constants::COUPLING_EPOCH_TICKS as u64) != 0
+            && effective_tick % (rynvek_core::constants::COUPLING_EPOCH_TICKS as u64) != 0
         {
             return Err(RynvekErrorCode::SimulationInvariantViolated);
         }
