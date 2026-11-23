@@ -20,12 +20,7 @@ pub const ACTION_COMPONENTS: [&str; 6] = [
     "unit.actions.defense",
     "unit.actions.emit",
 ];
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AuthoredRule {
-    pub rule_graph_json: String,
-    pub compiled_rir_blake3: [u8; 32],
-    pub rir: Vec<u8>,
-}
+pub use rynvek_rules::components::AuthoredRule;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthoringState {
     /// 最近创作提交的权威修订；普通Tick不使安全边界排队的编辑自行过期。
@@ -38,13 +33,7 @@ pub struct AuthoringState {
     /// 拒绝整个动作写集合，保留原脑动作；错误事实入根和快照，工作台可见。
     pub rule_fault: Option<(String, u16)>,
 }
-pub fn valid_authoring_key(key: &str) -> bool {
-    !key.is_empty()
-        && key.len() <= 128
-        && key
-            .split(['-', '_', '.'])
-            .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
-}
+pub use rynvek_rules::components::valid_authoring_key;
 pub fn compile_action_rule(source: &str) -> Result<RuleModule, RynvekErrorCode> {
     compile_action_rule_detailed(source).map_err(|e| e.code)
 }
@@ -139,9 +128,13 @@ impl ArenaWorld {
     pub(super) fn step_authored_rules_budgeted(&mut self, gas_budget: u64) {
         let mut remaining = gas_budget;
         self.parameter_state.tier1_gas_charged = 0;
-        let original = self.parameter_state.clone();
-        self.step_parameter_rules(&mut remaining);
-        if self.parameter_state.fault.is_none() { self.step_tier1_rules(&original, &mut remaining); }
+        use rynvek_rules::components::RegistrySource;
+        self.authoring.component_registry().execute(
+            &mut self.parameter_state,
+            self.tick,
+            self.config.world_seed,
+            &mut remaining,
+        );
         if self.parameter_state.fault.is_some() {
             return; // 失败的参数候选已用过预算，不允许后续动作规则重新使用该份额度。
         }

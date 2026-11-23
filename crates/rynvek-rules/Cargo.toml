@@ -17,6 +17,7 @@ quickjs = ["dep:rquickjs"]
 wasmtime = ["dep:wasmtime", "dep:wasmparser"]
 
 [dependencies]
+blake3.workspace = true
 rquickjs = { workspace = true, optional = true }
 rynvek-core.workspace = true
 serde.workspace = true

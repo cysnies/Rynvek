@@ -16,6 +16,8 @@
 
 #![deny(unsafe_code)]
 
+#[cfg(feature = "quickjs")]
+pub mod components;
 pub mod compiler;
 pub mod cpu;
 pub mod error;
