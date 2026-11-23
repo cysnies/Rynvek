@@ -200,8 +200,14 @@ impl TickCommitter {
     }
 
     /// 所有World领域共用的耐久发布点；私有CAS必须先完成，再由Store原子复验准入/fence/前驱。
-    pub async fn publish_row(&self, row: CommitRow, permits: Vec<crate::store::EditorPermit>) -> ApiResult<()> {
-        if row.world_id != self.world_id { return Err(conflict("提交世界身份不符")); }
+    pub async fn publish_row(
+        &self,
+        row: CommitRow,
+        permits: Vec<crate::store::EditorPermit>,
+    ) -> ApiResult<()> {
+        if row.world_id != self.world_id {
+            return Err(conflict("提交世界身份不符"));
+        }
         self.store.append_commit_checked(row, self.fencing_token, permits).await
     }
 

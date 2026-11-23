@@ -399,6 +399,7 @@ pub async fn fork(
 }
 
 pub(crate) async fn restore_runtime(app: &AppState, world: &WorldRow) -> ApiResult<ArenaRuntime> {
+    if world.is_controlled_general() {return Err(ApiError::bad_request("此World使用general服务器入口；Arena分叉/补丁/Studio尚未适配，不猜测快照格式"));}
     crate::transactions::restore_committed(app.store(), app.inner.world_snapshots.as_ref(), world).await
 }
 
@@ -413,6 +414,7 @@ pub async fn patches(
     body: Bytes,
 ) -> ApiResult<Response> {
     let (subject,world,permit)=super::studio_collaboration::admission(&app,&headers,&id,true).await?;
+    if world.is_controlled_general() {return Err(ApiError::bad_request("通用受控World暂不接受Arena WorldPatch，请使用general控制入口"));}
     if body.len() > MAX_PATCH_BYTES {
         return Err(ApiError::bad_request("WorldPatch 超过 1 MiB"));
     }

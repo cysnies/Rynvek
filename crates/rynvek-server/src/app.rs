@@ -138,6 +138,7 @@ pub struct AppInner {
     /// 配对到宿主发布期间串行化查询/取消，避免报告虚假离队或重复建局。
     pub matchmaking_gate: tokio::sync::Mutex<()>,
     pub registry: Mutex<MatchRegistry>,
+    pub general_hosts: tokio::sync::Mutex<BTreeMap<WireUuid, crate::general_host::GeneralHandle>>,
     pub lab_stop: tokio::sync::watch::Sender<bool>,
     pub lab_workers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     pub practice_slots: Arc<tokio::sync::Semaphore>,
@@ -200,6 +201,7 @@ impl AppState {
                 agent_slots: Arc::new(tokio::sync::Semaphore::new(2)),
                 matchmaking_gate: tokio::sync::Mutex::new(()),
                 registry: Mutex::new(MatchRegistry::default()),
+                general_hosts: tokio::sync::Mutex::new(BTreeMap::new()),
                 lab_stop: tokio::sync::watch::channel(false).0,
                 lab_workers: Mutex::new(Vec::new()),
                 plugins: std::sync::OnceLock::new(),

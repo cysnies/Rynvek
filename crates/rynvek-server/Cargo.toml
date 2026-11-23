@@ -24,6 +24,8 @@ rynvek-protocol.workspace = true
 rynvek-rts = { workspace = true, features = ["arrow"] }
 rynvek-rules = { workspace = true, features = ["wasmtime", "quickjs"] }
 rynvek-security.workspace = true
+rynvek-simulation.workspace = true
+rynvek-journal.workspace = true
 rynvek-storage.workspace = true
 rynvek-world.workspace = true
 serde.workspace = true
