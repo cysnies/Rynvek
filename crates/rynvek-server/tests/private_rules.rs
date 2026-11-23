@@ -1229,3 +1229,95 @@ async fn purpose_driver_runs_owner_installed_signed_bundle_without_private_packa
     );
     s.shutdown().await;
 }
+
+#[tokio::test]
+async fn durable_original_actor_stops_on_private_dependency_revocation_without_free_progress() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let s = start(store.clone(), dir.path()).await;
+    let owner = register(&s.base_url(), "durable-private-owner", "human", 156).await;
+    let id = create(&s, &owner, &bundle_world()).await;
+    let dep = published(
+        &s,
+        &owner,
+        &pack("rules.durable.dep", &support_graph()),
+        vec![],
+    )
+    .await;
+    let root = published(
+        &s,
+        &owner,
+        &pack("rules.durable.root", &root_graph()),
+        vec![dep.reference()],
+    )
+    .await;
+    let h = connect(&s, &owner, id).await;
+    let l = acquire(&s, &owner, id, h, "Sovereign").await;
+    first_three(&s, &owner, id, h, l).await;
+    let i = install(
+        &owner,
+        h,
+        l,
+        3,
+        &root,
+        &[
+            ("rules.durable.root", "steer"),
+            ("rules.durable.dep", "support"),
+        ],
+    );
+    assert_eq!(install_action(&s, &owner, id, &i).await.status, 200);
+    let row = store.get_world(id).await.unwrap().unwrap();
+    let v=ok_action(&s,&owner,id,json!({"action":"start_run","host_fence":h,"control_fence":l,"spec":{
+      "submission_id":new_uuid_v7().to_string(),"expected_revision":row.latest_revision,"expected_root":rynvek_server::ids::hex(&row.latest_state_root),
+      "ticks":20,"wall_seconds":60,"interval_ms":500,"max_energy_q":"1000000000","consent":rynvek_server::general_runs::CONSENT}})).await;
+    let jid = v["id"].as_str().unwrap().to_owned();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let j = store
+                .general_run_get(owner.principal_id, jid.clone())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_ne!(j.status, "blocked", "{j:?}");
+            if j.done >= 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(request_revoke(&s, &owner, &dep).await, 200);
+    let frozen = store.get_world(id).await.unwrap().unwrap();
+    let j = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let j = store
+                .general_run_get(owner.principal_id, jid.clone())
+                .await
+                .unwrap()
+                .unwrap();
+            if j.status == "blocked" {
+                break j;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(j.done >= 1 && j.done < 20);
+    assert!(j.energy_used_q > 0);
+    assert_eq!(
+        store
+            .get_world(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .latest_state_root,
+        frozen.latest_state_root,
+        "撤包返回后不再发布候选Tick"
+    );
+    assert_eq!(j.base_tick + j.done as u64, frozen.latest_tick);
+    let r=request(&s,Some(&owner),"POST",&format!("/api/v1/worlds/{id}/general/runs/{}",j.id),json!({"operation_id":new_uuid_v7().to_string(),"generation":j.generation,"action":"cancel"})).await;
+    assert_eq!(r.status, 200, "撤销后仍能取消意图，不必执行已撤销VM");
+    s.shutdown().await;
+}
