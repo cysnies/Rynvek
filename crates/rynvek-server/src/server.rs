@@ -50,6 +50,7 @@ impl RunningServer {
     /// 优雅停机：停止接入新连接并等待监听任务退出
     pub async fn shutdown(self) {
         let _ = self.shutdown.send(true);
+        crate::general_runs::stop_workers(&self.state).await;
         crate::lab_jobs::stop_workers(&self.state).await;
         let _ = self
             .state

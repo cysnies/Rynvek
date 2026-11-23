@@ -139,6 +139,8 @@ pub struct AppInner {
     pub matchmaking_gate: tokio::sync::Mutex<()>,
     pub registry: Mutex<MatchRegistry>,
     pub general_hosts: tokio::sync::Mutex<BTreeMap<WireUuid, crate::general_host::GeneralHandle>>,
+    pub general_run_stop: tokio::sync::watch::Sender<bool>,
+    pub general_run_workers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     pub lab_stop: tokio::sync::watch::Sender<bool>,
     pub lab_workers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     pub practice_slots: Arc<tokio::sync::Semaphore>,
@@ -202,6 +204,8 @@ impl AppState {
                 matchmaking_gate: tokio::sync::Mutex::new(()),
                 registry: Mutex::new(MatchRegistry::default()),
                 general_hosts: tokio::sync::Mutex::new(BTreeMap::new()),
+                general_run_stop:tokio::sync::watch::channel(false).0,
+                general_run_workers:Mutex::new(Vec::new()),
                 lab_stop: tokio::sync::watch::channel(false).0,
                 lab_workers: Mutex::new(Vec::new()),
                 plugins: std::sync::OnceLock::new(),
@@ -214,6 +218,7 @@ impl AppState {
         };
         tokio::spawn(finalizer(state.clone(), rx));
         crate::lab_jobs::start_workers(&state);
+        crate::general_runs::start_workers(&state);
         Ok(state)
     }
 

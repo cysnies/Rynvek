@@ -399,6 +399,7 @@ async fn forged_private_wal_cannot_replay_even_with_a_valid_cas_digest() {
     let mut i = input(&u, 1, 1, 0, vec![]);
     i.envelope.payload.push(PhysicsCommand::Despawn { serial: 999 });
     let record = GeneralTickRecord {
+        run_step:None,
         admission_grant_id: None,
         installation: None,
         format: "rynvek-general-tick/1".into(),
@@ -867,6 +868,7 @@ async fn general_driver_revocation_is_rechecked_in_original_store_commit_lock() 
     candidate.tick_with_commands(&[]).unwrap();
     let manifest = candidate.authoritative_commit(root);
     let record = GeneralTickRecord {
+        run_step:None,
         format: "rynvek-general-tick/4".into(),
         base_revision: 0,
         base_root: root,

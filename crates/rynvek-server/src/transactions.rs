@@ -215,6 +215,12 @@ impl TickCommitter {
         self.store.append_commit_guarded(row, self.fencing_token, permits,rules).await
     }
 
+    /// 世界提交与耐久意图进度必须由Store同一最终锁/事务线性化。
+    pub async fn publish_running_row(&self,row:CommitRow,permits:Vec<crate::store::EditorPermit>,rules:Vec<crate::store::RulePermit>,run:Option<crate::general_runs::RunPermit>)->ApiResult<()> {
+        if row.world_id!=self.world_id{return Err(conflict("提交世界不符"))}
+        self.store.append_commit_running(row,self.fencing_token,permits,rules,run).await
+    }
+
     pub async fn records(&self) -> ApiResult<Vec<TickRecord>> {
         let mut records = Vec::new();
         for commit in self.store.list_commits(self.world_id).await? {

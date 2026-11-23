@@ -59,10 +59,24 @@ pub struct GeneralTickRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub admission_grant_id: Option<WireUuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_step: Option<crate::general_runs::RunStep>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub installation: Option<crate::rule_package::RuleInstallReplay>,
 }
 impl GeneralTickRecord {
     fn valid_format(&self) -> bool {
+        if let Some(r) = &self.run_step {
+            return self.format == "rynvek-general-tick/5"
+                && self.admission_grant_id.is_none()
+                && r.step > 0
+                && r.job_fence > 0
+                && crate::general_runs::GeneralRun::step_key(&r.run_id, r.step)
+                    .is_ok_and(|k| k == self.input.envelope.idempotency_key)
+                && self.input.install.is_none()
+                && self.input.recovery.is_none()
+                && self.installation.is_none()
+                && self.input.envelope.payload.is_empty();
+        }
         // 新日志显式区分历史委托出处；不是用当前准入重新授权过去已提交的Tick。
         if self.admission_grant_id.is_some() {
             return self.format == "rynvek-general-tick/4"
@@ -89,7 +103,7 @@ impl GeneralTickRecord {
     pub fn replay(&self, world: &SimulationEngine) -> ApiResult<SimulationEngine> {
         let next = world.clock.tick.checked_add(1).ok_or_else(|| conflict("Tick溢出"))?;
         if !self.valid_format()
-            || (self.admission_grant_id.is_some() && !has_controlled_rules(world))
+            || ((self.admission_grant_id.is_some() || self.run_step.is_some()) && !has_controlled_rules(world))
             || self.base_revision != world.clock.world_revision
             || self.base_root != world.parent_commit_hash
             || self.input.envelope.target_tick != next
@@ -360,21 +374,44 @@ pub(crate) async fn restore(
     crate::rule_package::installed_permits(app, row.owner_principal_id, &world).await?;
     Ok((world, receipts))
 }
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
     Connect,
-    Acquire { host_fence: u64, level: ControlLevel },
-    Release { host_fence: u64, control_fence: u64 },
-    Tick { input: GeneralInput },
-    Install { input: GeneralInput },
-    Recover { input: GeneralInput },
-    Close { host_fence: u64, control_fence: u64 },
+    StartRun {
+        host_fence: u64,
+        control_fence: u64,
+        spec: crate::general_runs::RunSpec,
+    },
+    #[serde(skip)]
+    RunStep,
+    Acquire {
+        host_fence: u64,
+        level: ControlLevel,
+    },
+    Release {
+        host_fence: u64,
+        control_fence: u64,
+    },
+    Tick {
+        input: GeneralInput,
+    },
+    Install {
+        input: GeneralInput,
+    },
+    Recover {
+        input: GeneralInput,
+    },
+    Close {
+        host_fence: u64,
+        control_fence: u64,
+    },
 }
 struct Message {
     headers: HeaderMap,
     action: Action,
     grant: Option<WireUuid>,
+    run: Option<crate::lab_jobs::Claim>,
     reply: oneshot::Sender<ApiResult<Value>>,
 }
 #[derive(Clone, Debug)]
@@ -385,13 +422,20 @@ impl GeneralHandle {
     fn closed(&self) -> bool {
         self.tx.is_closed()
     }
-    async fn request(&self, headers: HeaderMap, action: Action, grant: Option<WireUuid>) -> ApiResult<Value> {
+    async fn request(
+        &self,
+        headers: HeaderMap,
+        action: Action,
+        grant: Option<WireUuid>,
+        run: Option<crate::lab_jobs::Claim>,
+    ) -> ApiResult<Value> {
         let (reply, rx) = oneshot::channel();
         self.tx
             .try_send(Message {
                 headers,
                 action,
                 grant,
+                run,
                 reply,
             })
             .map_err(|_| conflict("通用Actor忙或已退役"))?;
@@ -409,6 +453,7 @@ struct Actor {
     dead: bool,
     /// 控制租约还必须绑定取得时的准入版本；重新授权不能复用旧control fence。
     driver_lease: Option<(u64, WireUuid, u64)>,
+    run_lease: Option<(crate::lab_jobs::Claim, u64)>,
 }
 impl Actor {
     fn check(&self, pid: u64, host: u64, control: u64, sovereign: bool) -> ApiResult<()> {
@@ -428,10 +473,36 @@ impl Actor {
         Ok(())
     }
     async fn process(&mut self, app: &AppState, msg: &Message) -> ApiResult<Value> {
-        let (subject, row, admission) =
-            request_permit(app, &msg.headers, &self.committer.world_id.to_string(), msg.grant).await?;
+        let (subject, row, admission) = message_permit(
+            app,
+            &msg.headers,
+            &self.committer.world_id.to_string(),
+            msg.grant,
+            msg.run.as_ref(),
+        )
+        .await?;
         if msg.grant.is_some() && !crate::general_collaboration::allowed(&msg.action) {
             return Err(ApiError::forbidden("准入仅可驱动已安装规则"));
+        }
+        if let Some((claim, fence)) = self.run_lease.clone() {
+            let current = app.store().general_run_get(claim.owner, claim.id.clone()).await?;
+            if current
+                .as_ref()
+                .is_none_or(|j| j.live(&claim, crate::ids::unix_now_s()).is_err())
+            {
+                self.leases
+                    .release(DOMAIN, fence)
+                    .map_err(|e| ApiError::new(e.code, e.message))?;
+                self.leases.drain_events();
+                self.gate.unbind(claim.owner);
+                self.run_lease = None;
+            }
+        }
+        if msg.run.is_none()
+            && !matches!(msg.action, Action::Connect | Action::StartRun { .. })
+            && app.store().general_run_reserved(row.world_id).await?
+        {
+            return Err(conflict("持久运行保留控制，须先暂停/取消；暂停仍保留精确起点"));
         }
         // 只清理已失效目的版本绑定的旧控制租约；原release保留递增计数，重授权不得复用fence。
         if let Some((principal_id, grant_id, fence)) = self.driver_lease {
@@ -462,7 +533,102 @@ impl Actor {
             return Err(conflict("宿主租约已失效"));
         }
         let pid = subject.principal_id;
-        match &msg.action {
+        let mut action = msg.action.clone();
+        if let Some(c) = &msg.run {
+            if !matches!(action, Action::RunStep) {
+                return Err(ApiError::forbidden("后台上下文只可执行原规则Tick"));
+            }
+            let j = app
+                .store()
+                .general_run_get(c.owner, c.id.clone())
+                .await?
+                .ok_or_else(|| conflict("运行不存在"))?;
+            j.live(c, crate::ids::unix_now_s())?;
+            j.baseline(&row)?;
+            if !has_controlled_rules(&self.world) {
+                return Err(conflict("运行不允许无规则免费推进"));
+            }
+            let control = if let Some((old, token)) = &self.run_lease {
+                if old != c {
+                    return Err(conflict("后台控制绑定已过期"));
+                }
+                *token
+            } else {
+                let l = self
+                    .leases
+                    .acquire(
+                        Principal::new(pid.to_string(), PrincipalKind::Human),
+                        DOMAIN,
+                        ControlLevel::Sovereign,
+                        self.world.clock.tick,
+                        900,
+                    )
+                    .map_err(|e| ApiError::new(e.code, e.message))?;
+                self.leases.drain_events();
+                self.gate.bind(pid, DOMAIN);
+                self.run_lease = Some((c.clone(), l.fencing_token));
+                l.fencing_token
+            };
+            action = Action::Tick {
+                input: GeneralInput {
+                    host_fence: self.committer.fencing_token,
+                    control_fence: control,
+                    envelope: CommandEnvelope {
+                        idempotency_key: crate::general_runs::GeneralRun::step_key(&j.id, j.done + 1)?,
+                        principal_id: pid,
+                        issued_at_tick: self.world.clock.tick,
+                        target_tick: self.world.clock.tick + 1,
+                        payload: vec![],
+                    },
+                    install: None,
+                    recovery: None,
+                },
+            };
+        }
+        match &action {
+            Action::RunStep => Err(ApiError::forbidden("内部作业动作不可由HTTP提交")),
+            Action::StartRun {
+                host_fence,
+                control_fence,
+                spec,
+            } => {
+                spec.validate()?;
+                if let Some(old) = app
+                    .store()
+                    .general_run_submission(pid, spec.submission_id.clone())
+                    .await?
+                {
+                    if old.world_id != row.world_id || old.spec != *spec {
+                        return Err(conflict("提交键绑定不同运行"));
+                    }
+                    return Ok(serde_json::to_value(old).expect("定型运行"));
+                }
+                self.check(pid, *host_fence, *control_fence, true)?;
+                if app.store().backend_name() == "postgres" && app.config().blob_dir.is_none() {
+                    return Err(conflict("PG耐久运行还需显式私有文件CAS目录，不能只持久化计数"));
+                }
+                if !has_controlled_rules(&self.world)
+                    || self.world.life().is_none()
+                    || self
+                        .world
+                        .component_rules()
+                        .is_none_or(|r| r.config.rule_cost_micro_per_gas.is_none() || r.recovery.is_some())
+                {
+                    return Err(conflict(
+                        "耐久运行只驱动已有有源定价规则，拒绝空推进/维护/CPU配额冒充能量",
+                    ));
+                }
+                let j = crate::general_runs::GeneralRun::new(&row, spec.clone(), crate::ids::unix_now_s())?;
+                let j = app.store().general_run_submit(j, self.committer.fencing_token).await?;
+                self.leases
+                    .release(DOMAIN, *control_fence)
+                    .map_err(|e| ApiError::new(e.code, e.message))?;
+                self.leases.drain_events();
+                self.gate.unbind(pid);
+                self.driver_lease = None;
+                app.audit(Some(pid),"world.general.run.start",j.id.clone(),json!({"world_id":row.world_id,"ticks":j.spec.ticks,"max_energy_q":j.spec.max_energy_q,"deadline_s":j.deadline_s})).await;
+                Ok(serde_json::to_value(j).expect("定型运行"))
+            }
             Action::Connect => Ok(if msg.grant.is_some() {
                 json!({"host_fence":self.committer.fencing_token,"frame":rynvek_engine::general::GeneralRenderFrame::capture(&self.world)})
             } else {
@@ -500,26 +666,21 @@ impl Actor {
                 host_fence,
                 control_fence,
             } => {
-                self.check(
-                    pid,
-                    *host_fence,
-                    *control_fence,
-                    matches!(msg.action, Action::Close { .. }),
-                )?;
+                self.check(pid, *host_fence, *control_fence, matches!(action, Action::Close { .. }))?;
                 self.leases
                     .release(DOMAIN, *control_fence)
                     .map_err(|e| ApiError::new(e.code, e.message))?;
                 self.leases.drain_events();
                 self.gate.unbind(pid);
                 self.driver_lease = None;
-                if matches!(msg.action, Action::Close { .. }) {
+                if matches!(action, Action::Close { .. }) {
                     self.dead = true;
                 }
                 Ok(json!({"released":true,"closed":self.dead,"commit":meta(&self.world)}))
             }
             Action::Tick { input } | Action::Install { input } | Action::Recover { input } => {
-                if matches!(msg.action, Action::Install { .. }) != input.install.is_some()
-                    || matches!(msg.action, Action::Recover { .. }) != input.recovery.is_some()
+                if matches!(action, Action::Install { .. }) != input.install.is_some()
+                    || matches!(action, Action::Recover { .. }) != input.recovery.is_some()
                 {
                     return Err(ApiError::bad_request(
                         "安装/撤销隔离维护必须分别显式请求，不可普通Tick偷带",
@@ -560,7 +721,7 @@ impl Actor {
                     ));
                 }
                 // 此目的只驱动已有规则；不能借空世界将纯物理推进偷换为“规则实付”。
-                if msg.grant.is_some() && !has_controlled_rules(&self.world) {
+                if (msg.grant.is_some() || msg.run.is_some()) && !has_controlled_rules(&self.world) {
                     return Err(ApiError::forbidden("此目的需要世界已有受控规则，不授权空物理驱动"));
                 }
                 if self.world.life().is_some()
@@ -665,9 +826,30 @@ impl Actor {
                 candidate
                     .tick_with_commands(&input.envelope.payload)
                     .map_err(|e| ApiError::bad_request(format!("通用候选Tick拒绝：{e:?}")))?;
+                let run_permit = if let Some(c) = &msg.run {
+                    let j = app
+                        .store()
+                        .general_run_get(c.owner, c.id.clone())
+                        .await?
+                        .ok_or_else(|| conflict("运行不存在"))?;
+                    Some(crate::general_runs::RunPermit {
+                        claim: c.clone(),
+                        step: j.done + 1,
+                        energy_q: candidate.component_rules().map_or(0, |r| r.paid_q),
+                    })
+                } else {
+                    None
+                };
                 let record = GeneralTickRecord {
                     admission_grant_id: msg.grant,
-                    format: if msg.grant.is_some() {
+                    run_step: msg.run.as_ref().map(|c| crate::general_runs::RunStep {
+                        run_id: c.id.clone(),
+                        step: run_permit.as_ref().expect("运行守卫").step,
+                        job_fence: c.fence,
+                    }),
+                    format: if msg.run.is_some() {
+                        "rynvek-general-tick/5".into()
+                    } else if msg.grant.is_some() {
                         "rynvek-general-tick/4".into()
                     } else if input.recovery.is_some() {
                         "rynvek-general-tick/3"
@@ -708,7 +890,7 @@ impl Actor {
                 };
                 if let Err(e) = self
                     .committer
-                    .publish_guarded_row(commit, vec![admission], rule_permits)
+                    .publish_running_row(commit, vec![admission], rule_permits, run_permit)
                     .await
                 {
                     self.dead = true;
@@ -720,7 +902,9 @@ impl Actor {
                 self.receipts
                     .retain(|_, r| r.input.envelope.target_tick.saturating_add(RETENTION) >= self.world.clock.tick);
                 self.receipts.insert(input.envelope.idempotency_key, record);
-                Ok(if msg.grant.is_some() {
+                Ok(if msg.run.is_some() {
+                    json!({"commit":meta(&self.world)})
+                } else if msg.grant.is_some() {
                     json!({"duplicate":false,"commit":meta(&self.world),"frame":rynvek_engine::general::GeneralRenderFrame::capture(&self.world)})
                 } else {
                     json!({"duplicate":false,"commit":meta(&self.world),"observation":observation(&self.world)})
@@ -741,7 +925,15 @@ fn spawn(app: Weak<AppInner>, mut actor: Actor) -> GeneralHandle {
             // 返回前再次校验会话/所有者准入；已持久Tick不能因回执丢失自动重复。
             let result = match result {
                 Ok(v) => {
-                    match request_permit(&app, &msg.headers, &actor.committer.world_id.to_string(), msg.grant).await {
+                    match message_permit(
+                        &app,
+                        &msg.headers,
+                        &actor.committer.world_id.to_string(),
+                        msg.grant,
+                        msg.run.as_ref(),
+                    )
+                    .await
+                    {
                         Ok((_, row, _)) => {
                             let live = app.store().ranked_host(row.world_id).await;
                             match live {
@@ -814,7 +1006,17 @@ pub(crate) async fn control_request(
     action: Action,
     grant: Option<WireUuid>,
 ) -> ApiResult<Response> {
-    let (_, row, _) = request_permit(&app, &headers, &id, grant).await?;
+    control_request_inner(app, headers, id, action, grant, None).await
+}
+async fn control_request_inner(
+    app: AppState,
+    headers: HeaderMap,
+    id: String,
+    action: Action,
+    grant: Option<WireUuid>,
+    run: Option<crate::lab_jobs::Claim>,
+) -> ApiResult<Response> {
+    let (_, row, _) = message_permit(&app, &headers, &id, grant, run.as_ref()).await?;
     if grant.is_some() && !crate::general_collaboration::allowed(&action) {
         return Err(ApiError::forbidden("准入仅可驱动已安装规则"));
     }
@@ -823,7 +1025,7 @@ pub(crate) async fn control_request(
     let handle = if let Some(h) = hosts.get(&row.world_id) {
         h.clone()
     } else {
-        if !matches!(action, Action::Connect) {
+        if !matches!(action, Action::Connect) && !(run.is_some() && matches!(action, Action::RunStep)) {
             return Err(conflict("请先显式connect恢复宿主并取得新控制租约"));
         }
         if hosts.len() >= 64 {
@@ -881,13 +1083,14 @@ pub(crate) async fn control_request(
                 apm,
                 dead: false,
                 driver_lease: None,
+                run_lease: None,
             },
         );
         hosts.insert(row.world_id, h.clone());
         h
     };
     drop(hosts);
-    let value = handle.request(headers, action, grant).await?;
+    let value = handle.request(headers, action, grant, run).await?;
     Ok(private(value))
 }
 pub async fn observe(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
@@ -909,4 +1112,55 @@ pub async fn render_frame(
     Ok(private(
         serde_json::to_value(rynvek_engine::general::GeneralRenderFrame::capture(&world)).expect("定型渲染投影"),
     ))
+}
+
+async fn message_permit(
+    app: &AppState,
+    headers: &HeaderMap,
+    id: &str,
+    grant: Option<WireUuid>,
+    run: Option<&crate::lab_jobs::Claim>,
+) -> ApiResult<(Subject, WorldRow, EditorPermit)> {
+    if let Some(c) = run {
+        if grant.is_some() {
+            return Err(ApiError::forbidden("后台运行不能借用协作准入"));
+        }
+        let (s, w, p) = crate::general_runs::admission(app, c).await?;
+        if w.world_id.to_string() != id {
+            return Err(conflict("运行世界不符"));
+        }
+        Ok((s, w, p))
+    } else {
+        request_permit(app, headers, id, grant).await
+    }
+}
+/// 内部调度不转发Bearer；健康原宿主仍不可抢占或重置控制fence。
+pub(crate) async fn run_step(app: &AppState, c: crate::lab_jobs::Claim) -> ApiResult<bool> {
+    let (_, w, _) = crate::general_runs::admission(app, &c).await?;
+    let local = app
+        .inner
+        .general_hosts
+        .lock()
+        .await
+        .get(&w.world_id)
+        .is_some_and(|h| !h.closed());
+    if !local
+        && app
+            .store()
+            .ranked_host(w.world_id)
+            .await?
+            .is_some_and(|h| h.expires_at_s > crate::ids::unix_now_s())
+    {
+        return Ok(false);
+    }
+    control_request_inner(
+        app.clone(),
+        HeaderMap::new(),
+        w.world_id.to_string(),
+        Action::RunStep,
+        None,
+        Some(c),
+    )
+    .await?;
+    Ok(true)
 }

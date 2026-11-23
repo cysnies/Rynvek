@@ -360,6 +360,14 @@ macro_rules! dispatch {
 }
 
 impl Store {
+    pub async fn general_run_submit(&self,j:crate::general_runs::GeneralRun,host:u64)->StoreResult<crate::general_runs::GeneralRun>{dispatch!(self.general_run_submit(j,host))}
+    pub async fn general_run_submission(&self,owner:u64,submission:String)->StoreResult<Option<crate::general_runs::GeneralRun>>{dispatch!(self.general_run_submission(owner,submission))}
+    pub async fn general_run_get(&self,owner:u64,id:String)->StoreResult<Option<crate::general_runs::GeneralRun>>{dispatch!(self.general_run_get(owner,id))}
+    pub async fn general_run_reserved(&self,world:WireUuid)->StoreResult<bool>{dispatch!(self.general_run_reserved(world))}
+    pub async fn general_run_claim(&self,node:String)->StoreResult<Option<crate::general_runs::GeneralRun>>{dispatch!(self.general_run_claim(node))}
+    pub async fn general_run_control(&self,world:WireUuid,owner:u64,id:String,op:crate::lab_jobs::OwnerAction)->StoreResult<crate::general_runs::GeneralRun>{dispatch!(self.general_run_control(world,owner,id,op))}
+    pub async fn general_run_worker(&self,c:crate::lab_jobs::Claim,op:crate::lab_jobs::WorkerAction)->StoreResult<crate::general_runs::GeneralRun>{dispatch!(self.general_run_worker(c,op))}
+    pub async fn append_commit_running(&self,commit:CommitRow,fence:u64,permits:Vec<EditorPermit>,rules:Vec<RulePermit>,run:Option<crate::general_runs::RunPermit>)->StoreResult<()>{dispatch!(self.append_commit_running(commit,fence,permits,rules,run))}
     pub async fn agent_run_create(&self, row: crate::agent_runs::AgentRun) -> StoreResult<crate::agent_runs::AgentRun> {
         dispatch!(self.agent_run_create(row))
     }

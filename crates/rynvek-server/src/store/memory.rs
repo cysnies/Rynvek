@@ -18,6 +18,7 @@ use crate::error::ApiError;
 
 #[derive(Debug, Default)]
 struct Tables {
+    general_runs: BTreeMap<String, crate::general_runs::GeneralRun>,
     agent_runs: BTreeMap<String, crate::agent_runs::AgentRun>,
     lab_jobs: BTreeMap<String, crate::lab_jobs::LabJob>,
     private_visuals: BTreeMap<(u64, String, String), super::PrivateArtifactRow>,
@@ -813,6 +814,9 @@ impl MemoryStore {
         self.append_commit_guarded(commit,expected_fencing_token,permits,vec![])
     }
     pub fn append_commit_guarded(&self,commit:CommitRow,expected_fencing_token:u64,permits:Vec<super::EditorPermit>,rules:Vec<super::RulePermit>)->StoreResult<()> {
+        self.append_commit_running(commit,expected_fencing_token,permits,rules,None)
+    }
+    pub fn append_commit_running(&self,commit:CommitRow,expected_fencing_token:u64,permits:Vec<super::EditorPermit>,rules:Vec<super::RulePermit>,run:Option<crate::general_runs::RunPermit>)->StoreResult<()> {
         let mut t = self.lock();
         for permit in &permits {Self::editor_allowed(&t,commit.world_id,permit)?;}
         for rule in rules {
@@ -843,6 +847,13 @@ impl MemoryStore {
         if t.world_commits.contains_key(&(commit.world_id, commit.world_revision)) {
             return Err(conflict("world_revision 已存在"));
         }
+        let reserved=t.general_runs.values().find(|j|j.world_id==commit.world_id && j.reserved()).cloned();
+        let updated=match (reserved,run) {
+            (Some(mut j),Some(p)) => {Self::editor_allowed(&t,commit.world_id,&super::EditorPermit{principal_id:j.owner,grant_id:None,purpose:super::AdmissionPurpose::GeneralRuleDrive})?;j.commit(&p,world,&commit,crate::ids::unix_now_s())?; Some(j)}
+            (None,None) => None,
+            _ => return Err(conflict("耐久意图保留该世界，或旧运行已暂停/取消")),
+        };
+        if let Some(j)=updated {t.general_runs.insert(j.id.clone(),j);}
         let w = t.worlds.get_mut(&commit.world_id).expect("已检查");
         w.latest_revision = commit.world_revision;
         w.latest_tick = commit.tick;
@@ -1273,3 +1284,6 @@ mod general_host_time_tests {
         assert_eq!(memory.list_commits(id).unwrap().len(), 1);
     }
 }
+
+#[path="memory_general_runs.rs"]
+mod general_runs;

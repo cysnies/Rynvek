@@ -43,7 +43,7 @@ pub struct Experiment {
     pub tables: BTreeMap<String, String>,
     pub error: Option<String>,
 }
-mod principal_text {
+pub(crate) mod principal_text {
     use serde::{Deserialize, Deserializer, Serializer};
     pub fn serialize<S: Serializer>(v: &u64, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&v.to_string())
@@ -78,7 +78,7 @@ pub struct OwnerAction {
     pub generation: u32,
     pub action: String,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Claim {
     pub id: String,
     pub owner: u64,

@@ -219,6 +219,7 @@ impl PostgresStore {
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0010_private_visual.sql")).await.map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0011_private_rules.sql")).await.map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0012_admission_purpose.sql")).await.map_err(db_err)?;
+        c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0013_general_runs.sql")).await.map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -558,6 +559,9 @@ impl PostgresStore {
         self.append_commit_guarded(commit,expected_fencing_token,permits,vec![]).await
     }
     pub async fn append_commit_guarded(&self,commit:CommitRow,expected_fencing_token:u64,permits:Vec<super::EditorPermit>,rules:Vec<super::RulePermit>)->StoreResult<()> {
+        self.append_commit_running(commit,expected_fencing_token,permits,rules,None).await
+    }
+    pub async fn append_commit_running(&self,commit:CommitRow,expected_fencing_token:u64,permits:Vec<super::EditorPermit>,rules:Vec<super::RulePermit>,run:Option<crate::general_runs::RunPermit>)->StoreResult<()> {
         if commit.parent_revision.and_then(|r| r.checked_add(1)) != Some(commit.world_revision) {
             return Err(ApiError::new(
                 RynvekErrorCode::StructuralMutationConflict,
@@ -566,12 +570,10 @@ impl PostgresStore {
         }
         let mut c = self.client.lock().await;
         let tx = c.transaction().await.map_err(db_err)?;
-        tx.query_one(
-            "SELECT world_id::text FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE",
+        let world=world_of(&tx.query_one(
+            &format!("SELECT {WORLD_COLS} FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE"),
             &[&uuid_text(&commit.world_id)],
-        )
-        .await
-        .map_err(db_err)?;
+        ).await.map_err(db_err)?)?;
         ranked::check_lease(&tx, commit.world_id, expected_fencing_token).await?;
         for p in permits {Self::editor_allowed(&tx,commit.world_id,&p).await?;}
         for rule in rules {
@@ -584,6 +586,7 @@ impl PostgresStore {
                 if r.get::<_,bool>(1) || crate::ids::hex(&stored.cid)!=pin.blake3_256 || stored.publisher_key.as_slice()!=owner.get::<_,Vec<u8>>(2) {return Err(crate::transactions::conflict("规则依赖撤销/改变"));}
             }
         }
+        general_runs::commit(&tx,&world,&commit,run).await?;
         let n = tx
             .execute(
                 "UPDATE worlds SET latest_revision = $3, latest_tick = $4, latest_state_root = $5, updated_at = NOW() \
@@ -1105,3 +1108,6 @@ mod audio_versions;
 
 #[path = "postgres_visual.rs"]
 mod visual;
+
+#[path="postgres_general_runs.rs"]
+mod general_runs;
