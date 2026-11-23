@@ -116,6 +116,12 @@ export interface EnergyRow {
   readonly secretion_q:bigint|string;
   readonly synthesis_q:bigint|string;
   readonly continuous_q:bigint|string;
+  readonly rule_q:bigint|string;
+  readonly material_received_u:bigint|string;
+  readonly material_external_u:bigint|string;
+  readonly material_stored_u:bigint|string;
+  readonly material_transferred_u:bigint|string;
+  readonly material_returned_u:bigint|string;
 
 }
 const q=(v:bigint|string):bigint=>{
@@ -123,12 +129,15 @@ const q=(v:bigint|string):bigint=>{
   if (typeof v==="string"&&!/^(0|[1-9][0-9]*)$/.test(v)) throw new Error("无效精确能量整数");
   const n=BigInt(v);if(n<0n)throw new Error("能量不能为负");return n;
 };
-export function energyBalance(row:EnergyRow):{externalReceived:bigint;accounted:bigint;balanced:boolean} {
+export function energyBalance(row:EnergyRow):{externalReceived:bigint;accounted:bigint;balanced:boolean;materialExternal:bigint;materialAccounted:bigint;materialBalanced:boolean} {
   if(!row.enabled) throw new Error("此样本未启用生态，不能当作零能量验收");
   const externalReceived=q(row.received_q)-q(row.transferred_q);
   const accounted=q(row.stored_q)+q(row.dissipated_q)+q(row.exported_q)+q(row.returned_q);
-  const activity=q(row.attack_q)+q(row.repair_q)+q(row.secretion_q)+q(row.synthesis_q)+q(row.continuous_q);
-  return {externalReceived,accounted,balanced:activity<=q(row.dissipated_q)&&externalReceived>=0n&&externalReceived===q(row.external_received_q)&&externalReceived===accounted};
+  const activity=q(row.attack_q)+q(row.repair_q)+q(row.secretion_q)+q(row.synthesis_q)+q(row.continuous_q)+q(row.rule_q);
+  const materialExternal=q(row.material_received_u)-q(row.material_transferred_u);
+  const materialAccounted=q(row.material_stored_u)+q(row.material_returned_u);
+  const materialBalanced=materialExternal>=0n&&materialExternal===q(row.material_external_u)&&materialExternal===materialAccounted;
+  return {externalReceived,accounted,materialExternal,materialAccounted,materialBalanced,balanced:activity<=q(row.dissipated_q)&&externalReceived>=0n&&externalReceived===q(row.external_received_q)&&externalReceived===accounted};
 }
 
 /** 每个 run 的谱系摘要 */
@@ -285,5 +294,5 @@ export const TABLE_COLUMNS = {
     "parameter_value",
   ],
   lineage: ["run", "faction", "slug", "unit", "generation", "entity", "parent", "origin", "born_tick", "genome", "parent_genome", "allocated_q"],
-  energy: ["enabled","run","tick","live_bodies","remains","natural_births","max_generation","received_q","stored_q","dissipated_q","exported_q","returned_q","transferred_q","external_received_q","state_root","attack_q","repair_q","secretion_q","synthesis_q","continuous_q"],
+  energy: ["enabled","run","tick","live_bodies","remains","natural_births","max_generation","received_q","stored_q","dissipated_q","exported_q","returned_q","transferred_q","external_received_q","state_root","attack_q","repair_q","secretion_q","synthesis_q","continuous_q","rule_q","material_received_u","material_external_u","material_stored_u","material_transferred_u","material_returned_u"],
 } as const;

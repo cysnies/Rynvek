@@ -36,6 +36,10 @@ export interface RoleEnergyContract {
   readonly repair_cost_micro_per_milli:number;
   readonly secretion_cost_micro_per_field_raw:number;
   readonly continuous_cost_micro_per_neuron_step:number;
+  readonly rule_cost_micro_per_gas:number;
+  readonly material_capacity_milli:number;
+  readonly material_growth_milli_per_tick:number;
+  readonly material_synthesis_micro_per_milli:number;
   readonly birth_synthesis_milli:number;
   readonly activity_reserve_milli:number;
 
@@ -131,9 +135,11 @@ export function validateSpec(spec: ExperimentSpec): void {
       const kinds=["unit.forager","unit.striker","unit.carapace","unit.spitter","unit.weaver","unit.leviathan"];
       for (const [kind,role] of Object.entries(c.roles)) {
         if(!kinds.includes(kind)||!role||typeof role!=="object"||Array.isArray(role)) throw new SpecError("未知角色或非法生命成本对象");
-        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction","attack_cost_micro_per_shot","repair_cost_micro_per_milli","secretion_cost_micro_per_field_raw","continuous_cost_micro_per_neuron_step","birth_synthesis_milli","activity_reserve_milli","replication_mutation_rate_permille"];
+        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction","attack_cost_micro_per_shot","repair_cost_micro_per_milli","secretion_cost_micro_per_field_raw","continuous_cost_micro_per_neuron_step","rule_cost_micro_per_gas","material_capacity_milli","material_growth_milli_per_tick","material_synthesis_micro_per_milli","birth_synthesis_milli","activity_reserve_milli","replication_mutation_rate_permille"];
         if(keys.some(k=>!Object.prototype.hasOwnProperty.call(role,k))||Object.keys(role).some(k=>!keys.includes(k))) throw new SpecError("角色成本必须完整显式配置");
         if(!Number.isInteger(role.replication_mutation_rate_permille)||role.replication_mutation_rate_permille<0||role.replication_mutation_rate_permille>1000)throw new SpecError("复制突变率必须在0..=1000‰");
+        if(role.natural_reproduction&&role.material_capacity_milli===1)throw new SpecError("自然复制至少需要2 milli材料容量");
+        if(role.material_capacity_milli===0&&(role.material_growth_milli_per_tick!==0||role.material_synthesis_micro_per_milli!==0))throw new SpecError("关闭材料容量时须显式关闭材料摄取与合成价");
         if(typeof role.natural_reproduction!=="boolean") throw new SpecError("自然繁殖许可必须为boolean");
         for(const [key,value] of Object.entries(role)) {
           if(key==="natural_reproduction")continue;

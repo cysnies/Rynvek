@@ -7,7 +7,7 @@ export function suggestedRoles():Record<EnergyUnitKind,RoleDraft> {
   return Object.fromEntries(ROLE_KINDS.map(kind=>[kind,{enabled:kind==="unit.forager"||kind==="unit.striker",rule:{
     basal_cost_micro_per_tick:100,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:100,
     synapse_maintenance_micro_per_tick:1,
-    attack_cost_micro_per_shot:100,repair_cost_micro_per_milli:1,continuous_cost_micro_per_neuron_step:1,secretion_cost_micro_per_field_raw:1,birth_synthesis_milli:10,activity_reserve_milli:10,natural_reproduction:kind==="unit.forager",replication_mutation_rate_permille:50
+    attack_cost_micro_per_shot:100,repair_cost_micro_per_milli:1,rule_cost_micro_per_gas:1,material_capacity_milli:1000,material_growth_milli_per_tick:5,material_synthesis_micro_per_milli:1,continuous_cost_micro_per_neuron_step:1,secretion_cost_micro_per_field_raw:1,birth_synthesis_milli:10,activity_reserve_milli:10,natural_reproduction:kind==="unit.forager",replication_mutation_rate_permille:50
   }}])) as Record<EnergyUnitKind,RoleDraft>;
 }
 export interface LabDraft {name:string;seeds:string;ticks:number;sampleEvery:number;players:number;policy:"ecology"|"economy"|"idle";rates:string;ablation:boolean;roles:Record<EnergyUnitKind,RoleDraft>}
@@ -42,7 +42,7 @@ export function energyRows(rows:readonly JsonRow[]):EnergySample[] {
   return rows.map(r=>{
     if(typeof r["enabled"]!=="boolean")throw new Error("缺少生态启用事实");
     return {enabled:r["enabled"],run:integer(r,"run"),tick:exact(r,"tick"),live_bodies:integer(r,"live_bodies"),remains:integer(r,"remains"),state_root:text(r,"state_root"),
-      received_q:exact(r,"received_q"),stored_q:exact(r,"stored_q"),dissipated_q:exact(r,"dissipated_q"),exported_q:exact(r,"exported_q"),returned_q:exact(r,"returned_q"),transferred_q:exact(r,"transferred_q"),external_received_q:exact(r,"external_received_q"),attack_q:exact(r,"attack_q"),repair_q:exact(r,"repair_q"),secretion_q:exact(r,"secretion_q"),synthesis_q:exact(r,"synthesis_q"),continuous_q:exact(r,"continuous_q")};
+      received_q:exact(r,"received_q"),stored_q:exact(r,"stored_q"),dissipated_q:exact(r,"dissipated_q"),exported_q:exact(r,"exported_q"),returned_q:exact(r,"returned_q"),transferred_q:exact(r,"transferred_q"),external_received_q:exact(r,"external_received_q"),attack_q:exact(r,"attack_q"),repair_q:exact(r,"repair_q"),secretion_q:exact(r,"secretion_q"),synthesis_q:exact(r,"synthesis_q"),continuous_q:exact(r,"continuous_q"),rule_q:exact(r,"rule_q"),material_received_u:exact(r,"material_received_u"),material_external_u:exact(r,"material_external_u"),material_stored_u:exact(r,"material_stored_u"),material_transferred_u:exact(r,"material_transferred_u"),material_returned_u:exact(r,"material_returned_u")};
   });
 }
 /** 完整分析有明确内存上限；超限仍可分页/导出，不拿残缺谱系冒充完整森林。 */
