@@ -187,6 +187,7 @@ export class EngineHost {
       worldId: init.worldId ?? null,
       gpuMode: init.gpuMode,
       ...(init.arenaFaction !== undefined ? { arenaFaction: init.arenaFaction } : {}),
+      ...(init.generalRemote !== undefined ? { generalRemote:init.generalRemote } : {}),
     };
     this.#state = "initializing";
     this.#worker.postMessage(message, [offscreen]);

@@ -53,6 +53,7 @@ export interface EngineInitOptions {
   gpuMode: GpuMode;
   /** 远程阵营只读显示，禁止本地 STEP/START。 */
   arenaFaction?: number;
+  generalRemote?: boolean;
 }
 
 /** 主线程 → Worker 命令（不含 `ENGINE_INIT`，后者由宿主随画布一起发送） */
@@ -72,6 +73,7 @@ export type EngineCommand =
   | { type: "ARENA_SELECTION"; worldId: string; units: number[]; building: number | null }
   | { type: "ARENA_OVERLAY"; worldId: string; drag: [[number, number], [number, number]] | null; placement: {kind: BuildingKind; origin: [number, number]} | null }
   | { type: "ARENA_OBSERVATION"; worldId: string; observation: FactionObservation }
+  | { type:"GENERAL_FRAME";frame:GeneralRenderFrame }
   | { type: "SHUTDOWN" };
 
 /** `ENGINE_INIT` 消息（`canvas` 为已转移的 OffscreenCanvas） */
@@ -98,11 +100,13 @@ export const ENGINE_COMMAND_TYPES = [
   "ARENA_SELECTION",
   "ARENA_OVERLAY",
   "ARENA_OBSERVATION",
+  "GENERAL_FRAME",
   "SHUTDOWN",
 ] as const;
 
 /** Worker → 主线程事件 */
 export type EngineEvent =
+  | {type:"GENERAL_FRAME_APPLIED";worldId:string;tick:number;stateRoot:string}
   | {
       type: "ENGINE_READY";
       backend: ComputeBackendKind;
@@ -112,6 +116,7 @@ export type EngineEvent =
       generation: number;
       /** 实际启用的只读竞技场阵营；旧版本/本地仿真不回显。 */
       arenaFaction?: number;
+  generalRemote?: boolean;
     }
   | { type:"ARENA_THEME_APPLIED";worldId:string;requestId:number;background:number;factions:readonly number[] }
   | { type: "TICK_COMMITTED"; tick: number; stateRoot: string }
@@ -127,11 +132,12 @@ export type EngineEvent =
 export type EngineEventType = EngineEvent["type"];
 export type EngineEventOf<T extends EngineEventType> = Extract<EngineEvent, { type: T }>;
 
-type FieldKind = "optional-u8" | "u32" | "number" | "string" | "nullable-string" | "nullable-u32" | "backend" | "hex64" | "opaque7";
+type FieldKind = "optional-bool" | "optional-u8" | "u32" | "number" | "string" | "nullable-string" | "nullable-u32" | "backend" | "hex64" | "opaque7";
 
 /** 每种事件的字段模式（运行时校验 Worker 消息） */
 const EVENT_SCHEMA: { readonly [K in EngineEventType]: Readonly<Record<string, FieldKind>> } = {
-  ENGINE_READY: { backend: "backend", profile: "nullable-string", adapter: "nullable-string", generation: "u32", arenaFaction: "optional-u8" },
+  ENGINE_READY: { backend: "backend", profile: "nullable-string", adapter: "nullable-string", generation: "u32", arenaFaction: "optional-u8", generalRemote:"optional-bool" },
+  GENERAL_FRAME_APPLIED:{worldId:"string",tick:"number",stateRoot:"hex64"},
   ARENA_THEME_APPLIED:{worldId:"string",requestId:"u32",background:"u32",factions:"opaque7"},
   TICK_COMMITTED: { tick: "number", stateRoot: "hex64" },
   FRAME_RENDERED: { tick: "number" },
@@ -150,6 +156,7 @@ const isU32 = (v: unknown): v is number => typeof v === "number" && Number.isInt
 
 function checkField(kind: FieldKind, v: unknown): boolean {
   switch (kind) {
+    case "optional-bool": return v===undefined||typeof v==="boolean";
     case "opaque7":return Array.isArray(v)&&v.length===7&&v.every(c=>isU32(c)&&(c>>>24)===255);
     case "optional-u8":
       return v === undefined || (isU32(v) && v <= 255);
@@ -206,3 +213,6 @@ export const EngineErrorCode = {
   GpuBufferAllocationFailed: 0x6003,
   WgslShaderValidationFailed: 0x6004,
 } as const;
+
+/** 最小私有表现投影；Q32.32只在原Rust表现层转换，不积分/外推/生成世界。 */
+export interface GeneralRenderFrame {format:"rynvek-general-frame/1";worldId:string;tick:number;revision:number;stateRoot:string;bodies:{serial:number;positionQ32:[number,number];radiusQ32:number}[]}

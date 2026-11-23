@@ -49,6 +49,7 @@ pub struct EngineConfig {
     pub gpu_mode: GpuMode,
     /// Some 时仅呈现该阵营服务器观察，不运行本地仿真。
     pub arena_faction: Option<u8>,
+    pub general_remote: bool,
     /// DeviceLost 恢复最大失败次数（达到即降级）
     pub max_recovery_attempts: u32,
     /// 画布设备像素尺寸
@@ -61,6 +62,7 @@ impl Default for EngineConfig {
             world_id: [0; 16],
             gpu_mode: GpuMode::Auto,
             arena_faction: None,
+            general_remote: false,
             max_recovery_attempts: DeviceLostRecovery::DEFAULT_MAX_ATTEMPTS,
             viewport: [1280, 720],
         }
@@ -172,6 +174,8 @@ pub struct Engine {
     sim: SimulationEngine,
     arena_observation: Option<Box<rynvek_rts::observation::FactionObservation>>,
     arena_map: Option<Box<crate::protocol::ArenaMapData>>,
+    general_frame: Option<Box<crate::general::GeneralRenderFrame>>,
+    general_rejected: bool,
     arena_selection: crate::observation::Selection,
     arena_theme: crate::observation::ArenaTheme,
     owner: Option<GpuDeviceOwner>,
@@ -204,6 +208,8 @@ impl Engine {
             sim: SimulationEngine::new(config.world_id),
             arena_observation: None,
             arena_map: None,
+            general_frame: None,
+            general_rejected: false,
             arena_selection: Default::default(),
             arena_theme: Default::default(),
             recovery: DeviceLostRecovery::new(config.max_recovery_attempts),
@@ -276,6 +282,7 @@ impl Engine {
             adapter,
             generation,
             arena_faction: self.config.arena_faction,
+            general_remote: self.config.general_remote,
         });
     }
 
@@ -766,7 +773,9 @@ impl Engine {
     /// 登记拾取请求（画布像素坐标）；无渲染资源时立即回复未命中
     pub fn request_pick(&mut self, request_id: u32, x: u32, y: u32) {
         match self.gpu.as_mut().and_then(|g| g.render.as_mut()) {
-            Some(render) if self.config.arena_faction.is_none() => render.picker.request(request_id, x, y),
+            Some(render) if self.config.arena_faction.is_none() && !self.config.general_remote => {
+                render.picker.request(request_id, x, y)
+            }
             _ => self.events.push_back(EngineEvent::PickResult {
                 request_id,
                 entity_serial: None,
@@ -785,7 +794,7 @@ impl Engine {
     }
 
     fn require_local_simulation(&self) -> Result<(), EngineError> {
-        if self.config.arena_faction.is_some() {
+        if self.config.arena_faction.is_some() || self.config.general_remote {
             return Err(EngineError {
                 code: RynvekErrorCode::SimulationInvariantViolated,
                 message: "远程阵营显示禁止 STEP/START；命令必须提交服务器权威宿主".into(),
@@ -796,6 +805,12 @@ impl Engine {
 
     /// 与 GPU 上传共用的只读场景路径；远程模式初始化前为空，不显示四实体演示。
     pub fn frame_scene(&self) -> rynvek_render::FrameScene {
+        if self.config.general_remote {
+            return self.general_frame.as_ref().map_or_else(
+                || rynvek_render::FrameScene::new(0, RenderLayerMask::NONE),
+                |f| f.scene(self.layer_mask),
+            );
+        }
         if self.config.arena_faction.is_some() {
             return self.arena_observation.as_ref().map_or_else(
                 || rynvek_render::FrameScene::new(0, rynvek_render::RenderLayerMask::NONE),
@@ -856,7 +871,7 @@ impl Engine {
             &render.pick_view,
             &scene,
             &self.camera,
-            self.config.arena_faction.is_none().then_some(field),
+            (self.config.arena_faction.is_none() && !self.config.general_remote).then_some(field),
         );
         render.picker.encode(&mut enc, &render.pick_texture);
         queue.submit([enc.finish()]);
@@ -1074,12 +1089,40 @@ impl Engine {
                 self.last_tick = observation.tick;
                 self.arena_observation = Some(observation);
             }
+            EngineCommand::GeneralFrame { frame } => {
+                if self.shutdown
+                    || self.general_rejected
+                    || !self.config.general_remote
+                    || self.config.arena_faction.is_some()
+                    || crate::protocol::parse_world_id(&frame.world_id) != Some(self.config.world_id)
+                    || !frame.validate()
+                    || self.general_frame.as_ref().is_some_and(|old| {
+                        frame.tick < old.tick || frame.tick == old.tick && old.as_ref() != frame.as_ref()
+                    })
+                {
+                    self.general_frame = None;
+                    self.general_rejected = true;
+                    self.last_tick = 0;
+                    return Err(EngineError {
+                        code: RynvekErrorCode::SimulationInvariantViolated,
+                        message: "General观察世界/只读模式/根/时序/身体非法".into(),
+                    });
+                }
+                self.last_tick = frame.tick;
+                self.events.push_back(EngineEvent::GeneralFrameApplied {
+                    world_id: frame.world_id.clone(),
+                    tick: frame.tick,
+                    state_root: frame.state_root.clone(),
+                });
+                self.general_frame = Some(frame);
+            }
             EngineCommand::SimulateDeviceLost => self.simulate_device_lost(),
             EngineCommand::Shutdown => {
                 self.running = false;
                 self.shutdown = true;
                 self.gpu = None;
                 self.arena_observation = None;
+                self.general_frame = None;
                 self.arena_map = None;
                 self.arena_selection = Default::default();
                 self.arena_theme = Default::default();
@@ -1267,5 +1310,85 @@ mod tests {
         assert_eq!(e.simulation().clock.tick, e.last_tick());
         e.handle_command(EngineCommand::Shutdown).unwrap();
         assert!(e.is_shutdown() && !e.is_running());
+    }
+    #[test]
+    fn remote_general_uses_original_circle_scene_and_never_steps_local_simulation() {
+        let cfg: rynvek_world::general::GeneralWorldConfig =
+            serde_json::from_str(include_str!("../../../examples/worlds/general-rules.world.json")).unwrap();
+        let mut authority = cfg.instantiate([0x53; 16]).unwrap();
+        authority.tick().unwrap();
+        let frame = crate::general::GeneralRenderFrame::capture(&authority);
+        assert!(frame.validate());
+        let mut e = Engine::new(EngineConfig {
+            world_id: authority.world_id,
+            general_remote: true,
+            ..Default::default()
+        });
+        assert_eq!(e.frame_scene().instance_count(), 0);
+        e.handle_command(EngineCommand::GeneralFrame {
+            frame: Box::new(frame.clone()),
+        })
+        .unwrap();
+        let scene = e.frame_scene();
+        let original = collect_scene(
+            &authority,
+            authority.clock.tick,
+            e.camera.lod(),
+            RenderLayerMask::ALL,
+            &[&EntityProvider::default()],
+        );
+        assert_eq!(scene.ordered_instances(), original.ordered_instances());
+        assert_eq!(e.sim.clock.tick, 0);
+        assert!(e.handle_command(EngineCommand::Step { ticks: 1 }).is_err());
+        assert!(e.handle_command(EngineCommand::Start { tick_rate: 30 }).is_err());
+        assert!(
+            e.handle_command(EngineCommand::GeneralWorld {
+                package_bytes: general_package()
+            })
+            .is_err()
+        );
+        let mut bad = frame.clone();
+        bad.state_root = "ff".repeat(32);
+        assert!(
+            e.handle_command(EngineCommand::GeneralFrame { frame: Box::new(bad) })
+                .is_err()
+        );
+        assert_eq!(e.frame_scene().instance_count(), 0);
+        assert!(
+            e.handle_command(EngineCommand::GeneralFrame {
+                frame: Box::new(frame.clone())
+            })
+            .is_err(),
+            "坏帧清态后禁止晚帧复活，必须新建Worker并重验授权"
+        );
+        e.handle_command(EngineCommand::Shutdown).unwrap();
+        assert_eq!(e.frame_scene().instance_count(), 0);
+        assert!(
+            e.handle_command(EngineCommand::GeneralFrame { frame: Box::new(frame) })
+                .is_err()
+        );
+    }
+    #[test]
+    fn remote_general_rejects_cross_world_arena_bad_geometry_and_private_extra_fields() {
+        let mut f:crate::general::GeneralRenderFrame=serde_json::from_value(serde_json::json!({"format":"rynvek-general-frame/1","worldId":"00".repeat(16),"tick":1,"revision":1,"stateRoot":"ab".repeat(32),"bodies":[{"serial":1,"positionQ32":[4294967296i64*64,4294967296i64*128],"radiusQ32":4294967296i64}]})).unwrap();
+        let mut arena = Engine::new(EngineConfig {
+            arena_faction: Some(0),
+            ..Default::default()
+        });
+        assert!(
+            arena
+                .handle_command(EngineCommand::GeneralFrame {
+                    frame: Box::new(f.clone())
+                })
+                .is_err()
+        );
+        f.bodies[0].radius_q32 = 0;
+        assert!(!f.validate());
+        f.bodies[0].radius_q32 = 4294967296;
+        f.bodies.push(f.bodies[0].clone());
+        assert!(!f.validate());
+        let mut raw = serde_json::to_value(f).unwrap();
+        raw["rule_source"] = serde_json::json!("不应进入渲染器");
+        assert!(serde_json::from_value::<crate::general::GeneralRenderFrame>(raw).is_err());
     }
 }

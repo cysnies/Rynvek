@@ -256,3 +256,5 @@ it("WASM下载/实例化失败显式回报一次，停止队列且不调度空�
   expect(loop.stopped).toBe(true); expect(scope.raf).toHaveLength(0);
   expect(scope.out).toEqual([[{ type: "ENGINE_ERROR", code: 0x3003, message: "Worker 调用失败：真实WASM加载失败" }]]);
 });
+
+it("General能力必须由真实WASM握手确认，旧产物不得调度任何帧",async()=>{for(const supported of [false,true]){const scope=new FakeScope(),wasm=new FakeWasmWorker();wasm.readyEvents=[supported?{...READY_GPU,generalRemote:true}:READY_GPU];const runner=runEngineWorker(scope,wasm);scope.send({type:"ENGINE_INIT",canvas:new FakeOffscreen(9),width:256,height:256,worldId:"53".repeat(16),gpuMode:"required",generalRemote:true});await flush();wasm.finishInit();await flush();if(!supported){expect(runner.stopped).toBe(true);expect(scope.raf).toHaveLength(0);expect(wasm.calls.some(c=>c.startsWith("frame:"))).toBe(false);}else{expect(runner.stopped).toBe(false);scope.send({type:"SHUTDOWN"});await flush();}}});

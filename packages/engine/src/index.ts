@@ -14,3 +14,5 @@ export * from "./protocol.js";
 export * from "./worker.js";
 
 export * from "./arena.js";
+
+export * from "./general.js";

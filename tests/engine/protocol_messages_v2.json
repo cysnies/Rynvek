@@ -164,6 +164,26 @@
       }
     },
     {
+      "type": "GENERAL_FRAME",
+      "frame": {
+        "format": "rynvek-general-frame/1",
+        "worldId": "00112233445566778899aabbccddeeff",
+        "tick": 7,
+        "revision": 7,
+        "stateRoot": "abababababababababababababababababababababababababababababababab",
+        "bodies": [
+          {
+            "serial": 1,
+            "positionQ32": [
+              274877906944,
+              549755813888
+            ],
+            "radiusQ32": 4294967296
+          }
+        ]
+      }
+    },
+    {
       "type": "SHUTDOWN"
     }
   ],
@@ -245,6 +265,12 @@
         4294967295,
         4294967295
       ]
+    },
+    {
+      "type": "GENERAL_FRAME_APPLIED",
+      "worldId": "00112233445566778899aabbccddeeff",
+      "tick": 7,
+      "stateRoot": "abababababababababababababababababababababababababababababababab"
     }
   ]
 }

@@ -98,6 +98,7 @@ impl WorkerHost {
             world_id,
             gpu_mode,
             arena_faction,
+            general_remote,
         } = cmd
         else {
             return Err(protocol_error("begin_init 只接受 ENGINE_INIT"));
@@ -118,12 +119,16 @@ impl WorkerHost {
                 message: format!("worldId 必须是 32 位十六进制：{hex}"),
             })?,
         };
+        if *general_remote && arena_faction.is_some() {
+            return Err(protocol_error("远程General与Arena不可混用"));
+        }
         self.phase = HostPhase::Initializing;
         Ok(InitPlan {
             config: EngineConfig {
                 world_id,
                 gpu_mode: *gpu_mode,
                 arena_faction: *arena_faction,
+                general_remote: *general_remote,
                 viewport: [*width, *height],
                 ..EngineConfig::default()
             },
@@ -320,6 +325,7 @@ mod tests {
             world_id: None,
             gpu_mode: GpuMode::Disabled,
             arena_faction: None,
+            general_remote: false,
         }
     }
 
@@ -333,6 +339,7 @@ mod tests {
             world_id: None,
             gpu_mode: GpuMode::Auto,
             arena_faction: None,
+            general_remote: false,
         };
         assert_eq!(h.begin_init(&bad).unwrap_err().code, RynvekErrorCode::DimensionMismatch);
         let bad_id = EngineCommand::EngineInit {
@@ -342,6 +349,7 @@ mod tests {
             world_id: Some("xyz".into()),
             gpu_mode: GpuMode::Auto,
             arena_faction: None,
+            general_remote: false,
         };
         assert!(h.begin_init(&bad_id).is_err());
         assert_eq!(h.phase(), HostPhase::AwaitingInit);

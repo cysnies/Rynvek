@@ -51,6 +51,8 @@ pub enum EngineCommand {
         /// 远程竞技场只读显示：绑定阵营，禁止推进本地演示世界。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         arena_faction: Option<u8>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        general_remote: bool,
     },
     Resize {
         width: u32,
@@ -123,6 +125,9 @@ pub enum EngineCommand {
         world_id: String,
         observation: Box<rynvek_rts::observation::FactionObservation>,
     },
+    GeneralFrame {
+        frame: Box<crate::general::GeneralRenderFrame>,
+    },
     Shutdown,
 }
 
@@ -159,6 +164,11 @@ fn default_tick_rate() -> u32 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE", rename_all_fields = "camelCase")]
 pub enum EngineEvent {
+    GeneralFrameApplied {
+        world_id: String,
+        tick: u64,
+        state_root: String,
+    },
     EngineReady {
         backend: ComputeBackendKind,
         /// `TierA` … `TierD`；无 GPU 时为 `None`
@@ -168,6 +178,8 @@ pub enum EngineEvent {
         /// 实际启用的远程只读阵营；省略表示本地仿真或旧版本，不证明竞技场显示能力。
         #[serde(default, skip_serializing_if = "Option::is_none")]
         arena_faction: Option<u8>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        general_remote: bool,
     },
     ArenaThemeApplied {
         world_id: String,
@@ -263,6 +275,7 @@ mod tests {
                 world_id: None,
                 gpu_mode: GpuMode::Required,
                 arena_faction: None,
+                general_remote: false,
             }
         );
         let pick = EngineCommand::from_json(r#"{"type":"PICK_REQUEST","requestId":7,"x":1,"y":2}"#).unwrap();
@@ -294,6 +307,7 @@ mod tests {
             adapter: None,
             generation: 0,
             arena_faction: None,
+            general_remote: false,
         };
         assert_eq!(
             ready.to_json(),

@@ -17,7 +17,7 @@ fn fixture() -> Value {
 fn every_fixture_command_roundtrips_field_by_field() {
     let f = fixture();
     let cmds = f["commands"].as_array().unwrap();
-    assert_eq!(cmds.len(), 17, "17 种当前命令各一条");
+    assert_eq!(cmds.len(), 18, "18 种当前命令各一条");
     for raw in cmds {
         let cmd: EngineCommand = serde_json::from_value(raw.clone()).unwrap_or_else(|e| panic!("{raw}: {e}"));
         assert_eq!(&serde_json::to_value(&cmd).unwrap(), raw);
@@ -31,7 +31,7 @@ fn every_fixture_event_roundtrips_field_by_field() {
     let mut kinds: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
     kinds.sort_unstable();
     kinds.dedup();
-    assert_eq!(kinds.len(), 11, "11 种当前事件全部覆盖");
+    assert_eq!(kinds.len(), 12, "12 种当前事件全部覆盖");
     for raw in events {
         let ev: EngineEvent = serde_json::from_value(raw.clone()).unwrap_or_else(|e| panic!("{raw}: {e}"));
         assert_eq!(&serde_json::to_value(&ev).unwrap(), raw);

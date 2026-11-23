@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+import { expect, it, vi } from "vitest";
+import { createGeneralRenderHost, validateGeneralFrame, type GeneralRenderFrame } from "../src/index.js";
+import { FakeWorker, FakeCanvas, READY_GPU } from "./fakes.js";
+const world = "53".repeat(16);
+const frame: GeneralRenderFrame = { format: "rynvek-general-frame/1", worldId: world, tick: 1, revision: 1, stateRoot: "ab".repeat(32), bodies: [{ serial: 1, positionQ32: [64 * 4294967296, 128 * 4294967296], radiusQ32: 4294967296 }] };
+it("原Host一次移交最小权威投影，确认能力与真实FRAME_RENDERED前不宣称显示，释放清Worker", () => { const w = new FakeWorker(), canvas = new FakeCanvas(), status = vi.fn(), error = vi.fn(); const r = createGeneralRenderHost(w, canvas, world, status, error); expect(w.posted[0]?.message).toMatchObject({ generalRemote: true, gpuMode: "required", worldId: world }); w.deliver({ ...READY_GPU, generalRemote: true }); r.present(frame); const posted = w.posted.at(-1)?.message as {
+    frame: GeneralRenderFrame;
+}; expect(posted.frame).toEqual(frame); expect(Object.keys(posted.frame)).not.toContain("rule_source"); expect(status).not.toHaveBeenCalled(); w.deliver({ type: "GENERAL_FRAME_APPLIED", worldId: world, tick: 1, stateRoot: frame.stateRoot }); expect(status).toHaveBeenLastCalledWith(expect.stringContaining("待GPU")); w.deliver({ type: "FRAME_RENDERED", tick: 1 }); expect(status).toHaveBeenLastCalledWith(expect.stringContaining("WebGPU已提交")); r.dispose(); expect(w.terminated).toBe(true); expect(() => r.present(frame)).toThrow(); });
+it("旧Worker未确认能力即关闭；额外源码/坏范围/错世界/假根回执拒绝", () => { const w = new FakeWorker(), error = vi.fn(); createGeneralRenderHost(w, new FakeCanvas(), world, vi.fn(), error); w.deliver(READY_GPU); expect(w.terminated).toBe(true); expect(error).toHaveBeenCalled(); for (const f of [{ ...frame, rule_source: "不可传入" }, { ...frame, worldId: "ff".repeat(16) }, { ...frame, bodies: [{ ...frame.bodies[0]!, radiusQ32: 0 }] }])
+    expect(() => validateGeneralFrame(f as GeneralRenderFrame, world)).toThrow(); const second = new FakeWorker(), r = createGeneralRenderHost(second, new FakeCanvas(), world, vi.fn(), error); second.deliver({ ...READY_GPU, generalRemote: true }); r.present(frame); second.deliver({ type: "GENERAL_FRAME_APPLIED", worldId: world, tick: 1, stateRoot: "00".repeat(32) }); expect(second.terminated).toBe(true); });

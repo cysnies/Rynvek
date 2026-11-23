@@ -28,6 +28,25 @@ impl Default for EntityProvider {
     }
 }
 
+impl EntityProvider {
+    pub(crate) fn push_circle(&self, serial: u32, position_q32: [i64; 2], radius_q32: i64, scene: &mut FrameScene) {
+        let scale = 1.0 / (Q32_32::ONE.0 as f64);
+
+        let x = (position_q32[0] as f64 * scale) as f32;
+        let y = (position_q32[1] as f64 * scale) as f32;
+        scene.push(
+            InstanceData::new(
+                RenderLayer::Organisms,
+                [x, y],
+                (radius_q32 as f64 * scale * 2.0) as f32,
+                Rgba8(self.color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)),
+                InstanceShape::Circle,
+            )
+            .with_pick(PickId(serial)),
+        );
+    }
+}
+
 impl VisualizationProvider<SimulationEngine> for EntityProvider {
     fn id(&self) -> &'static str {
         "rynvek.engine.entities"
@@ -38,20 +57,8 @@ impl VisualizationProvider<SimulationEngine> for EntityProvider {
     }
 
     fn populate(&self, snapshot: &SimulationEngine, _lod: NeuralLod, scene: &mut FrameScene) {
-        let scale = 1.0 / (Q32_32::ONE.0 as f64);
         for (serial, body) in snapshot.physics().iter() {
-            let x = (body.position_q32[0] as f64 * scale) as f32;
-            let y = (body.position_q32[1] as f64 * scale) as f32;
-            scene.push(
-                InstanceData::new(
-                    RenderLayer::Organisms,
-                    [x, y],
-                    (body.radius_q32 as f64 * scale * 2.0) as f32,
-                    Rgba8(self.color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)),
-                    InstanceShape::Circle,
-                )
-                .with_pick(PickId(serial)),
-            );
+            self.push_circle(serial, body.position_q32, body.radius_q32, scene);
         }
     }
 }
