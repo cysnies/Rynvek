@@ -1063,3 +1063,60 @@ async fn pending_quarantine_release_revoked_after_resolve_still_fails_original_c
     assert_eq!(view(&s, &u, id).await["rule_recovery"], Value::Null);
     s.shutdown().await;
 }
+
+#[tokio::test]
+#[ignore = "真实General Web控制器HTTP链：先tsc构建web-platform；无浏览器/GPU验收"]
+async fn actual_general_web_identity_create_discover_fences_install_quarantine_and_private_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let s = start(store.clone(), dir.path()).await;
+    let u = register(&s.base_url(), "general-web-owner", "human", 113).await;
+    published(&s, &u, &pack("rules.web.old", &root_graph()), vec![]).await;
+    published(&s, &u, &pack("rules.web.new", &root_graph()), vec![]).await;
+    let me = client::get(&format!("{}/api/v1/auth/session", s.base_url()), Some(&u.token))
+        .await
+        .unwrap();
+    assert_eq!(me.status, 200);
+    assert_eq!(me.json().unwrap()["principal_id"], u.principal_id.to_string());
+    assert_eq!(
+        client::get(&format!("{}/api/v1/auth/session", s.base_url()), None)
+            .await
+            .unwrap()
+            .status,
+        401
+    );
+    let payload = json!({"base":s.base_url(),"token":u.token,"owner":u.principal_id.to_string(),"key":rynvek_server::ids::hex(&u.key.public_key()),"world":rules().build_package("world.test.general-web", "0.1.0").unwrap()});
+    let result = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut cmd = std::process::Command::new("node")
+            .arg("apps/web-platform/test/general-http-e2e.mjs")
+            .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        cmd.stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&payload).unwrap())
+            .unwrap();
+        let out = cmd.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "真实Web控制器失败: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        serde_json::from_slice::<Value>(&out.stdout).unwrap()
+    })
+    .await
+    .unwrap();
+    let id = result["world_id"].as_str().unwrap().parse::<WireUuid>().unwrap();
+    let before = view(&s, &u, id).await;
+    assert_eq!(before["commit"]["state_root"], result["root"]);
+    assert_eq!(before["commit"]["tick"], 9);
+    s.shutdown().await;
+    let restored = start(store, dir.path()).await;
+    assert_eq!(view(&restored, &u, id).await, before);
+    restored.shutdown().await;
+}

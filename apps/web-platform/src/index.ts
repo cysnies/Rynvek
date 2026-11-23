@@ -11,7 +11,7 @@
  * - `/hub`：Rynvek Hub 世界包（`.rworld`）、插件包（`.rpack`）与黄金回放库。
  */
 
-export const WEB_PLATFORM_SURFACES = ["arena", "studio", "lab", "hub"] as const;
+export const WEB_PLATFORM_SURFACES = ["arena", "studio", "lab", "hub", "general"] as const;
 export type WebPlatformSurface = (typeof WEB_PLATFORM_SURFACES)[number];
 
 export interface WebPlatformRoute {
@@ -22,6 +22,7 @@ export interface WebPlatformRoute {
 }
 
 export const WEB_PLATFORM_ROUTES: Readonly<Record<WebPlatformSurface, WebPlatformRoute>> = {
+  general: {surface:"general",path:"/general",titleZh:"通用权威世界 (General)",requiresWebGpuCanvas:false},
   arena: {
     surface: "arena",
     path: "/arena",

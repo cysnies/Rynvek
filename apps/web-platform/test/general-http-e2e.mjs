@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: 2026 The Rynvek Contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+import assert from "node:assert/strict";
+import { GeneralWorldSession } from "../dist/general-remote.js";
+let text = "";
+for await (const c of process.stdin)
+    text += c;
+const p = JSON.parse(text), c = await GeneralWorldSession.open(p.base, p.token);
+assert.equal(c.identity.principal_id, p.owner);
+assert.equal(c.identity.ed25519_pubkey, p.key);
+const id = await c.create(Uint8Array.from(p.world));
+assert((await c.listWorlds()).some(w => w.world_id === id));
+await c.select(id);
+assert.equal(c.observation.commit.tick, 0);
+assert.equal(c.hostFence, undefined);
+await c.connect();
+await c.acquire();
+for (let i = 0; i < 3; i++)
+    await c.advance("tick");
+const list = await c.discoverRules();
+assert.equal(list.length, 2);
+const plans = list.map(r => ({ root: { id: r.manifest.package_id, version: r.manifest.version, blake3_256: r.manifest.artifact_cid }, modules: { [r.manifest.package_id]: "steer" } })).sort((a, b) => a.root.id.localeCompare(b.root.id));
+const next = plans[0], old = plans[1];
+assert.match(old.root.id, /old$/);
+assert.deepEqual(await c.verify(old), [old.root.id]);
+await c.advance("install", old);
+await c.advance("tick");
+await c.rules.revoke(old.root);
+await assert.rejects(() => c.advance("tick"));
+assert.equal(c.observation, undefined);
+assert.equal(c.controlFence, undefined);
+await c.refresh();
+assert.equal(c.observation.commit.tick, 5);
+await c.connect();
+await c.acquire();
+await c.advance("recover", next, 4);
+assert.equal(c.observation.commit.tick, 6);
+assert.equal(c.observation.rule_recovery.maintenance_paid_q, 4);
+c.destroy();
+const resumed = await GeneralWorldSession.open(p.base, p.token);
+await resumed.select(id);
+assert.equal(resumed.observation.rule_recovery.epoch_tick, 8);
+await resumed.connect();
+await resumed.acquire();
+await resumed.advance("recover", next, 4);
+await resumed.advance("install", next);
+await resumed.advance("tick");
+assert.equal(resumed.observation.commit.tick, 9);
+assert.equal(resumed.observation.rule_recovery, null);
+assert(resumed.observation.rule_meter.paid_q > 0);
+const result = { world_id: id, root: resumed.observation.commit.state_root, tick: 9 };
+resumed.destroy();
+console.log(JSON.stringify(result));
