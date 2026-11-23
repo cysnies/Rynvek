@@ -53,3 +53,7 @@ cargo test -p rynvek-server --test private_rules --test general_authority --offl
 - C#规则消费、全规范跨种类锁/Schema迁移/组织信任、来源长期保留、完整生命材料生长遗传、多Chunk/三维/任意World、presence/离线多主仍欠。
 - Node22、C#本批重编、wasm32、真实browser硬件GPU、实际PG并发SQL多机OS断电24h长稳仍未验。旧6个PvP_Custom夹具须补真实lease，禁止降生产fence。
 - 未跑全workspace/完整Web集/Clippy/license/SBOM/完整安全/soak/CI轮询；主体齐后集中安全/运行时/正式发布门禁，不宣布整体完成。
+
+## 阶段54追加：原Worker远程桥接代码与构建阻塞
+
+已有最小权威帧→原EntityProvider/FrameScene/Renderer及显式只读画布生命周期，详见[GENERAL_REMOTE_RENDERER.md](GENERAL_REMOTE_RENDERER.md)。上文“尚未桥接”保留阶段53历史；本箱新wasm32因缺clang构建失败，旧产物会被General能力握手主动拒显；不能将原生软件回读/TS打包称浏览器可用或硬件验收。

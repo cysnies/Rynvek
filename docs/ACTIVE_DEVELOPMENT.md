@@ -5,6 +5,20 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十四批：远程General最小观察到原Worker/FrameScene/Renderer（从main a1be0c3继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核阶段53交接/ACTIVE/规范7.1与干净PUBLIC远端 `a1be0c3fb2271a0930b467fc680b59ae52db2948`；不重做既有用户/规则链。完整边界和父代理验项见[GENERAL_REMOTE_RENDERER.md](GENERAL_REMOTE_RENDERER.md)。
+
+- 新原权限GET general/frame，只传六字段元数据与每身体serial/Q32位置/半径；恢复后再准入、仅Private所有者、无宿主认领/控制或Tick。无快照/源码/账户/场网格/令牌给Worker。
+- 原EngineHost/Dedicated Worker显式generalRemote能力握手→原EntityProvider圆体函数/FrameScene/WorldRenderer，不新造Canvas渲染器，不启动本地第二份World。禁本地STEP/START/GENERAL_WORLD，Arena绑定/原fog保持。坏帧清态并封闭Worker，晚帧不能复活。
+- /general明确开启GPU只读显示，5秒只读复验、12秒授权失鲜/启动超时清除；断线/下次复验撤权/隐藏/换世界清私有画布、观察、双fence、计划/包清单并终止Worker。不是即时撤权推送或信息追回；不自动推进/续租/降级假画布。只在真实匹配观察回执+原FRAME_RENDERED后报告GPU提交，不称硬件实测。
+
+130个不同定向用例通过，新增10：TS engine54（3新）、Web DOM/路由15（3新）、Rust engine17（2新）/wasm原生6/共享协议2、Arena表现13/General软件回读1新、server General11（1新）/私库11。真实HTTP→最小投影→原生场景，原Node用户链签名安装/维护/恢复仍执行；原生llvmpipe LLVM19.1.7 GL Cpu回读实际圆半径/清屏及原Arena fog，不是浏览器/硬件GPU。必要类型/tsc/Vite/原生检查与敏感筛查，不是集中全门禁。
+
+**新wasm32构建未成功**：已用脚本原支持的既有官方wasm-bindgen0.2.130，锁定公开依赖正常下载后因缺clang失败；未生成新产物，未换依赖/网络绕过。Vite仅复用旧wasm，新握手会主动拒绝旧产物显示General，不能声称浏览器功能已可验收；先补正常工具链重编与新ABI实证。执行器无浏览器，不重试既往受管loopback拦截，父代理仅在已有获准可达部署验文档清单。
+
+下一主体/发布阻塞仍有General协作自治/签名登录/分页编辑器，Agent/C#及全规范World等；Node22/C#本批重编/新wasm32 ABI/真实browser硬件GPU/实际PG多机断电长稳仍欠。原Store/Simulation/有源计价/提交锁零改动，保ABAC双fence/fog/失败原子性。主体齐后集中完整门禁/安全运行时/正式发布，不以本批标整体完成。以下旧批为历史。
+
 ## 第五十三批：General真实Web身份/世界/私有规则与明确实付控制（从main e495479继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核阶段52交接/ACTIVE/真实规范/干净远端 `e4954793989102a71f02bc47e417c4b5c8d61342`；不重复AST/私库/Actor/隔离链。完整流程与父代理浏览器验项见[GENERAL_WORLD_WEB.md](GENERAL_WORLD_WEB.md)。
