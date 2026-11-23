@@ -18,6 +18,7 @@ fn world() -> ArenaWorld {
             natural_reproduction: true,
             attack_cost_micro_per_shot: 0,
             repair_cost_micro_per_milli: 0,
+            continuous_cost_micro_per_neuron_step: 0,
             secretion_cost_micro_per_field_raw: 0,
             birth_synthesis_milli: 0,
             activity_reserve_milli: 0,

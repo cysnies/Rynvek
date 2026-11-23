@@ -145,6 +145,7 @@ pub fn energy_schema() -> SchemaRef {
         field("repair_q", DataType::Decimal128(38, 0), false),
         field("secretion_q", DataType::Decimal128(38, 0), false),
         field("synthesis_q", DataType::Decimal128(38, 0), false),
+        field("continuous_q", DataType::Decimal128(38, 0), false),
     ]))
 }
 
@@ -331,6 +332,11 @@ pub fn energy_batch(rows: &[EnergyRow]) -> Result<RecordBatch, ArrowError> {
             arc(Decimal128Array::from_iter_values(
                 rows.iter()
                     .map(|r| i128::try_from(r.synthesis_q).expect("热耗子账精确汇总")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.continuous_q).expect("热耗子账精确汇总")),
             )
             .with_precision_and_scale(38, 0)?),
         ],

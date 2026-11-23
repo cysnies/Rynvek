@@ -231,6 +231,7 @@ impl ArenaWorld {
             let cost = self
                 .faction(faction)
                 .map_or(800, |f| f.modifiers().spike_cost_micro_energy) as u32;
+            let continuous_q = self.continuous_neural_q(id);
             let u = self.units.get_mut(&id).expect("存在");
             u.modulators = m;
             if budgeted && u.defense.hp_milli <= 0 {
@@ -245,10 +246,21 @@ impl ArenaWorld {
                     .bodies
                     .get_mut(&id)
                     .expect("存活个体");
-                u.actions = u
-                    .brain
-                    .step_epoch_budgeted(&x, m.0, plasticity, &mut body.account, cost)
-                    .map_or([0; 6], |(actions, _)| actions);
+                u.actions =
+                    match u
+                        .brain
+                        .step_epoch_budgeted(&x, m.0, plasticity, &mut body.account, cost, continuous_q)
+                    {
+                        Some((actions, _)) => {
+                            body.activity.continuous_q = body
+                                .activity
+                                .continuous_q
+                                .checked_add(continuous_q)
+                                .expect("连续计算子账不超过总热耗");
+                            actions
+                        }
+                        None => [0; 6],
+                    };
                 continue;
             }
             let (actions, spikes) = u.brain.step_epoch_metered(&x, m.0, plasticity);

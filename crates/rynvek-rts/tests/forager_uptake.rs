@@ -4,7 +4,7 @@
 use rynvek_rts::{ArenaMap, ArenaWorld, MatchConfig, TerrainTileKind, UnitKind};
 fn world() -> ArenaWorld {
     let mut c = serde_json::to_value(MatchConfig::pve(57, 1)).unwrap();
-    c["ecology"] = serde_json::json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}});
+    c["ecology"] = serde_json::json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}});
     ArenaWorld::with_map(
         serde_json::from_value(c).unwrap(),
         ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::OpenSubstrate; 96 * 96]),

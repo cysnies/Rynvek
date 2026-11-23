@@ -126,10 +126,15 @@ impl UnitBrain {
         plasticity: bool,
         account: &mut rynvek_neural::metabolism::EnergyAccount,
         cost_micro: u32,
+        continuous_q: u64,
     ) -> Option<([i16; 6], u32)> {
         let mut candidate = self.clone();
         let (actions, spikes) = candidate.step_epoch_metered(sensory, m, plasticity);
-        if !account.try_charge_spikes(spikes, cost_micro) {
+        let Ok(total_q) = u64::try_from(u128::from(spikes) * u128::from(cost_micro) * 4 + u128::from(continuous_q))
+        else {
+            return None;
+        };
+        if !account.try_dissipate_q(total_q) {
             return None;
         }
         *self = candidate;
@@ -271,5 +276,39 @@ mod tests {
         assert_eq!(modulated_sensory(&x, [0, 0, 0, -256])[0], Q8_8(50));
         assert_eq!(modulated_sensory(&x, [77, 0, -30, 0])[sensor::MOD_DA], Q8_8(77));
         assert_eq!(modulated_sensory(&x, [77, 0, -30, 0])[sensor::MOD_NE], Q8_8(-30));
+    }
+}
+
+#[cfg(test)]
+mod continuous_cost_tests {
+    use super::*;
+    use crate::UnitKind;
+    use rynvek_neural::metabolism::EnergyAccount;
+    #[test]
+    fn continuous_cost_both_nonspiking_models_commit_only_after_full_payment() {
+        for kind in [UnitKind::Forager, UnitKind::Carapace] {
+            let mut brain = UnitBrain::from_genome(&Genome::seed(kind)).unwrap();
+            let before = brain.state_root();
+            let mut account = EnergyAccount::default();
+            assert!(account.try_receive_milli(1));
+            let original = account.clone();
+            assert!(
+                brain
+                    .step_epoch_budgeted(&[256; 16], [0; 4], false, &mut account, 800, 4001)
+                    .is_none()
+            );
+            assert_eq!(brain.state_root(), before);
+            assert_eq!(account, original);
+            let mut reference = brain.clone();
+            let (actions, spikes) = reference.step_epoch_metered(&[256; 16], [0; 4], false);
+            assert_eq!(spikes, 0, "连续输出不可伪装为脉冲");
+            assert_eq!(
+                brain.step_epoch_budgeted(&[256; 16], [0; 4], false, &mut account, 800, 4000),
+                Some((actions, 0))
+            );
+            assert_eq!(brain.state_root(), reference.state_root());
+            assert_eq!((account.stored_q, account.dissipated_q), (0, 4000));
+            assert!(account.is_conserved());
+        }
     }
 }

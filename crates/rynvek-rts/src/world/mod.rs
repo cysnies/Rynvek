@@ -1250,6 +1250,7 @@ impl ArenaWorld {
         self.step_harvest();
         self.step_metabolism();
         self.step_combat();
+        self.step_signal_emission();
         self.step_environment();
         self.retire_activity_exhausted();
         self.step_deaths();
@@ -1327,7 +1328,7 @@ impl ArenaWorld {
         let config_root = {
             let mut h = Hasher::new();
             // 当前格式绑定整个配置，删除历史模式共用标签与二次身份来源。
-            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_11");
+            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_12");
             h.update(&serde_json::to_vec(&self.config).expect("配置仅含确定性枚举和整数"));
             h.update(&serde_json::to_vec(&self.authoring).expect("有序创作规则"));
             h.update(&self.map.width.to_le_bytes());

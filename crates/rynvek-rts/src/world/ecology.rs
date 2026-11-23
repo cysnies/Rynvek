@@ -25,6 +25,8 @@ pub struct RoleEnergyContract {
     pub attack_cost_micro_per_shot: u32,
     pub repair_cost_micro_per_milli: u32,
     pub secretion_cost_micro_per_field_raw: u32,
+    /// 非脉冲模型每个隐藏神经元每子步的显式实验价格，0明确关闭。
+    pub continuous_cost_micro_per_neuron_step: u32,
     pub birth_synthesis_milli: u32,
     pub activity_reserve_milli: u32,
     pub natural_reproduction: bool,
@@ -87,6 +89,7 @@ pub struct ActivityHeat {
     pub repair_q: u64,
     pub secretion_q: u64,
     pub synthesis_q: u64,
+    pub continuous_q: u64,
 }
 impl ActivityHeat {
     pub fn total_q(&self) -> u128 {
@@ -94,6 +97,7 @@ impl ActivityHeat {
             + u128::from(self.repair_q)
             + u128::from(self.secretion_q)
             + u128::from(self.synthesis_q)
+            + u128::from(self.continuous_q)
     }
     fn record(&mut self, kind: ActivityKind, q: u64) {
         let value = match kind {
@@ -222,6 +226,44 @@ impl ArenaWorld {
         b.activity.record(kind, q);
         true
     }
+    /// 自主信号发射：只对显式生态角色启用，不把免费RTS或野生身体伪装为已计价。
+    /// a_emit的[-256,256]直接映射每Tick的有符号SignalA raw，最大1.0场单位。
+    /// 这是有界实验映射，不是原规范已冻结的化学产率或物质守恒模型。
+    pub(super) fn step_signal_emission(&mut self) {
+        let ids: Vec<_> = self.units.keys().copied().collect();
+        for id in ids {
+            let u = &self.units[&id];
+            if self.role_energy(u.kind, u.faction).is_none() || !self.can_perform_activity(id) {
+                continue;
+            }
+            let delta = i32::from(u.actions[crate::genome::action::EMIT].clamp(-256, 256));
+            if delta == 0 {
+                continue;
+            }
+            let Some((x, y)) = u
+                .position
+                .tile()
+                .filter(|(x, y)| *x < self.map.width && *y < self.map.height)
+            else {
+                continue;
+            };
+            let channel = crate::fields::ARENA_FIELD_CHANNELS[FieldId::SignalA.channel().index()];
+            let current = i32::from(self.fields.get(FieldId::SignalA, i64::from(x), i64::from(y)));
+            let room = if delta > 0 {
+                i32::from(channel.max_val_q8) - current
+            } else {
+                current - i32::from(channel.min_val_q8)
+            }
+            .max(0) as u64;
+            let price = self.activity_price_q(id, ActivityKind::Secretion);
+            let accepted = self.affordable_activity(id, u64::from(delta.unsigned_abs()).min(room), price);
+            assert!(self.charge_activity(id, ActivityKind::Secretion, accepted * price));
+            let actual = self
+                .fields
+                .add(FieldId::SignalA, x, y, delta.signum() * accepted as i32);
+            assert_eq!(actual, delta.signum() * accepted as i32);
+        }
+    }
     /// 后半Tick动作恰好耗尽，也必须走唯一死亡路径，不能留下可恢复的零能量幽灵。
     pub(super) fn retire_activity_exhausted(&mut self) {
         let ids: Vec<_> = self
@@ -252,13 +294,29 @@ impl ArenaWorld {
             .count() as u64;
         u64::from(role.basal_cost_micro_per_tick) * 4 + edges * u64::from(role.synapse_maintenance_micro_per_tick) * 4
     }
+    /// 计模型隐藏状态更新数，不以连续读出幅值伪造脉冲；不冒称CPU指令或突触MAC计量。
+    pub(super) fn continuous_neural_q(&self, id: EntitySerial) -> u64 {
+        let u = &self.units[&id];
+        if !matches!(
+            u.genome.model,
+            rynvek_neural::NeuronModelKind::CTRNN | rynvek_neural::NeuronModelKind::GatedMLP
+        ) {
+            return 0;
+        }
+        self.role_energy(u.kind, u.faction).map_or(0, |r| {
+            u64::from(u.genome.n_hid)
+                * crate::brain::BRAIN_STEPS_PER_EPOCH as u64
+                * u64::from(r.continuous_cost_micro_per_neuron_step)
+                * 4
+        })
+    }
     fn neural_reserve_q(&self, id: EntitySerial) -> u64 {
         let u = &self.units[&id];
         if !matches!(
             u.genome.model,
             rynvek_neural::NeuronModelKind::LIF | rynvek_neural::NeuronModelKind::Izhikevich
         ) {
-            return 0;
+            return self.continuous_neural_q(id);
         }
         let cost = self
             .faction(u.faction)
@@ -486,6 +544,7 @@ mod role_energy_tests {
             natural_reproduction: false,
             attack_cost_micro_per_shot: 0,
             repair_cost_micro_per_milli: 0,
+            continuous_cost_micro_per_neuron_step: 0,
             secretion_cost_micro_per_field_raw: 0,
             birth_synthesis_milli: 0,
             activity_reserve_milli: 0,

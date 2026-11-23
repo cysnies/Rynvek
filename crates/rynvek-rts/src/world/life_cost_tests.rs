@@ -19,6 +19,7 @@ fn fixture(kind: UnitKind, remaining_q: u64) -> (ArenaWorld, EntitySerial, Entit
         replication_mutation_rate_permille: 0,
         attack_cost_micro_per_shot: 0,
         repair_cost_micro_per_milli: 0,
+        continuous_cost_micro_per_neuron_step: 0,
         secretion_cost_micro_per_field_raw: 0,
         birth_synthesis_milli: 0,
         activity_reserve_milli: 10,
@@ -211,4 +212,135 @@ fn life_cost_natural_synthesis_is_atomic_and_preserves_parent_child_body_and_ene
     let cp = a.checkpoint().unwrap();
     let b = ArenaRuntime::restore([39; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
     assert_eq!(a.state_root(), b.state_root());
+}
+
+#[test]
+fn life_cost_emit_signed_saturation_budget_and_dead_sources() {
+    use crate::genome::action::EMIT;
+    for (action, start, end) in [(i16::MAX, 12_798, 12_800), (i16::MIN, -12_798, -12_800)] {
+        let (mut w, s, _) = fixture(UnitKind::Striker, 21);
+        w.units.get_mut(&s).unwrap().actions[EMIT] = action;
+        w.fields.set(FieldId::SignalA, 44, 44, start);
+        w.step_signal_emission();
+        assert_eq!(w.fields.get(FieldId::SignalA, 44, 44), end);
+        let b = &w.ecology.as_ref().unwrap().bodies[&s];
+        assert_eq!((b.account.stored_q, b.activity.secretion_q), (5, 16));
+        assert!(b.account.is_conserved());
+        let before = b.clone();
+        w.step_signal_emission(); // 满场不收请求量费用
+        assert_eq!(w.ecology.as_ref().unwrap().bodies[&s], before);
+        w.fields.set(FieldId::SignalA, 44, 44, 0);
+        w.step_signal_emission(); // 余款不足一个量子，保留原池
+        assert_eq!(w.fields.get(FieldId::SignalA, 44, 44), 0);
+        assert_eq!(w.ecology.as_ref().unwrap().bodies[&s], before);
+    }
+    let (mut w, s, wild) = fixture(UnitKind::Striker, 2048);
+    w.units.get_mut(&wild).unwrap().actions[EMIT] = 256;
+    w.units.get_mut(&s).unwrap().actions[EMIT] = 0;
+    w.step_signal_emission();
+    assert_eq!(w.fields.get(FieldId::SignalA, 46, 44), 0, "野生角色没有显式供能契约");
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&s].activity.secretion_q, 0);
+    w.units.get_mut(&s).unwrap().actions[EMIT] = 256;
+    w.units.get_mut(&s).unwrap().defense.hp_milli = 0;
+    w.step_signal_emission();
+    assert_eq!(w.fields.get(FieldId::SignalA, 44, 44), 0);
+}
+
+#[test]
+fn life_cost_emit_real_tick_checkpoint_wal_and_exhaustion() {
+    use crate::genome::action::EMIT;
+    let (mut w, s, _) = fixture(UnitKind::Striker, 10_000);
+    w.units.get_mut(&s).unwrap().actions = [0, 0, -256, 0, 0, 256];
+    w.faction_mut(OWNER).unwrap().ledger.balance.biomass = 0;
+    w.fields.set(FieldId::SignalA, 44, 44, 0);
+    let dir = tempfile::TempDir::new().unwrap();
+    let snap = dir.path().join("emit.rsnap");
+    let log = dir.path().join("emit.rjournal");
+    let id = [42; 16];
+    let out = w.save_snapshot(&snap, id, 1, [0; 32]).unwrap();
+    let mut parent = out.state_root;
+    let mut writer = JournalWriter::create(&log, id, w.tick, 1, w.tick).unwrap();
+    w.step_with_journal(&mut writer, id, 2, &mut parent).unwrap();
+    assert_eq!(
+        w.fields.get(FieldId::SignalA, 44, 44),
+        256,
+        "真实非脑更新Tick消费原动作"
+    );
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&s].activity.secretion_q, 2048);
+    writer.append_torn_bytes(&[0xfe]).unwrap();
+    let (recovered, result) = ArenaWorld::recover_from_snapshot_and_journal(&snap, &log, id).unwrap();
+    assert!(result.torn_write_detected);
+    assert_eq!(recovered.canonical_state(), w.canonical_state());
+    let (mut w, s, _) = fixture(UnitKind::Striker, 8);
+    w.units.get_mut(&s).unwrap().actions[EMIT] = 256;
+    w.step_signal_emission();
+    assert_eq!(w.fields.get(FieldId::SignalA, 44, 44), 1);
+    w.retire_activity_exhausted();
+    assert!(!w.units.contains_key(&s));
+    assert_eq!(w.ecology.as_ref().unwrap().remains[&s].activity.secretion_q, 8);
+    ArenaRuntime::new(id, w).checkpoint().unwrap();
+}
+
+#[test]
+fn life_cost_continuous_brain_pays_real_updates_and_rejects_atomically() {
+    for (remaining, succeeds) in [(1023, false), (1024, true), (10_000, true)] {
+        let (mut w, s, _) = fixture(UnitKind::Carapace, remaining);
+        w.config
+            .ecology
+            .as_mut()
+            .unwrap()
+            .roles
+            .get_mut(&UnitKind::Carapace)
+            .unwrap()
+            .continuous_cost_micro_per_neuron_step = 2;
+        let expected = 32 * 4 * 2 * 4; // 32隐藏神经元 × 4真实子步 × 2micro × 4q
+        assert_eq!(w.continuous_neural_q(s), expected);
+        let brain = w.units[&s].brain.state_root();
+        let account = w.ecology.as_ref().unwrap().bodies[&s].account.clone();
+        w.step_brains();
+        let body = &w.ecology.as_ref().unwrap().bodies[&s];
+        assert!(body.account.is_conserved());
+        if succeeds {
+            assert_eq!(body.activity.continuous_q, expected);
+            assert_eq!(body.account.stored_q, account.stored_q - expected);
+            assert_eq!(body.account.dissipated_q, account.dissipated_q + expected);
+            assert_ne!(w.units[&s].brain.state_root(), brain);
+        } else {
+            assert_eq!(body.account, account);
+            assert_eq!(body.activity.continuous_q, 0);
+            assert_eq!(w.units[&s].brain.state_root(), brain);
+            assert_eq!(w.units[&s].actions, [0; 6]);
+        }
+        w.retire_activity_exhausted();
+        if remaining == 1024 {
+            assert_eq!(w.ecology.as_ref().unwrap().remains[&s].activity.continuous_q, expected);
+        }
+        let runtime = ArenaRuntime::new([42; 16], w);
+        let cp = runtime.checkpoint().unwrap();
+        let restored = ArenaRuntime::restore([42; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
+        assert_eq!(runtime.world().canonical_state(), restored.world().canonical_state());
+    }
+}
+
+#[test]
+fn life_cost_emit_consumes_real_brain_readout_and_world_field() {
+    use crate::genome::{action::EMIT, sensor};
+    let (mut w, s, _) = fixture(UnitKind::Weaver, 1_000_000);
+    // 定向基因夹具：原CTRNN的敌方在射程感知→首隐藏神经元→原第六动作。
+    let u = w.units.get_mut(&s).unwrap();
+    u.genome.w_in.fill(0);
+    u.genome.w_rec.fill(0);
+    u.genome.w_out.fill(0);
+    u.genome.w_in[sensor::ENEMY_IN_RANGE] = 512;
+    u.genome.w_out[EMIT * u.genome.n_hid as usize] = 512;
+    u.brain = crate::brain::UnitBrain::from_genome(&u.genome).unwrap();
+    w.step_brains();
+    let emitted = w.units[&s].actions[EMIT];
+    assert!(emitted > 0);
+    w.step_signal_emission();
+    assert_eq!(w.fields.get(FieldId::SignalA, 44, 44), emitted);
+    assert_eq!(
+        w.ecology.as_ref().unwrap().bodies[&s].activity.secretion_q,
+        emitted as u64 * 8
+    );
 }

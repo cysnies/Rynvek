@@ -311,6 +311,7 @@ pub struct EnergyRow {
     pub repair_q: u128,
     pub secretion_q: u128,
     pub synthesis_q: u128,
+    pub continuous_q: u128,
 }
 
 /// 一个实验的全部结果
@@ -600,6 +601,7 @@ fn sample_energy(world: &ArenaWorld, run: u32, root: [u8; 32]) -> EnergyRow {
             row.repair_q += u128::from(h.repair_q);
             row.secretion_q += u128::from(h.secretion_q);
             row.synthesis_q += u128::from(h.synthesis_q);
+            row.continuous_q += u128::from(h.continuous_q);
         }
         for a in e
             .bodies

@@ -12,7 +12,7 @@ fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
       "name":"真实自然谱系", "seeds":[57],"ticks":600,"sample_every":300,
       "variants":[{"label":"自然复制", "policy":"ecology", "ecology":{"roles":{"unit.forager":{
         "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
-      ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":10,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}}]
+      ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":1,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":10,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}}]
     }))
     .unwrap();
     spec.validate().unwrap();
@@ -54,11 +54,12 @@ fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
     }
     assert_eq!(result.energy.len(), 2);
     assert!(result.energy.last().unwrap().synthesis_q > 0);
+    assert!(result.energy.last().unwrap().continuous_q > 0);
     for row in &result.energy {
         assert!(row.synthesis_q >= u128::from(row.natural_births) * 40_000);
-        assert!(row.attack_q + row.repair_q + row.secretion_q + row.synthesis_q <= row.dissipated_q);
+        assert!(row.attack_q + row.repair_q + row.secretion_q + row.synthesis_q + row.continuous_q <= row.dissipated_q);
     }
-    for name in ["attack_q", "repair_q", "secretion_q", "synthesis_q"] {
+    for name in ["attack_q", "repair_q", "secretion_q", "synthesis_q", "continuous_q"] {
         let schema = arrow_io::energy_schema();
         assert_eq!(
             schema.field_with_name(name).unwrap().data_type(),
@@ -77,7 +78,7 @@ fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
 fn ecology_experiment_cannot_silently_enable_ranked_or_incomplete_contract() {
     for variant in [
         serde_json::json!({"label":"x","policy":"ecology"}),
-        serde_json::json!({"label":"x","mode":"duel","ecology":{"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}}),
+        serde_json::json!({"label":"x","mode":"duel","ecology":{"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":1,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}}),
     ] {
         let spec: ExperimentSpec =
             serde_json::from_value(serde_json::json!({"name":"bad","seeds":[1],"ticks":1,"variants":[variant]}))

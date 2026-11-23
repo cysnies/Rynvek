@@ -18,6 +18,7 @@ fn budget_world() -> (ArenaWorld, rynvek_rts::EntitySerial) {
             natural_reproduction: true,
             attack_cost_micro_per_shot: 0,
             repair_cost_micro_per_milli: 0,
+            continuous_cost_micro_per_neuron_step: 0,
             secretion_cost_micro_per_field_raw: 0,
             birth_synthesis_milli: 0,
             activity_reserve_milli: 0,
@@ -135,7 +136,7 @@ fn exact_epoch_price_is_atomic_including_plasticity_and_both_tech_costs() {
             };
             let old = a.clone();
             let mut actual = brain.clone();
-            let out = actual.step_epoch_budgeted(&[256; 16], [0; 4], true, &mut a, cost);
+            let out = actual.step_epoch_budgeted(&[256; 16], [0; 4], true, &mut a, cost, 0);
             if available < price {
                 assert!(out.is_none());
                 assert_eq!(actual, brain);
@@ -151,7 +152,7 @@ fn exact_epoch_price_is_atomic_including_plasticity_and_both_tech_costs() {
                 assert!(probe.step_epoch_metered(&[256; 16], [0; 4], true).1 > 0);
                 assert!(
                     actual
-                        .step_epoch_budgeted(&[256; 16], [0; 4], true, &mut a, cost)
+                        .step_epoch_budgeted(&[256; 16], [0; 4], true, &mut a, cost, 0)
                         .is_none(),
                     "真实支付耗尽后不能继续提交下一次发放"
                 );
