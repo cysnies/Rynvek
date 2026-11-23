@@ -5,6 +5,23 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第四十八批：通用World声明组件、受控规则与有来源计价（从main 56982a0继续）
+
+**主体继续，整体未完成、未达正式发布验收。** 已先核交接、ACTIVE与远端均为干净 `56982a017d35b49534c36577282f8d03498d8b93`，未重做阶段47。依最短真实依赖，将Arena原组件registry与Tier0/Tier1执行下沉rules共享核心，由原通用World原Phase07消费；不新造平行架构。完整入口/数学/限制见[GENERAL_WORLD_COMPONENT_RULES.md](GENERAL_WORLD_COMPONENT_RULES.md)。
+
+- 原RYWL可选 `components` 声明模板/实例/受限RuleGraph与原RYPK，沿原CPU/QuickJS同旧态、单写者与有界预算执行。只映射两个Q8.8加速度组件到原真实刚体，不开任意身体/生命账户/场写入；按持久serial绑定，退役不复用稠密槽位。
+- 有生命身体明确正micro/Gas价，Tier0按实际逐实体Gas、Tier1按原中断粗配额确定分摊后由同一有来源EnergyAccount实付转热；CPU配额本身不是生物能量，paid_q不二次计入守恒。LIF与身体规则控制互斥，无执行Gas不保留免费生命推进；规则故障/欠费/非法输出连同原场与摄取整Tick回滚。
+- 原十域根绑定实际定义/动态态/计量，可选RULS进入原快照与文件WAL逐提交重仿真；纯物理四块及无组件LIFE/NEUR不变。只有创世显式安装；原GENERAL_WORLD本地/暂停/Tick0空世界准入及fog/权限/生产fence不弱化。原CLI真实子进程build/run/recover与原生Engine命令已实际消费。
+- `cc748c9` 共享规则核心、`f8a5507` 原事务/定价/恢复、`1f10fa8` RYWL/CLI/Engine真实入口、`c72bcdb` 原FrameScene实际规则位移。最终文档后已推HEAD由交接与同一Page记录，不在本文制造自引用。
+
+### 快验与仍存发布阻塞
+
+56个不同定向用例通过，新增13，重跑不累计：simulation规则10/生命8/物理12，Arena Tier1 8/参数Lab2，World registry2/通用库4，Engine通用5，CLI3，原16阶段/10Hz1，原迷雾1。含Tier1粗配额精确分摊、同旧态、欠费/预算/坏输出/沙箱故障整帧回滚、原生命闭世界、serial不误指、合法包络RULS篡改拒绝、原WAL文件恢复与后续根一致。必要server与wasm宿主原生target检查、触及源码rustfmt、diff检查通过。JSON/schema仅语法检查，未运行JSON Schema语义验证。
+
+必要累计凭据/私人联系/敏感文件名筛查无命中、身份同既有公开提交，不等同完整秘密/隐私审计。PUBLIC普通push，不force/no-verify/admin或改历史/保护/网络，不删原资料。未跑全workspace/Clippy/license/SBOM/安全/soak/CI轮询；Node22正式运行时、C#本批重编、wasm32、真实浏览器/硬件GPU、PG多机/并发SQL/断电/24h长稳未验，llvmpipe仍仅阶段41软件回读。
+
+下一主体优先**统一权限Actor及通用World在线命令/观察/持久fence**；TS AST、完整私有rpack签名依赖发现/验签/安装链仍欠，本地内嵌原包不冒称私库链。单Chunk受控组件不是任意World；Neural Soup完整材料/生长/自然遗传迁入、多Chunk/三维、Agent独立赛道、协作presence/离线多主仍欠。旧6个PvP_Custom Actor夹具必须补真实lease前提，禁止弱化生产fence。主体齐后集中完整验收、安全与正式发布打磨，不以阶段完成宣布全项目完成。
+
 ## 第四十七批：通用World有来源生命场与可选付费LIF（从main a22fbe5继续）
 
 **主体继续，整体未完成、未达正式发布验收。** 已核对手交、ACTIVE与远端均为干净 `a22fbe586241f11db1dd0f0ae20883943b33872f` 后再实现，未重做阶段46刚体链。选定最短真实端到端：复用原 `EnergyAccount` 与可选付费 LIF，把有来源营养摄取、维护、死亡/命令残骸返还接入通用单 Chunk World；不迁 Arena 生态/Tier1，不双记阵营 Biomass，不把本批宣称为任意组件 World 或项目完成。保持 PUBLIC、认证 gh 与本地持续授权，未改可见性/历史/保护/网络策略。完整来源与剖面边界见[GENERAL_WORLD_LIFE.md](GENERAL_WORLD_LIFE.md)。

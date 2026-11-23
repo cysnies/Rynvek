@@ -65,3 +65,5 @@ CLI实际调用原唯一包写/读器，产出RYWL；执行器仅接收严格sch
 阶段47已交付通用World的有来源生命场与可选付费LIF，仍不是声明组件或任意World。下一主体仍包括：通用World的声明组件/受控规则及统一权限Actor；TS AST、完整私有rpack精确签名依赖发现验签安装；多Chunk物理/迁移实际权威链；Agent独立赛道/实际受控智能；协作presence与离线多主等。一般组件参数、已有RTS、此次刚体链不能拼成“任意World已完成”。
 
 主体齐后必须集中完整workspace测试、Clippy、license/SBOM、安全/运行时/发布打磨。Node22、C#本批重编、真实浏览器WebGPU/硬件GPU、真实PG多机断电/长稳仍欠；llvmpipe仍仅阶段41软件回读。整体项目**未完成、未达到正式发布验收**。
+
+阶段48当前增量见[通用World声明组件与受控计价](GENERAL_WORLD_COMPONENT_RULES.md)：同一物理ECS/事务/快照承载真实规则控制，仍非任意World或统一线上Actor。

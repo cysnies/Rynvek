@@ -5,6 +5,8 @@
 
 阶段47从干净 `a22fbe5` 继续，在阶段46单 Chunk 圆形刚体 World 上接入**有来源**营养与可选付费 LIF。这不是把 Arena 生态/Tier1 迁入通用 World，也不是声明式任意组件或统一权限 Actor。原 Tick 事务、迷雾、权限与生产 fence 未放宽。
 
+阶段48已复用同一有来源账户接入[声明组件/受控规则计价](GENERAL_WORLD_COMPONENT_RULES.md)，下文“未接规则”保留为阶段47历史边界；当前有规则身体与LIF互斥，不双写/双记。
+
 ## 账本与来源
 
 复用原 `rynvek-neural::metabolism::EnergyAccount` 与同一内部量子（`ENERGY_Q_PER_FIELD_RAW=15625`），不另造第二套能量单位。活体创世时为空账，能量只来自配置中的明确 Nutrient 沉淀，以及随后从所在格**先收款再等额扣场**的摄取；禁止先扣后钳，也禁止把不足的格值补成正库存。世界级 Biomass/Flux/Neurogel 保持 0，不写入阵营收获，避免与 Arena 双记。
