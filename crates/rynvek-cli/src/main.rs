@@ -19,6 +19,7 @@ mod general;
 mod keys;
 mod offline;
 mod remote;
+mod rule;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -78,6 +79,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// 受限Tier0原RYPK确定性构建与重新验算
+    #[command(subcommand)]
+    Rule(rule::RuleCommand),
     /// 原 RYWL 通用物理 World 打包、运行与 WAL 恢复
     #[command(subcommand)]
     World(general::WorldCommand),
@@ -211,6 +215,7 @@ struct RemoteArgs {
 
 async fn run(cli: Cli) -> CliResult {
     match cli.command {
+        Command::Rule(command) => rule::execute(command),
         Command::World(command) => general::execute(command),
         Command::Server(a) => remote::serve(a).await,
         Command::Keygen { out } => keys::keygen(&out),

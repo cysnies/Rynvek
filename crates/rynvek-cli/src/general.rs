@@ -21,6 +21,9 @@ pub enum WorldCommand {
         id: String,
         #[arg(long, default_value = "1.0.0")]
         version: String,
+        /// 本地创世显式安装：模块ID=原Tier0.rpack路径，可重复；不是私库签名/依赖解析。
+        #[arg(long = "rule-pack")]
+        rule_packs: Vec<String>,
     },
     Run {
         #[arg(long)]
@@ -46,7 +49,7 @@ pub enum WorldCommand {
 fn fail(e: impl std::fmt::Debug) -> CliError {
     CliError::new(format!("通用 World：{e:?}"))
 }
-fn read(path: &Path, max: usize) -> CliResult<Vec<u8>> {
+pub(crate) fn read(path: &Path, max: usize) -> CliResult<Vec<u8>> {
     let f = std::fs::File::open(path).map_err(fail)?;
     let mut bytes = Vec::new();
     f.take((max + 1) as u64).read_to_end(&mut bytes).map_err(fail)?;
@@ -55,7 +58,7 @@ fn read(path: &Path, max: usize) -> CliResult<Vec<u8>> {
     }
     Ok(bytes)
 }
-fn write_new(path: &Path, bytes: &[u8]) -> CliResult {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> CliResult {
     let mut f = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -109,8 +112,35 @@ pub fn execute(command: WorldCommand) -> CliResult {
             out,
             id,
             version,
+            rule_packs,
         } => {
-            let config: GeneralWorldConfig = serde_json::from_slice(&read(&config, 128 * 1024)?).map_err(fail)?;
+            let mut config: GeneralWorldConfig = serde_json::from_slice(&read(&config, 128 * 1024)?).map_err(fail)?;
+            if rule_packs.len() > 16 {
+                return Err(CliError::new("显式安装最多16个规则包"));
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            for spec in rule_packs {
+                let (module, path) = spec
+                    .split_once('=')
+                    .ok_or_else(|| CliError::new("rule-pack须为模块ID=路径"))?;
+                if !seen.insert(module.to_owned()) {
+                    return Err(CliError::new("同模块不能重复安装"));
+                }
+                let rules = config
+                    .components
+                    .as_mut()
+                    .ok_or_else(|| CliError::new("World必须已声明组件与绑定，不隐式创建"))?;
+                if !rules.bindings.values().any(|b| b.module_id == module) || rules.tier1_rules.contains_key(module) {
+                    return Err(CliError::new("安装模块必须有声明绑定且不能覆盖Tier1"));
+                }
+                let p = rynvek_rules::package::Tier0RulePackage::parse(&read(
+                    Path::new(path),
+                    rynvek_rules::package::MAX_TIER0_PACKAGE_BYTES,
+                )?)
+                .map_err(fail)?;
+                // 显式本地安装替换命名模块的原图；原World校验再次核完整组件/宿主/价格。
+                rules.rule_graphs.insert(module.to_owned(), p.graph_json);
+            }
             write_new(&out, &config.build_package(&id, &version).map_err(fail)?)
         }
         WorldCommand::Run {

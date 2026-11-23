@@ -3041,6 +3041,7 @@ dependencies = [
  "rynvek-protocol",
  "rynvek-render",
  "rynvek-rts",
+ "rynvek-rules",
  "rynvek-security",
  "rynvek-server",
  "rynvek-simulation",

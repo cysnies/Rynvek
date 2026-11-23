@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true, features = ["env"] }
 rynvek-core.workspace = true
+rynvek-rules.workspace = true
 rynvek-network.workspace = true
 rynvek-protocol.workspace = true
 rynvek-security.workspace = true
