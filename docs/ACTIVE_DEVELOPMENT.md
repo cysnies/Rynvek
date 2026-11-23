@@ -3,7 +3,25 @@
 
 # 持续开发与可执行缺口
 
-更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
+更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
+
+## 第四十二批：自主EMIT信号与连续脑计算实付（从main 4600175继续）
+
+**主体继续，整体未完成。** t26u明确保持PUBLIC并继续普通push，取代PRIVATE-only；未改可见性。先对阶段41四提交逐提交差异作凭据/私人联系信息/敏感文件名筛查，未发现命中，定向夹具为合成数据；不是完整秘密审计。已用认证gh身份cysnies普通push阶段41，远端main与本地 `46001753a5a60628f3ad256b73d8515c67a4ed9e` 一致，未force/no-verify/admin。
+
+本批实际能力与精确边界见[LIFE_SIGNAL_COMPUTE_COSTS.md](LIFE_SIGNAL_COMPUTE_COSTS.md)：
+
+- 原第六动作 `a_emit` → 当前格有界有符号SignalA → 按实际可容纳/可支付raw实付原secretion价 → 热耗/原耗尽退役。只启用显式生态玩家角色，零量/死源/野生/越界无免费动作；不是全部分子或材料模型。
+- 原GatedMLP/CTRNN每隐藏神经元每真实子步的必填实验价 `continuous_cost_micro_per_neuron_step`，候选脑/账户总费原子提交；欠费动作清零，LIF/Izhikevich保持真实脉冲价。原 `/lab` 六角色模板显式价格1。
+- `continuous_q`贯通原活体/遗骸、私有快照、Lab Energy Decimal128 Parquet、TS BigInt守恒分析与浏览器四表。Arena/12、CURRENT_12、Lab kernel/5；无旧格式fallback，不删原数据历史，WAL仍2。
+
+### 快验与尚未验
+
+本批实现提交：`3674aed`（权威生命链/快照域/原Lab汇总与必要夹具）、`cf3db3cadc0f61fab443a9a8623134a9c38289c4`（原Lab价目/精确分析/浏览器入口）。49个不同定向用例通过（新增5，重跑不累计）：原动作与新增分泌/连续账9、原脑非脉冲原子收费1、原脉冲预算7、真实Lab多代/四表Parquet1、TS契约/谱系25、React原工作台6。必要server编译（含engine）、Lab build、web类型与diff检查通过。初次无arrow特性0用例不计通过；已补开arrow执行真实Lab用例。曾修正定向测试的u32→usize类型及精确耗尽先退役后检查点前置，并真实重跑通过。不做全workspace/Clippy/license/SBOM/soak/CI轮询。真实浏览器WebGPU/独立显卡/真实PG多机断电/长稳未验；llvmpipe仍只代表阶段41软件回读。Node24检查有项目Node22引擎警告，正式Node22运行时验收仍欠。
+
+### 下一主体与发布阻塞
+
+通用生长/材料体量（有来源摄取/合成/分裂/死亡去向）、一般规则计算计价仍欠；自主SignalA不是全部分泌系统，野生供能等继续。一般TS/rpack/物理ECS、独立Agent赛道/真实LLM、协作presence/离线多主等仍保留。主体齐后必须完整测试/验收/安全与正式发布打磨，不称本段或整体已发行。Pi仅MIT设计参考，无外部模型/支付授权。
 
 ## 第四十一批：私有受限.rview主题与原renderer真实消费（从main 2082bd3继续）
 
