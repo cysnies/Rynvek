@@ -6,7 +6,7 @@ import {afterEach,expect,it,vi} from "vitest";
 import {cleanup,fireEvent,render,screen,waitFor,act} from "@testing-library/react";
 import {StudioApp} from "../src/StudioApp.js";
 afterEach(()=>{cleanup();vi.unstubAllGlobals()});
-const basis={world_id:"w",revision:7,tick:4,state_root:"ab".repeat(32),rule_fault:null,parameter_state:{next_serial:0,entities:{},fault:null},collaboration:{principal_id:"1",role:"owner",grant_id:null},baseline:{width:2,height:2,terrain:[0,0,0,0],params:{},genomes:{},rules:{},templates:[]}};
+const basis={world_id:"w",revision:7,tick:4,state_root:"ab".repeat(32),rule_fault:null,ecology_contract:null,parameter_state:{next_serial:0,entities:{},fault:null},collaboration:{principal_id:"1",role:"owner",grant_id:null},baseline:{width:2,height:2,terrain:[0,0,0,0],params:{},genomes:{},rules:{},templates:[]}};
 async function connect(){render(<StudioApp/>);fireEvent.change(screen.getByLabelText("Studio服务地址"),{target:{value:"http://srv"}});fireEvent.change(screen.getByLabelText("世界ID"),{target:{value:"w"}});fireEvent.change(screen.getByLabelText("Studio令牌"),{target:{value:"private"}});fireEvent.click(screen.getByText("连接权威世界"));await screen.findByText(/revision 7/)}
 it("真实HTTP会话挂载停靠编辑，回执前不展示乐观地形/修订，断开清除私有结果",async()=>{
  let resolve!:(r:Response)=>void;const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>init?.method==="POST"?new Promise<Response>(r=>{resolve=r}):Response.json(basis));vi.stubGlobal("fetch",fetcher);

@@ -101,25 +101,36 @@ describe("planRuns / toRequestBody", () => {
 
 it("生态扫描只接受完整显式PvE契约，不把缺省规则偷偷开启",()=>{
   const role={basal_cost_micro_per_tick:1000,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:0,synapse_maintenance_micro_per_tick:0,natural_reproduction:true,attack_cost_micro_per_shot:0,repair_cost_micro_per_milli:0,rule_cost_micro_per_gas:0,material_capacity_milli:0,material_growth_milli_per_tick:0,material_synthesis_micro_per_milli:0,continuous_cost_micro_per_neuron_step:0,secretion_cost_micro_per_field_raw:0,birth_synthesis_milli:0,activity_reserve_milli:0,replication_mutation_rate_permille:50};
-  const ecology={roles:{"unit.forager":role}};
+  const ecology={wild:{roles:{},population_limit:0,seeds:[]},roles:{"unit.forager":role}};
   const spec={name:"生态",seeds:[57],ticks:60,variants:[{label:"x",policy:"ecology" as const,ecology}]};
   expect(toRequestBody(spec)).toMatchObject({variants:[{ecology}]});
   expect(()=>validateSpec({...spec,variants:[{...spec.variants[0]!,mode:"duel"}]})).toThrow();
   expect(()=>validateSpec({...spec,variants:[{label:"x",policy:"ecology"}]})).toThrow();
-  expect(()=>validateSpec({...spec,variants:[{...spec.variants[0]!,ecology:{roles:{"unit.forager":{...role,reserve_ticks:0xffff_ffff,basal_cost_micro_per_tick:0xffff_ffff}}}}]})).toThrow();
+  expect(()=>validateSpec({...spec,variants:[{...spec.variants[0]!,ecology:{wild:{roles:{},population_limit:0,seeds:[]},roles:{"unit.forager":{...role,reserve_ticks:0xffff_ffff,basal_cost_micro_per_tick:0xffff_ffff}}}}]})).toThrow();
 });
 
 it("统一角色表保留非采集成本和自然繁殖许可，拒绝旧平铺或未知角色",()=>{
   const role={basal_cost_micro_per_tick:100,reserve_ticks:4,birth_energy_milli:1000,movement_cost_micro_per_tile:100,synapse_maintenance_micro_per_tick:1,natural_reproduction:false,attack_cost_micro_per_shot:0,repair_cost_micro_per_milli:0,rule_cost_micro_per_gas:0,material_capacity_milli:0,material_growth_milli_per_tick:0,material_synthesis_micro_per_milli:0,continuous_cost_micro_per_neuron_step:0,secretion_cost_micro_per_field_raw:0,birth_synthesis_milli:0,activity_reserve_milli:0,replication_mutation_rate_permille:50};
-  const spec={name:"角色补给",seeds:[57],ticks:30,variants:[{label:"s",ecology:{roles:{"unit.striker":role}}}]};
-  expect(toRequestBody(spec)).toMatchObject({variants:[{ecology:{roles:{"unit.striker":role}}}]});
+  const spec={name:"角色补给",seeds:[57],ticks:30,variants:[{label:"s",ecology:{wild:{roles:{},population_limit:0,seeds:[]},roles:{"unit.striker":role}}}]};
+  expect(toRequestBody(spec)).toMatchObject({variants:[{ecology:{wild:{roles:{},population_limit:0,seeds:[]},roles:{"unit.striker":role}}}]});
   for (const key of ["attack_cost_micro_per_shot","repair_cost_micro_per_milli","secretion_cost_micro_per_field_raw","continuous_cost_micro_per_neuron_step","rule_cost_micro_per_gas","material_capacity_milli","material_growth_milli_per_tick","material_synthesis_micro_per_milli","birth_synthesis_milli","activity_reserve_milli"] as const) {
     const incomplete:Record<string,unknown>={...role};delete incomplete[key];
     for(const invalid of [incomplete,{...role,[key]:-1},{...role,[key]:0x1_0000_0000}]) {
-      expect(()=>validateSpec({...spec,variants:[{label:"bad",ecology:{roles:{"unit.striker":invalid as never}}}]})).toThrow();
+      expect(()=>validateSpec({...spec,variants:[{label:"bad",ecology:{wild:{roles:{},population_limit:0,seeds:[]},roles:{"unit.striker":invalid as never}}}]})).toThrow();
     }
   }
   for(const ecology of [role,{roles:{}},{roles:{"unit.unknown":role}}]) {
     expect(()=>validateSpec({...spec,variants:[{label:"bad",ecology:ecology as never}]})).toThrow();
   }
+});
+
+it("野生自然契约严格限定来源速率/体量/种群并保持显式当前格式",()=>{
+  const energy={basal_cost_micro_per_tick:10,reserve_ticks:1,birth_energy_milli:10,movement_cost_micro_per_tile:1,synapse_maintenance_micro_per_tick:0,natural_reproduction:true,attack_cost_micro_per_shot:1,repair_cost_micro_per_milli:1,rule_cost_micro_per_gas:1,material_capacity_milli:8,material_growth_milli_per_tick:4,material_synthesis_micro_per_milli:1,continuous_cost_micro_per_neuron_step:1,secretion_cost_micro_per_field_raw:1,birth_synthesis_milli:1,activity_reserve_milli:1,replication_mutation_rate_permille:50};
+  const wild={roles:{"unit.forager":{energy,uptake_raw_per_tick:128}},population_limit:4,seeds:[{kind:"unit.forager" as const,x:10,y:10}]};
+  const spec={name:"野生",seeds:[57],ticks:30,variants:[{label:"s",policy:"idle" as const,ecology:{roles:{},wild}}]};
+  expect(toRequestBody(spec)).toMatchObject({variants:[{ecology:{wild}}]});
+  for(const bad of [{...wild,population_limit:129},{...wild,seeds:[]},{...wild,seeds:[...wild.seeds,...wild.seeds]},{...wild,roles:{"unit.forager":{energy,uptake_raw_per_tick:257}}},{...wild,roles:{"unit.forager":{energy:{...energy,material_capacity_milli:0},uptake_raw_per_tick:128}}},{...wild,seeds:[{kind:"unit.forager",x:256,y:10}]}]){
+    expect(()=>validateSpec({...spec,variants:[{label:"bad",ecology:{roles:{},wild:bad as never}}]})).toThrow();
+  }
+  expect(()=>validateSpec({...spec,variants:[{label:"old",ecology:{roles:{"unit.forager":energy}} as never}]})).toThrow();
 });

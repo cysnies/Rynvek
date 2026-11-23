@@ -12,7 +12,7 @@ const cid="a".repeat(64),genome="0".repeat(64),childGenome="1".repeat(64),q="900
 // 此处仅是传输/组件快验夹具；生产代码没有示范种群，真实HTTP作业另由Rust定向快验执行。
 const root={run:0,faction:0,entity:1,parent:null,slug:"root",unit:"unit.forager",generation:0,origin:"initial",born_tick:"0",genome,parent_genome:null,allocated_q:"0"};
 const child={...root,entity:2,parent:1,slug:"child",generation:1,origin:"mitosis",born_tick:"1",genome:childGenome,parent_genome:genome,allocated_q:"4000000"};
-const energy={attack_q:"0",repair_q:"0",secretion_q:"0",synthesis_q:"0",continuous_q:"0",rule_q:"0",material_received_u:"0",material_external_u:"0",material_stored_u:"0",material_transferred_u:"0",material_returned_u:"0",enabled:true,run:0,tick:"10",live_bodies:2,remains:0,state_root:cid,received_q:q,stored_q:q,dissipated_q:"0",exported_q:"0",returned_q:"0",transferred_q:"0",external_received_q:q};
+const energy={attack_q:"0",repair_q:"0",secretion_q:"0",synthesis_q:"0",continuous_q:"0",rule_q:"0",material_received_u:"0",material_external_u:"0",material_converted_u:"0",material_stored_u:"0",material_transferred_u:"0",material_returned_u:"0",enabled:true,run:0,tick:"10",live_bodies:2,remains:0,state_root:cid,received_q:q,stored_q:q,dissipated_q:"0",exported_q:"0",returned_q:"0",transferred_q:"0",external_received_q:q};
 const job={exp_id:"private-job",name:"私有快验作业",status:"completed",generation:0,attempt:1,lease_expires_at_unix_s:null,runs_done:1,runs_total:1,variants:[],tables:{runs:cid,metrics:cid,lineage:cid,energy:cid}};
 const rows=(table:string)=>table==="lineage"?[root,child]:table==="energy"?[energy]:table==="runs"?[{run:0,variant:"w3-m0",seed:"57"}]:[];
 const page=(table:string)=>{const values=rows(table);return {exp_id:job.exp_id,table,cid,page:{total_rows:values.length,offset:0,next_offset:null,columns:Object.keys(values[0]??{}),rows:values}};};
@@ -96,4 +96,13 @@ it("参数草案不把空值、浮点或state写入当作合法扫描",()=>{
  expect(makeParameterExperiment(d).variants).toHaveLength(2);
  for(const values of ["1,","1.5","9007199254740993"])expect(()=>makeParameterExperiment({...d,values})).toThrow();
  expect(()=>makeParameterExperiment({...d,component:"state.total"})).toThrow();
+});
+
+it("野生JSON走原W3扫描且不把身体化学转材料算作第二份外源",()=>{
+ const roles=suggestedRoles();for(const role of Object.values(roles))role.enabled=false;
+ const energy=roles["unit.forager"].rule;
+ const wild={roles:{"unit.forager":{energy,uptake_raw_per_tick:128}},population_limit:4,seeds:[{kind:"unit.forager",x:10,y:10}]};
+ const spec=makeExperiment({name:"wild",seeds:"57",ticks:30,sampleEvery:15,players:1,policy:"idle",rates:"50,100",ablation:true,roles,wildJson:JSON.stringify(wild)});
+ expect(spec.variants?.map(v=>v.ecology?.wild.roles["unit.forager"]?.energy.replication_mutation_rate_permille)).toEqual([50,100,0]);
+ expect(spec.variants?.[0]?.ecology?.roles).toEqual({});
 });

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-import { LabClient, lineageForest, type EcologyContract, type EnergyRow, type EnergyUnitKind, type ExperimentSpec, type LineageRow, type RoleEnergyContract, type LabTable, validateSpec } from "@rynvek/lab";
+import { LabClient, lineageForest, type EcologyContract, type WildEcologyContract, type EnergyRow, type EnergyUnitKind, type ExperimentSpec, type LineageRow, type RoleEnergyContract, type LabTable, validateSpec } from "@rynvek/lab";
 export const ROLE_KINDS:readonly EnergyUnitKind[]=["unit.forager","unit.striker","unit.carapace","unit.spitter","unit.weaver","unit.leviathan"];
 export interface RoleDraft {enabled:boolean;rule:RoleEnergyContract}
 export function suggestedRoles():Record<EnergyUnitKind,RoleDraft> {
@@ -10,16 +10,18 @@ export function suggestedRoles():Record<EnergyUnitKind,RoleDraft> {
     attack_cost_micro_per_shot:100,repair_cost_micro_per_milli:1,rule_cost_micro_per_gas:1,material_capacity_milli:1000,material_growth_milli_per_tick:5,material_synthesis_micro_per_milli:1,continuous_cost_micro_per_neuron_step:1,secretion_cost_micro_per_field_raw:1,birth_synthesis_milli:10,activity_reserve_milli:10,natural_reproduction:kind==="unit.forager",replication_mutation_rate_permille:50
   }}])) as Record<EnergyUnitKind,RoleDraft>;
 }
-export interface LabDraft {name:string;seeds:string;ticks:number;sampleEvery:number;players:number;policy:"ecology"|"economy"|"idle";rates:string;ablation:boolean;roles:Record<EnergyUnitKind,RoleDraft>}
+export interface LabDraft {name:string;seeds:string;ticks:number;sampleEvery:number;players:number;policy:"ecology"|"economy"|"idle";rates:string;ablation:boolean;roles:Record<EnergyUnitKind,RoleDraft>;wildJson?:string}
 export function makeExperiment(d:LabDraft):ExperimentSpec {
   const parse=(s:string)=>s.split(",").map(v=>{if(!v.trim())throw new Error("种子/扫描值不能空缺");return Number(v.trim());});
   const rates=[...new Set([...parse(d.rates),...(d.ablation?[0]:[])])];
   if(rates.some(v=>!Number.isInteger(v)||v<0||v>1000))throw new Error("W3复制突变率必须在0..1000‰");
+  const wildBase:WildEcologyContract=d.wildJson?.trim()?JSON.parse(d.wildJson):{roles:{},population_limit:0,seeds:[]};
   const variants=rates.map(rate=>{
     const roles=Object.fromEntries(ROLE_KINDS.filter(k=>d.roles[k].enabled).map(k=>[k,{
       ...d.roles[k].rule,...(d.roles[k].rule.natural_reproduction?{replication_mutation_rate_permille:rate}:{})
     }])) as EcologyContract["roles"];
-    return {label:`w3-m${rate}`,mode:"pve" as const,players:d.players,policy:d.policy,ecology:{roles}};
+    const wild:WildEcologyContract={...wildBase,roles:Object.fromEntries(Object.entries(wildBase.roles).map(([kind,r])=>[kind,{...r,energy:{...r.energy,...(r.energy.natural_reproduction?{replication_mutation_rate_permille:rate}:{})}}]))};
+    return {label:`w3-m${rate}`,mode:"pve" as const,players:d.players,policy:d.policy,ecology:{roles,wild}};
   });
   const spec={name:d.name,seeds:parse(d.seeds),ticks:d.ticks,sample_every:d.sampleEvery,variants};
   validateSpec(spec);return spec;
@@ -42,7 +44,7 @@ export function energyRows(rows:readonly JsonRow[]):EnergySample[] {
   return rows.map(r=>{
     if(typeof r["enabled"]!=="boolean")throw new Error("缺少生态启用事实");
     return {enabled:r["enabled"],run:integer(r,"run"),tick:exact(r,"tick"),live_bodies:integer(r,"live_bodies"),remains:integer(r,"remains"),state_root:text(r,"state_root"),
-      received_q:exact(r,"received_q"),stored_q:exact(r,"stored_q"),dissipated_q:exact(r,"dissipated_q"),exported_q:exact(r,"exported_q"),returned_q:exact(r,"returned_q"),transferred_q:exact(r,"transferred_q"),external_received_q:exact(r,"external_received_q"),attack_q:exact(r,"attack_q"),repair_q:exact(r,"repair_q"),secretion_q:exact(r,"secretion_q"),synthesis_q:exact(r,"synthesis_q"),continuous_q:exact(r,"continuous_q"),rule_q:exact(r,"rule_q"),material_received_u:exact(r,"material_received_u"),material_external_u:exact(r,"material_external_u"),material_stored_u:exact(r,"material_stored_u"),material_transferred_u:exact(r,"material_transferred_u"),material_returned_u:exact(r,"material_returned_u")};
+      received_q:exact(r,"received_q"),stored_q:exact(r,"stored_q"),dissipated_q:exact(r,"dissipated_q"),exported_q:exact(r,"exported_q"),returned_q:exact(r,"returned_q"),transferred_q:exact(r,"transferred_q"),external_received_q:exact(r,"external_received_q"),attack_q:exact(r,"attack_q"),repair_q:exact(r,"repair_q"),secretion_q:exact(r,"secretion_q"),synthesis_q:exact(r,"synthesis_q"),continuous_q:exact(r,"continuous_q"),rule_q:exact(r,"rule_q"),material_received_u:exact(r,"material_received_u"),material_external_u:exact(r,"material_external_u"),material_converted_u:exact(r,"material_converted_u"),material_stored_u:exact(r,"material_stored_u"),material_transferred_u:exact(r,"material_transferred_u"),material_returned_u:exact(r,"material_returned_u")};
   });
 }
 /** 完整分析有明确内存上限；超限仍可分页/导出，不拿残缺谱系冒充完整森林。 */

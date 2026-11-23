@@ -69,10 +69,17 @@ describe("谱系与指标分析", () => {
    expect(()=>lineageForest([child])).toThrow();
    expect(()=>lineageForest([root,{...child,parent_genome:"f".repeat(64)}])).toThrow();
    const n=9007199254740993n;
-   const row={attack_q:0n,repair_q:0n,secretion_q:0n,synthesis_q:0n,continuous_q:1n,rule_q:0n,material_received_u:0n,material_external_u:0n,material_stored_u:0n,material_transferred_u:0n,material_returned_u:0n,enabled:true,run:0,tick:30n,received_q:n+4n,transferred_q:4n,external_received_q:n.toString(),stored_q:n-3n,dissipated_q:1n,exported_q:1n,returned_q:1n};
+   const row={attack_q:0n,repair_q:0n,secretion_q:0n,synthesis_q:0n,continuous_q:1n,rule_q:0n,material_received_u:0n,material_external_u:0n,material_converted_u:0n,material_stored_u:0n,material_transferred_u:0n,material_returned_u:0n,enabled:true,run:0,tick:30n,received_q:n+4n,transferred_q:4n,external_received_q:n.toString(),stored_q:n-3n,dissipated_q:1n,exported_q:1n,returned_q:1n};
    expect(energyBalance(row).balanced).toBe(true);
    const material={...row,material_received_u:n+4n,material_transferred_u:4n,material_external_u:n,material_stored_u:n-1000n,material_returned_u:1000n};
    expect(energyBalance(material).materialBalanced).toBe(true);
    expect(energyBalance({...material,material_stored_u:n}).materialBalanced).toBe(false);
    expect(energyBalance({...row,continuous_q:2n}).balanced).toBe(false);
  });
+
+it("内部化学预算转材料不能冒充外源或重复使用已转出的能量",()=>{
+ const row={enabled:true,received_q:5000n,stored_q:1000n,dissipated_q:0n,exported_q:4000n,returned_q:0n,transferred_q:0n,external_received_q:5000n,attack_q:0n,repair_q:0n,secretion_q:0n,synthesis_q:0n,continuous_q:0n,rule_q:0n,material_received_u:256n,material_external_u:0n,material_converted_u:256n,material_stored_u:256n,material_transferred_u:0n,material_returned_u:0n};
+ expect(energyBalance(row)).toMatchObject({balanced:true,materialBalanced:true,materialExternal:0n,materialConverted:256n});
+ expect(energyBalance({...row,exported_q:0n,stored_q:5000n}).materialBalanced).toBe(false);
+ expect(energyBalance({...row,material_external_u:256n}).materialBalanced).toBe(false);
+});

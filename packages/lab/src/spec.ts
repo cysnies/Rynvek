@@ -46,7 +46,10 @@ export interface RoleEnergyContract {
   readonly natural_reproduction:boolean;
   readonly replication_mutation_rate_permille:number;
 }
-export interface EcologyContract {readonly roles:Readonly<Partial<Record<EnergyUnitKind,RoleEnergyContract>>>}
+export interface WildRoleContract {readonly energy:RoleEnergyContract;readonly uptake_raw_per_tick:number}
+export interface WildSeed {readonly kind:EnergyUnitKind;readonly x:number;readonly y:number}
+export interface WildEcologyContract {readonly roles:Readonly<Partial<Record<EnergyUnitKind,WildRoleContract>>>;readonly population_limit:number;readonly seeds:readonly WildSeed[]}
+export interface EcologyContract {readonly roles:Readonly<Partial<Record<EnergyUnitKind,RoleEnergyContract>>>;readonly wild:WildEcologyContract}
 
 
 /** 实验变体（一组对照条件） */
@@ -131,21 +134,25 @@ export function validateSpec(spec: ExperimentSpec): void {
     if (v.ecology != null) {
       if ((v.mode ?? "pve") !== "pve") throw new SpecError("生态实验只允许显式PvE变体");
       const c=v.ecology;
-      if(typeof c!=="object"||Array.isArray(c)||Object.keys(c).some(k=>k!=="roles")||!c.roles||Object.keys(c.roles).length===0) throw new SpecError("必须提供非空角色表");
-      const kinds=["unit.forager","unit.striker","unit.carapace","unit.spitter","unit.weaver","unit.leviathan"];
-      for (const [kind,role] of Object.entries(c.roles)) {
-        if(!kinds.includes(kind)||!role||typeof role!=="object"||Array.isArray(role)) throw new SpecError("未知角色或非法生命成本对象");
-        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction","attack_cost_micro_per_shot","repair_cost_micro_per_milli","secretion_cost_micro_per_field_raw","continuous_cost_micro_per_neuron_step","rule_cost_micro_per_gas","material_capacity_milli","material_growth_milli_per_tick","material_synthesis_micro_per_milli","birth_synthesis_milli","activity_reserve_milli","replication_mutation_rate_permille"];
-        if(keys.some(k=>!Object.prototype.hasOwnProperty.call(role,k))||Object.keys(role).some(k=>!keys.includes(k))) throw new SpecError("角色成本必须完整显式配置");
-        if(!Number.isInteger(role.replication_mutation_rate_permille)||role.replication_mutation_rate_permille<0||role.replication_mutation_rate_permille>1000)throw new SpecError("复制突变率必须在0..=1000‰");
-        if(role.natural_reproduction&&role.material_capacity_milli===1)throw new SpecError("自然复制至少需要2 milli材料容量");
-        if(role.material_capacity_milli===0&&(role.material_growth_milli_per_tick!==0||role.material_synthesis_micro_per_milli!==0))throw new SpecError("关闭材料容量时须显式关闭材料摄取与合成价");
-        if(typeof role.natural_reproduction!=="boolean") throw new SpecError("自然繁殖许可必须为boolean");
-        for(const [key,value] of Object.entries(role)) {
-          if(key==="natural_reproduction")continue;
-          if(!Number.isInteger(value)||value<0||value>0xffff_ffff||((key==="birth_energy_milli"||key==="basal_cost_micro_per_tick")&&value===0))throw new SpecError("生命成本超出u32合法范围");
+      if(typeof c!=="object"||Array.isArray(c)||Object.keys(c).some(k=>k!=="roles"&&k!=="wild")||!c.roles||typeof c.roles!=="object"||Array.isArray(c.roles)) throw new SpecError("必须完整提供玩家与野生角色契约");
+      for(const [kind,role] of Object.entries(c.roles))validateRole(kind,role);
+      const w=c.wild;
+      if(!w||typeof w!=="object"||Array.isArray(w)||Object.keys(w).length!==3||Object.keys(w).some(k=>!["roles","population_limit","seeds"].includes(k))||!w.roles||typeof w.roles!=="object"||Array.isArray(w.roles)||!Array.isArray(w.seeds))throw new SpecError("野生契约须完整显式配置");
+      const wildRoles=Object.entries(w.roles);
+      if(wildRoles.length===0){
+        if(w.population_limit!==0||w.seeds.length!==0||Object.keys(c.roles).length===0)throw new SpecError("关闭野生profile须为空种子与0上限，且保留玩家角色");
+      }else{
+        if(!Number.isInteger(w.population_limit)||w.population_limit<1||w.population_limit>128||w.seeds.length===0||w.seeds.length>16||w.seeds.length>w.population_limit)throw new SpecError("野生种子须1..16且不超过1..128种群上限");
+        for(const [kind,role] of wildRoles){
+          if(!role||typeof role!=="object"||Array.isArray(role)||Object.keys(role).length!==2||Object.keys(role).some(k=>!["energy","uptake_raw_per_tick"].includes(k)))throw new SpecError("野生角色须显式价格与摄食速率");
+          validateRole(kind,role.energy);
+          if(!Number.isInteger(role.uptake_raw_per_tick)||role.uptake_raw_per_tick<0||role.uptake_raw_per_tick>256||role.energy.material_capacity_milli<2||role.energy.material_growth_milli_per_tick===0)throw new SpecError("野生结构与局部摄食超出边界");
         }
-        if(BigInt(role.basal_cost_micro_per_tick)*BigInt(role.reserve_ticks)*4n>(1n<<64n)-1n)throw new SpecError("代谢预留超出精确范围");
+        const cells=new Set<string>();
+        for(const seed of w.seeds){
+          if(!seed||typeof seed!=="object"||Array.isArray(seed)||Object.keys(seed).length!==3||Object.keys(seed).some(k=>!["kind","x","y"].includes(k))||!Object.hasOwn(w.roles,seed.kind)||![seed.x,seed.y].every(n=>Number.isInteger(n)&&n>=0&&n<256)||cells.has(`${seed.x},${seed.y}`))throw new SpecError("野生种子须在256地图范围内、有角色且不重叠；实际地形由服务端验证");
+          cells.add(`${seed.x},${seed.y}`);
+        }
       }
     }
     if(v.mode==="parameters"){
@@ -198,4 +205,20 @@ export function toRequestBody(spec: ExperimentSpec): Record<string, unknown> {
 /** `[start, start + count)` 的连续种子 */
 export function seedRange(start: number, count: number): number[] {
   return Array.from({ length: count }, (_, i) => start + i);
+}
+
+const ENERGY_KINDS=["unit.forager","unit.striker","unit.carapace","unit.spitter","unit.weaver","unit.leviathan"];
+function validateRole(kind:string,role:RoleEnergyContract|undefined):void {
+        if(!ENERGY_KINDS.includes(kind)||!role||typeof role!=="object"||Array.isArray(role)) throw new SpecError("未知角色或非法生命成本对象");
+        const keys=["basal_cost_micro_per_tick","reserve_ticks","birth_energy_milli","movement_cost_micro_per_tile","synapse_maintenance_micro_per_tick","natural_reproduction","attack_cost_micro_per_shot","repair_cost_micro_per_milli","secretion_cost_micro_per_field_raw","continuous_cost_micro_per_neuron_step","rule_cost_micro_per_gas","material_capacity_milli","material_growth_milli_per_tick","material_synthesis_micro_per_milli","birth_synthesis_milli","activity_reserve_milli","replication_mutation_rate_permille"];
+        if(keys.some(k=>!Object.prototype.hasOwnProperty.call(role,k))||Object.keys(role).some(k=>!keys.includes(k))) throw new SpecError("角色成本必须完整显式配置");
+        if(!Number.isInteger(role.replication_mutation_rate_permille)||role.replication_mutation_rate_permille<0||role.replication_mutation_rate_permille>1000)throw new SpecError("复制突变率必须在0..=1000‰");
+        if(role.natural_reproduction&&role.material_capacity_milli===1)throw new SpecError("自然复制至少需要2 milli材料容量");
+        if(role.material_capacity_milli===0&&(role.material_growth_milli_per_tick!==0||role.material_synthesis_micro_per_milli!==0))throw new SpecError("关闭材料容量时须显式关闭材料摄取与合成价");
+        if(typeof role.natural_reproduction!=="boolean") throw new SpecError("自然繁殖许可必须为boolean");
+        for(const [key,value] of Object.entries(role)) {
+          if(key==="natural_reproduction")continue;
+          if(!Number.isInteger(value)||value<0||value>0xffff_ffff||((key==="birth_energy_milli"||key==="basal_cost_micro_per_tick")&&value===0))throw new SpecError("生命成本超出u32合法范围");
+        }
+        if(BigInt(role.basal_cost_micro_per_tick)*BigInt(role.reserve_ticks)*4n>(1n<<64n)-1n)throw new SpecError("代谢预留超出精确范围");
 }

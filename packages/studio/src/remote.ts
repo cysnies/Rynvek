@@ -6,7 +6,7 @@ import {AuthoringDocument,type AuthoringBaseline} from "./authoring.js";
 import {HybridLogicalClock} from "./hlc.js";
 import {UndoManager,type LocalEdit} from "./undo.js";
 import {type WorldPatchOp,type WorldPatch} from "./patch.js";
-export interface AuthoringView {world_id:string;revision:number;tick:number;state_root:string;rule_fault:[string,number]|null;parameter_state:ParameterState;collaboration:{principal_id:string;role:"owner"|"studio-editor";grant_id:string|null};baseline:Omit<AuthoringBaseline,"terrain"> & {terrain:number[]}}
+export interface AuthoringView {world_id:string;revision:number;tick:number;state_root:string;rule_fault:[string,number]|null;ecology_contract:unknown;parameter_state:ParameterState;collaboration:{principal_id:string;role:"owner"|"studio-editor";grant_id:string|null};baseline:Omit<AuthoringBaseline,"terrain"> & {terrain:number[]}}
 export interface AuthoringAck {status:"applied";world_id:string;world_revision:number;effective_tick:number;state_root:string;patch_cid:string;report:Record<string,number|boolean>}
 export interface StudioEditor {principal_id:string;grant_id:string;active:boolean;role:"studio-editor";consent:"studio-source-edit/1"}
 export interface StudioChanges {world_id:string;from_revision:number;to_revision:number;tick:number;state_root:string;patches:{revision:number;patch:WorldPatch}[];has_more:boolean}
@@ -27,7 +27,7 @@ export class StudioClient {
   }
   async view(world:string,signal:AbortSignal):Promise<AuthoringView>{
     const v=await this.request(`${encodeURIComponent(world)}/authoring`,signal) as AuthoringView;
-    if(v.world_id!==world||!Number.isSafeInteger(v.revision)||v.revision<0||!Number.isSafeInteger(v.tick)||v.tick<0||!v.baseline||!Array.isArray(v.baseline.terrain)||!v.baseline.terrain.every(n=>Number.isInteger(n)&&n>=0&&n<=4)||!/^[a-f0-9]{64}$/.test(v.state_root))throw new Error("创作基线身份/修订非法");
+    if(!Object.hasOwn(v,"ecology_contract")||v.world_id!==world||!Number.isSafeInteger(v.revision)||v.revision<0||!Number.isSafeInteger(v.tick)||v.tick<0||!v.baseline||!Array.isArray(v.baseline.terrain)||!v.baseline.terrain.every(n=>Number.isInteger(n)&&n>=0&&n<=4)||!/^[a-f0-9]{64}$/.test(v.state_root))throw new Error("创作基线身份/修订非法");
     checkParameterState(v.parameter_state);
     if(!v.collaboration||!/^\d+$/.test(v.collaboration.principal_id)||!["owner","studio-editor"].includes(v.collaboration.role)||v.collaboration.role==="studio-editor"&&typeof v.collaboration.grant_id!=="string")throw new Error("创作准入事实非法");
     this.grants.delete(encodeURIComponent(world));if(v.collaboration.grant_id)this.grants.set(encodeURIComponent(world),v.collaboration.grant_id);return v;
