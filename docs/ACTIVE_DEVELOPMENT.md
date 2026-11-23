@@ -5,6 +5,21 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十二批：CLI/TS私有规则用户链与撤销后实付隔离到Epoch续跑（从main b9fad2b继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE/远端从干净 `b9fad2bace0bac283cb3c98d2e3eb40c30426676` 续；不重复AST/私库/Actor。完整入口与成本语义见[PRIVATE_RULE_CLIENTS.md](PRIVATE_RULE_CLIENTS.md)。
+
+- 用户可用CLI `rule publish/list/download/observe/connect/acquire/tick/install`，TS SDK `PrivateRuleClient` 发布发现可信验签、原Sovereign双fence逐Tick与显式安装。必须传既有可信登记公钥；下载每层签名/CID/精确DAG有界复验，不信自附钥/解析器自报列表。CLI共用唯一Rust RYPK/IR复验、全通过才wx写根包；当前极简HTTP仅明确回环，不明文带Bearer出站。TS不复制包/IR/AST编译器，不伪称本地IR等价证明。
+- 补撤销停在非Epoch后的明确产品机制：只有已撤销或已经显式隔离的有源正价Tier0 World，才能 `recover` 一个真实维护Tick；旧图/新图均不执行，受控加速度清零、原物理正常滑行。每活控制身体从原来源账额外热耗 `4×原rule_cost_micro_per_gas` EnergyQ，单列maintenance_paid_q，非伪造规则gas/CPU能价；CLI/SDK必须明确接受观察报价。不能免费Tick、补能、健康世界廉价跳规则、自动降级或越Epoch；到紧邻Epoch仍须显式install激活新图并恢复原实付。
+- 维护走原完整阶段/Tick/配置及状态根/私有v3日志、APM/幂等/恢复，保revision==tick、失败原子性和源闭包。历史旧签名只存档/历史重演；维护期原RulePermit守卫完整新待激活闭包，**原Store撤销/fence提交锁零修改**；待装包resolve后撤销仍最终拒绝，另一个有效计划必须用户明确请求。
+- 原命令信封兼容无损u64字符串主体输入，原数字输入/序列化不变；TS实际大于2^53身份经原Actor，不截断权限主体。SDK拒绝不安全Tick/fence。原测试未决Promise仅补never类型，不改Provider。
+
+87个不同定向通过，新增14，重跑不累计：SDK25（7新）、原General9/私有规则10（3新，真实AST和SDK前置用例均显式执行）、Rust客户端/HTTP2新、CLI真实子进程1新、仿真规则10/生命8、协议22（u64兼容1新）。真实CLI/Node双包签名→可信下载→实付位移、撤销停5→实付维护6/7→Epoch8安装/9实付、隔离中及安装后新App文件CAS恢复同根，原提交锁撤销竞争仍拒绝。必要SDK typecheck/build、server/CLI锁定编译、格式/diff与敏感筛查；不是完整门禁。
+
+后续优先General浏览器真实用户流/协作主体准入/自治调度与Agent独立赛道真实缺口；C#规则消费、生产TLS、全规范跨种类锁/Schema迁移/组织信任、完整生命材料生长遗传、多Chunk/三维/任意World、presence/离线多主仍欠。本批不是任意rpack或全World完成；隔离仅全Tier0、有源正价且有活体能支付维护的明确剖面，无来源/欠费/无活控制身体不能强行续跑。
+
+实际Node24.22.1/TS5.8.3；Node22/C#本批重编/wasm32/真实browser硬件GPU/实际PG并发SQL多机断电24h长稳仍须实证，MemoryStore+文件CAS不作替身。旧6个PvP_Custom Actor夹具补真实lease，不降生产fence。主体齐后集中完整门禁、安全运行时及正式发布打磨，未跑全workspace/Clippy/license/SBOM/完整安全/soak/CI轮询，不以本阶段宣布整体完成。以下旧批次为历史口径，以本节为当前状态。
+
 ## 第五十一批：私有签名精确规则包组到原权限Actor实付Tick/恢复（从main ef19014继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核阶段50交接/ACTIVE/远端均为干净 `ef19014a7be910f63fdef0ee516ac526648aa3e2`；不重做AST。实际入口/协议和明确边界见[PRIVATE_RULE_PACKAGES.md](PRIVATE_RULE_PACKAGES.md)。

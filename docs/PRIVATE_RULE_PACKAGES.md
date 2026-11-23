@@ -79,3 +79,8 @@ cargo check -p rynvek-server -p rynvek-cli --offline --locked
 ## 剩余主体/发布阻塞
 
 当前没有私有规则发布/安装的专用CLI/TS/C#客户端工作流或General浏览器流UI，没有全规范跨种类锁文件/Schema迁移/信任级/组织共享，也没有撤销后非Epoch安全续跑流程。源证据长期保留/分页/吞吐和高并发尚未认证。General通用协作准入与统一调度、完整生命材料/生长/自然遗传迁入、多Chunk/三维/任意World、Agent独立赛道、presence/离线多主等主体仍欠。主体齐后集中完整门禁、安全/运行时与正式发布打磨，不以阶段51结束宣布整体完成。
+
+
+## 阶段52接续（保留上文历史边界）
+
+已接通CLI/TS可信私有规则用户链，及撤销后非Epoch的显式有源隔离维护逐Tick→Epoch才安装续跑；原Store撤销/fence提交锁零修改。隔离不执行旧/新图、不免费Tick/补能/自动降级，维护成本单列而非伪造gas；仅全Tier0正价有源存活控制身体剖面。详见[PRIVATE_RULE_CLIENTS.md](PRIVATE_RULE_CLIENTS.md)。原“尚无客户端/非Epoch续跑”属于阶段51历史，C#流程/General浏览器协作自治/真实PG及完整正式发布门禁仍欠，不称任意rpack/World完成。

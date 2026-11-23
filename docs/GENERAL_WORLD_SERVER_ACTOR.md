@@ -62,3 +62,8 @@
 ## 阶段51接续（保留上文当批历史边界）
 
 现已接通有界Tier0私有签名精确包组的真实HTTP发布/发现/逐级下载验签、原权限Actor下一Coupling Epoch显式安装、原有源实付Tick及私有来源证据恢复，详见[PRIVATE_RULE_PACKAGES.md](PRIVATE_RULE_PACKAGES.md)。不修改本地叶子RYPK三条目fence，不把此共同安装剖面称全规范跨种类锁/任意World完成；历史撤销与活Tick分开，非Epoch暂停后安全续跑仍欠，PG多机/断电/真实硬件和完整发布门禁仍待实证。
+
+
+## 阶段52接续（保留上文历史边界）
+
+已接通CLI/TS可信私有规则用户链，及撤销后非Epoch的显式有源隔离维护逐Tick→Epoch才安装续跑；原Store撤销/fence提交锁零修改。隔离不执行旧/新图、不免费Tick/补能/自动降级，维护成本单列而非伪造gas；仅全Tier0正价有源存活控制身体剖面。详见[PRIVATE_RULE_CLIENTS.md](PRIVATE_RULE_CLIENTS.md)。原“尚无客户端/非Epoch续跑”属于阶段51历史，C#流程/General浏览器协作自治/真实PG及完整正式发布门禁仍欠，不称任意rpack/World完成。
