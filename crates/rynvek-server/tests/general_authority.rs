@@ -1014,3 +1014,54 @@ async fn general_driver_same_grant_private_recovery_keeps_receipt_and_double_fen
     assert_eq!(view(&s, &o, id).await, expected);
     s.shutdown().await;
 }
+
+async fn actual_driver_sdk(payload: Value) -> Value {
+    tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut child = std::process::Command::new("node")
+            .arg("packages/agent-sdk/test/general-driver-e2e.mjs")
+            .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice(&out.stdout).unwrap()
+    })
+    .await
+    .unwrap()
+}
+#[tokio::test]
+#[ignore = "真实跨Node SDK/原Engine帧校验：先构建agent-sdk和engine，再显式--include-ignored运行"]
+async fn actual_ts_driver_sdk_paid_rules_private_restore_revoke_regrant_and_original_engine_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let s = start(store.clone(), dir.path()).await;
+    let o = register(&s.base_url(), "driver-sdk-owner", "human", 156).await;
+    let d = register(&s.base_url(), "driver-sdk-guest", "human", 157).await;
+    let id = create(&s, &o, &rules()).await;
+    let previous=actual_driver_sdk(json!({"phase":"start","base":s.base_url(),"world":id.to_string(),"driverId":d.principal_id.to_string(),"ownerToken":o.token,"driverToken":d.token})).await;
+    let expected = view(&s, &o, id).await;
+    assert_eq!(expected["commit"]["tick"], 3);
+    assert_eq!(expected["commit"]["state_root"], previous["root"]);
+    s.shutdown().await;
+    let s = start(store, dir.path()).await;
+    assert_eq!(view(&s, &o, id).await, expected);
+    let end=actual_driver_sdk(json!({"phase":"restore","base":s.base_url(),"world":id.to_string(),"driverId":d.principal_id.to_string(),"ownerToken":o.token,"driverToken":d.token,"previous":previous})).await;
+    let result = view(&s, &o, id).await;
+    assert_eq!(result["commit"]["tick"], 4);
+    assert_eq!(result["commit"]["state_root"], end["root"]);
+    assert_eq!(
+        result["life"]["universe_energy_q"],
+        expected["life"]["universe_energy_q"]
+    );
+    s.shutdown().await;
+}

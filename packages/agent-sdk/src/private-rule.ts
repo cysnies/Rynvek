@@ -109,10 +109,18 @@ async function bounded(response: Response, max: number): Promise<Uint8Array> {
     }
     return out;
 }
+/** 同一私有控制链响应解码，限制尺寸/状态，不新增第二套传输。 */
+export async function readRuleJson(response:Response):Promise<any>{return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(await bounded(response,524288)));}
+/** owner与目的隔离协作共用原CommandEnvelope编码。 */
+export function generalCommandInput(principalId:string,f:GeneralFrame):any {
+    own(principalId);
+    if (!(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/).test(f.idempotencyKey)) throw new Error("须UUIDv7幂等键");
+    return {host_fence:safe(f.hostFence),control_fence:safe(f.controlFence),envelope:{idempotency_key:f.idempotencyKey,principal_id:principalId,issued_at_tick:safe(f.tick),target_tick:safe(f.tick+1),payload:[]}};
+}
 export class PrivateRuleClient {
     constructor(readonly ownerId: string, readonly trustedKey: string, private readonly request: RuleRequest) { own(ownerId); unhex(trustedKey, 32); }
     private path(r: ExactRuleRef): string { ref(r); return `/api/v1/private-hub/rules/${r.id}/${r.version}`; }
-    private async json(path: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<any> { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await bounded(await this.request(path, method, body, signal), 524288))); }
+    private async json(path: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<any> { return readRuleJson(await this.request(path, method, body, signal)); }
     private check(v: any, allowRevoked = false): SignedRuleRelease {
         const r = v?.release as SignedRuleRelease;
         manifest(r?.manifest);
@@ -186,12 +194,8 @@ export class PrivateRuleClient {
     async observe(world: string, signal?: AbortSignal): Promise<any> { return this.json(this.world(world), "GET", undefined, signal); }
     async connect(world: string, signal?: AbortSignal): Promise<any> { return this.json(this.world(world), "POST", { action: "connect" }, signal); }
     async acquire(world: string, hostFence: number, signal?: AbortSignal): Promise<any> { return this.json(this.world(world), "POST", { action: "acquire", host_fence: safe(hostFence), level: "Sovereign" }, signal); }
-    private frame(f: GeneralFrame): any {
-        if (!(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/).test(f.idempotencyKey))
-            throw new Error("须UUIDv7幂等键");
-        // 原CommandEnvelope兼容规范u64字符串身份，不把principal截成JS浮点数。
-        return { host_fence: safe(f.hostFence), control_fence: safe(f.controlFence), envelope: { idempotency_key: f.idempotencyKey, principal_id: this.ownerId, issued_at_tick: safe(f.tick), target_tick: safe(f.tick + 1), payload: [] } };
-    }
+    private frame(f: GeneralFrame): any { return generalCommandInput(this.ownerId,f); }
+
     async tick(f: GeneralFrame, signal?: AbortSignal): Promise<any> { return this.json(this.world(f.world), "POST", { action: "tick", input: this.frame(f) }, signal); }
     async install(f: GeneralFrame, plan: RuleInstallRequest, signal?: AbortSignal): Promise<any> { return this.change(f, plan, false, undefined, signal); }
     /** 显式接受单身体维护EnergyQ，仅推进一个有源维护Tick；不执行撤销图、不自动补Tick或激活新规则。 */
