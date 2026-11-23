@@ -205,10 +205,14 @@ impl TickCommitter {
         row: CommitRow,
         permits: Vec<crate::store::EditorPermit>,
     ) -> ApiResult<()> {
+        self.publish_guarded_row(row,permits,vec![]).await
+    }
+    /// 仍使用同一发布事务；规则撤销守卫与ABAC/fence/前驱在同一Store临界区判定。
+    pub async fn publish_guarded_row(&self,row:CommitRow,permits:Vec<crate::store::EditorPermit>,rules:Vec<crate::store::RulePermit>)->ApiResult<()> {
         if row.world_id != self.world_id {
             return Err(conflict("提交世界身份不符"));
         }
-        self.store.append_commit_checked(row, self.fencing_token, permits).await
+        self.store.append_commit_guarded(row, self.fencing_token, permits,rules).await
     }
 
     pub async fn records(&self) -> ApiResult<Vec<TickRecord>> {

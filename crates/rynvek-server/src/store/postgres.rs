@@ -217,6 +217,7 @@ impl PostgresStore {
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0008_private_audio.sql")).await.map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0009_studio_editors.sql")).await.map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0010_private_visual.sql")).await.map_err(db_err)?;
+        c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0011_private_rules.sql")).await.map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -548,6 +549,9 @@ impl PostgresStore {
 
     pub async fn append_commit(&self, commit: CommitRow, expected_fencing_token: u64) -> StoreResult<()> {self.append_commit_checked(commit,expected_fencing_token,vec![]).await}
     pub async fn append_commit_checked(&self, commit: CommitRow, expected_fencing_token: u64,permits:Vec<super::EditorPermit>) -> StoreResult<()> {
+        self.append_commit_guarded(commit,expected_fencing_token,permits,vec![]).await
+    }
+    pub async fn append_commit_guarded(&self,commit:CommitRow,expected_fencing_token:u64,permits:Vec<super::EditorPermit>,rules:Vec<super::RulePermit>)->StoreResult<()> {
         if commit.parent_revision.and_then(|r| r.checked_add(1)) != Some(commit.world_revision) {
             return Err(ApiError::new(
                 RynvekErrorCode::StructuralMutationConflict,
@@ -564,6 +568,16 @@ impl PostgresStore {
         .map_err(db_err)?;
         ranked::check_lease(&tx, commit.world_id, expected_fencing_token).await?;
         for p in permits {Self::editor_allowed(&tx,commit.world_id,&p).await?;}
+        for rule in rules {
+            let owner=tx.query_one("SELECT w.owner_principal_id,p.status,p.ed25519_pubkey FROM worlds w JOIN principals p ON p.principal_id=w.owner_principal_id WHERE w.world_id=$1::text::uuid FOR SHARE OF p",&[&uuid_text(&commit.world_id)]).await.map_err(db_err)?;
+            if u(owner.get(0))!=rule.owner_id || owner.get::<_,i16>(1)!=0 {return Err(crate::transactions::conflict("规则主体已失效"));}
+            let mut pins=rule.pins;pins.sort_by(|a,b|(&a.id,&a.version).cmp(&(&b.id,&b.version)));
+            for pin in pins {
+                let r=tx.query_opt("SELECT row_json::text,revoked FROM private_rule_versions WHERE owner_id=$1 AND package_id=$2 AND semver=$3 FOR SHARE",&[&i(rule.owner_id),&pin.id,&pin.version]).await.map_err(db_err)?.ok_or_else(||crate::transactions::conflict("规则依赖缺失"))?;
+                let stored:super::PrivateArtifactRow=serde_json::from_str(&r.get::<_,String>(0)).map_err(|_|corrupt("规则版本"))?;
+                if r.get::<_,bool>(1) || crate::ids::hex(&stored.cid)!=pin.blake3_256 || stored.publisher_key.as_slice()!=owner.get::<_,Vec<u8>>(2) {return Err(crate::transactions::conflict("规则依赖撤销/改变"));}
+            }
+        }
         let n = tx
             .execute(
                 "UPDATE worlds SET latest_revision = $3, latest_tick = $4, latest_state_root = $5, updated_at = NOW() \

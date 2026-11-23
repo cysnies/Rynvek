@@ -307,6 +307,16 @@ pub struct CustomRoom {
 }
 
 /// 私有不可变制品版本；与公共Hub和公共Blob索引隔离，owner为唯一读取/撤销者。
+/// 原私有制品存储的封闭种类选择；旧表/数据保持原位。
+#[derive(Clone, Copy, Debug)]
+pub enum PrivateArtifactKind { Agent, Audio, Visual, Rule }
+impl PrivateArtifactKind {
+    pub(crate) fn table(self) -> &'static str { match self {
+        Self::Agent=>"private_agent_versions",Self::Audio=>"private_audio_versions",Self::Visual=>"private_visual_versions",Self::Rule=>"private_rule_versions"
+    }}
+}
+#[derive(Clone,Debug)]
+pub struct RulePermit { pub owner_id:u64, pub pins:Vec<crate::agent_package::AgentDependency> }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PrivateArtifactRow {
     pub owner_id: u64,
@@ -384,6 +394,11 @@ impl Store {
         dispatch!(self.lab_worker(claim, action))
     }
 
+    pub async fn put_private_rule(&self,row:PrivateArtifactRow)->StoreResult<()> {dispatch!(self.put_private_artifact(PrivateArtifactKind::Rule,row))}
+    pub async fn private_rule(&self,owner:u64,id:String,version:String)->StoreResult<Option<PrivateArtifactRow>> {dispatch!(self.private_artifact(PrivateArtifactKind::Rule,owner,id,version))}
+    pub async fn private_rules(&self,owner:u64)->StoreResult<Vec<PrivateArtifactRow>> {dispatch!(self.private_artifacts(PrivateArtifactKind::Rule,owner))}
+    pub async fn revoke_private_rule(&self,owner:u64,id:String,version:String)->StoreResult<bool> {dispatch!(self.revoke_private_artifact(PrivateArtifactKind::Rule,owner,id,version))}
+    pub async fn append_commit_guarded(&self,commit:CommitRow,fence:u64,permits:Vec<EditorPermit>,rules:Vec<RulePermit>)->StoreResult<()> {dispatch!(self.append_commit_guarded(commit,fence,permits,rules))}
     pub async fn put_private_agent(&self, row: PrivateArtifactRow) -> StoreResult<()> {
         dispatch!(self.put_private_agent(row))
     }
