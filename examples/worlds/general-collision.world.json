@@ -1,0 +1,57 @@
+{
+  "schema": "rynvek.general-world.v1",
+  "profile": "rynvek.general-circle-ecs.v1",
+  "bodies": [
+    {
+      "position_q32": [
+        42949672960,
+        274877906944
+      ],
+      "velocity_q32": [
+        17179869184,
+        0
+      ],
+      "acceleration_q32": [
+        0,
+        0
+      ],
+      "radius_q32": 2147483648,
+      "mass_q32": 4294967296,
+      "fixed": false
+    },
+    {
+      "position_q32": [
+        47244640256,
+        274877906944
+      ],
+      "velocity_q32": [
+        0,
+        0
+      ],
+      "acceleration_q32": [
+        0,
+        0
+      ],
+      "radius_q32": 2147483648,
+      "mass_q32": 12884901888,
+      "fixed": false
+    },
+    {
+      "position_q32": [
+        68719476736,
+        274877906944
+      ],
+      "velocity_q32": [
+        0,
+        0
+      ],
+      "acceleration_q32": [
+        0,
+        0
+      ],
+      "radius_q32": 2147483648,
+      "mass_q32": 4294967296,
+      "fixed": true
+    }
+  ]
+}

@@ -24,3 +24,6 @@ pub use conflict::{ConflictPolicy, ConflictResolution};
 pub use engine::{SimulationEngine, SimulationError};
 pub use invariant::{InvariantId, InvariantRegistry, InvariantReport};
 pub use phase::{CanonicalPhaseId, KERNEL_IMMUTABLE_PHASES, TickCommitManifest};
+
+pub mod persistence;
+pub mod physics;

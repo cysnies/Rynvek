@@ -175,8 +175,8 @@ describe("拾取请求关联", () => {
     ]);
     const [ra, rb] = reqs;
     expect(ra!.requestId).not.toBe(rb!.requestId);
-    worker.deliver({ type: "PICK_RESULT", requestId: rb!.requestId, denseIndex: null });
-    worker.deliver({ type: "PICK_RESULT", requestId: ra!.requestId, denseIndex: 17 });
+    worker.deliver({ type: "PICK_RESULT", requestId: rb!.requestId, entitySerial: null });
+    worker.deliver({ type: "PICK_RESULT", requestId: ra!.requestId, entitySerial: 17 });
     await expect(a).resolves.toBe(17);
     await expect(b).resolves.toBeNull();
     expect(host.pendingPicks).toBe(0);
@@ -188,7 +188,7 @@ describe("拾取请求关联", () => {
     const p = host.pick(1, 1);
     timers.advance(100);
     await expect(p).rejects.toMatchObject({ code: "PICK_TIMEOUT" });
-    worker.deliver({ type: "PICK_RESULT", requestId: 1, denseIndex: 5 });
+    worker.deliver({ type: "PICK_RESULT", requestId: 1, entitySerial: 5 });
     expect(host.pendingPicks).toBe(0);
   });
 

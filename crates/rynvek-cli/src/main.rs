@@ -15,6 +15,7 @@
 //!
 //! 失败时以退出码 1 结束，stderr 打印规范 11.4 稳定错误码（如 `错误 0x7002 ...`），便于脚本判断。
 
+mod general;
 mod keys;
 mod offline;
 mod remote;
@@ -77,6 +78,9 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// 原 RYWL 通用物理 World 打包、运行与 WAL 恢复
+    #[command(subcommand)]
+    World(general::WorldCommand),
     /// 启动权威服务端
     Server(ServerArgs),
     /// 生成 Ed25519 种子文件
@@ -207,6 +211,7 @@ struct RemoteArgs {
 
 async fn run(cli: Cli) -> CliResult {
     match cli.command {
+        Command::World(command) => general::execute(command),
         Command::Server(a) => remote::serve(a).await,
         Command::Keygen { out } => keys::keygen(&out),
         Command::Login(a) => remote::login(a).await,

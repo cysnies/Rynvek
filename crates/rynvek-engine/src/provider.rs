@@ -14,17 +14,15 @@ use rynvek_render::{
 use rynvek_rts::{ArenaWorld, MatchConfig};
 use rynvek_simulation::engine::{SimulationEngine, SimulationError};
 
-/// 把 `SimulationEngine::positions`（Q32.32 局部坐标）投影为 [`InstanceData`]
+/// 把 `SimulationEngine` 的真实刚体列（Q32.32 局部坐标与碰撞半径）投影为 [`InstanceData`]
 #[derive(Clone, Debug)]
 pub struct EntityProvider {
-    pub radius: f32,
     pub color: [f32; 4],
 }
 
 impl Default for EntityProvider {
     fn default() -> Self {
         Self {
-            radius: 1.5,
             color: rynvek_render::WorldPalette::faction(0).0.map(|v| f32::from(v) / 255.0),
         }
     }
@@ -41,18 +39,18 @@ impl VisualizationProvider<SimulationEngine> for EntityProvider {
 
     fn populate(&self, snapshot: &SimulationEngine, _lod: NeuralLod, scene: &mut FrameScene) {
         let scale = 1.0 / (Q32_32::ONE.0 as f64);
-        for (i, &(lx, ly)) in snapshot.positions.iter().enumerate() {
-            let x = (lx as f64 * scale) as f32;
-            let y = (ly as f64 * scale) as f32;
+        for (serial, body) in snapshot.physics().iter() {
+            let x = (body.position_q32[0] as f64 * scale) as f32;
+            let y = (body.position_q32[1] as f64 * scale) as f32;
             scene.push(
                 InstanceData::new(
                     RenderLayer::Organisms,
                     [x, y],
-                    self.radius * 2.0,
+                    (body.radius_q32 as f64 * scale * 2.0) as f32,
                     Rgba8(self.color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)),
                     InstanceShape::Circle,
                 )
-                .with_pick(PickId::from_dense_index(i as u32).expect("有效实体索引")),
+                .with_pick(PickId(serial)),
             );
         }
     }
@@ -191,13 +189,11 @@ mod tests {
     use rynvek_render::collect_scene;
 
     #[test]
-    fn populates_four_initial_entities_from_simulation() {
+    fn empty_general_world_does_not_render_implicit_sample_entities() {
         let sim = SimulationEngine::default();
         let provider = EntityProvider::default();
         let scene = collect_scene(&sim, 0, NeuralLod::L2, RenderLayerMask::ALL, &[&provider]);
-        assert_eq!(scene.instance_count(), 4);
-        assert_eq!(scene.ordered_instances()[0].position, [2.0, 2.0]);
-        assert_eq!(scene.ordered_instances()[0].pick_id, 1);
+        assert_eq!(scene.instance_count(), 0);
     }
 
     #[test]

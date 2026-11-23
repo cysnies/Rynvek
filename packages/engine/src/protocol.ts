@@ -58,6 +58,7 @@ export interface EngineInitOptions {
 /** 主线程 → Worker 命令（不含 `ENGINE_INIT`，后者由宿主随画布一起发送） */
 export type EngineCommand =
   | { type: "RESIZE"; width: number; height: number; devicePixelRatio: number }
+  | { type: "GENERAL_WORLD"; packageBytes: number[] }
   | { type: "STEP"; ticks: number }
   | { type: "START"; tickRate: number }
   | { type: "PAUSE" }
@@ -83,6 +84,7 @@ export interface EngineInitMessage<C = unknown> extends EngineInitOptions {
 export const ENGINE_COMMAND_TYPES = [
   "ENGINE_INIT",
   "RESIZE",
+  "GENERAL_WORLD",
   "STEP",
   "START",
   "PAUSE",
@@ -114,7 +116,7 @@ export type EngineEvent =
   | { type:"ARENA_THEME_APPLIED";worldId:string;requestId:number;background:number;factions:readonly number[] }
   | { type: "TICK_COMMITTED"; tick: number; stateRoot: string }
   | { type: "FRAME_RENDERED"; tick: number }
-  | { type: "PICK_RESULT"; requestId: number; denseIndex: number | null }
+  | { type: "PICK_RESULT"; requestId: number; entitySerial: number | null }
   | { type: "DEVICE_LOST"; tick: number; reason: string }
   | { type: "RECOVERY_PROGRESS"; step: number; phase: string }
   | { type: "RECOVERED"; generation: number; resumeTick: number }
@@ -133,7 +135,7 @@ const EVENT_SCHEMA: { readonly [K in EngineEventType]: Readonly<Record<string, F
   ARENA_THEME_APPLIED:{worldId:"string",requestId:"u32",background:"u32",factions:"opaque7"},
   TICK_COMMITTED: { tick: "number", stateRoot: "hex64" },
   FRAME_RENDERED: { tick: "number" },
-  PICK_RESULT: { requestId: "u32", denseIndex: "nullable-u32" },
+  PICK_RESULT: { requestId: "u32", entitySerial: "nullable-u32" },
   DEVICE_LOST: { tick: "number", reason: "string" },
   RECOVERY_PROGRESS: { step: "u32", phase: "string" },
   RECOVERED: { generation: "u32", resumeTick: "number" },

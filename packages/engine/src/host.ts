@@ -199,6 +199,12 @@ export class EngineHost {
     if (command.type === "SHUTDOWN") this.#close();
   }
 
+  /** 明确载入非 RTS 的有界原 RYWL；执行与本地/创世权限在 Worker 再验。 */
+  loadGeneralWorld(bytes: Uint8Array): void {
+    if (!(bytes.length > 0 && bytes.length <= 128 * 1024)) throw new EngineHostError("INVALID_ARGUMENT", "通用 World 包须为 1–131072 字节");
+    this.send({ type: "GENERAL_WORLD", packageBytes: Array.from(bytes) });
+  }
+
   step(ticks = 1): void {
     this.send({ type: "STEP", ticks });
   }
@@ -316,7 +322,7 @@ export class EngineHost {
         if (p) {
           this.#pending.delete(ev.requestId);
           this.#timers.clearTimeout(p.timer);
-          p.resolve(ev.denseIndex);
+          p.resolve(ev.entitySerial);
         }
         break;
       }

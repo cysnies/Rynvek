@@ -43,7 +43,7 @@ describe("事件校验", () => {
     expect(parseEngineEvent({ type: "TICK_COMMITTED", tick: 1 })).toBeNull();
     expect(parseEngineEvent({ type: "TICK_COMMITTED", tick: 1, stateRoot: "XYZ" })).toBeNull();
     expect(parseEngineEvent({ type: "TICK_COMMITTED", tick: -1, stateRoot: "a".repeat(64) })).toBeNull();
-    expect(parseEngineEvent({ type: "PICK_RESULT", requestId: 1.5, denseIndex: null })).toBeNull();
+    expect(parseEngineEvent({ type: "PICK_RESULT", requestId: 1.5, entitySerial: null })).toBeNull();
     expect(parseEngineEvent({ type: "ENGINE_READY", backend: "metal", profile: null, adapter: null, generation: 0 })).toBeNull();
     expect(parseEngineEvent({ type: "toString" })).toBeNull();
   });

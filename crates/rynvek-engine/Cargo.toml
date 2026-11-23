@@ -24,6 +24,7 @@ rynvek-render.workspace = true
 rynvek-rts.workspace = true
 rynvek-rules.workspace = true
 rynvek-simulation.workspace = true
+rynvek-world.workspace = true
 rynvek-wgpu.workspace = true
 serde.workspace = true
 serde_json.workspace = true

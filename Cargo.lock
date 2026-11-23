@@ -3035,11 +3035,16 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "rynvek-core",
+ "rynvek-engine",
+ "rynvek-journal",
  "rynvek-network",
  "rynvek-protocol",
+ "rynvek-render",
  "rynvek-rts",
  "rynvek-security",
  "rynvek-server",
+ "rynvek-simulation",
+ "rynvek-world",
  "serde_json",
  "tempfile",
  "tokio",
@@ -3095,6 +3100,7 @@ dependencies = [
  "rynvek-rules",
  "rynvek-simulation",
  "rynvek-wgpu",
+ "rynvek-world",
  "serde",
  "serde_json",
  "wgpu",
@@ -3279,8 +3285,13 @@ dependencies = [
  "rynvek-compute",
  "rynvek-compute-cpu",
  "rynvek-core",
+ "rynvek-ecs",
  "rynvek-field",
+ "rynvek-journal",
+ "rynvek-snapshot",
  "rynvek-spatial",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3353,6 +3364,7 @@ dependencies = [
  "rynvek-ecs",
  "rynvek-rts",
  "rynvek-rules",
+ "rynvek-simulation",
  "serde",
  "serde_json",
 ]

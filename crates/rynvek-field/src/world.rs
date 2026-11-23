@@ -13,7 +13,7 @@ use crate::channels::{FieldChannelId, FieldChannelParams, FieldTileQ8, STANDARD_
 use crate::solver::{HALO, STRIDE, TILE_DIM, sum_interior_i64};
 
 /// 五通道场世界（一个逻辑 Chunk / 一个 Tile）
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FieldWorld {
     channels: [FieldTileQ8; 5],
 }
@@ -86,6 +86,53 @@ impl FieldWorld {
             }
         }
         Blake3Hash(*hasher.finalize().as_bytes())
+    }
+
+    /// 通用 World 的完整权威场分块：显式小端，包含参数、当前缓冲和未来源项。
+    /// 非当前工作缓冲不参与未来步，恢复时由求解器重新写入。
+    pub fn authority_bytes(&self) -> Vec<u8> {
+        let mut out = b"RYFIELD1".to_vec();
+        for tile in &self.channels {
+            out.extend_from_slice(&tile.params.diffusion_q8.to_le_bytes());
+            out.extend_from_slice(&tile.params.decay_q8.to_le_bytes());
+            out.extend_from_slice(&tile.params.min_val_q8.to_le_bytes());
+            out.extend_from_slice(&tile.params.max_val_q8.to_le_bytes());
+            for v in tile.current_buf().iter().chain(tile.sources.iter()) {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        out
+    }
+
+    pub fn from_authority_bytes(bytes: &[u8]) -> Result<Self, RynvekErrorCode> {
+        let expected = 8 + 5 * (12 + 2 * (STRIDE * STRIDE + TILE_DIM * TILE_DIM));
+        if bytes.len() != expected || &bytes[..8] != b"RYFIELD1" {
+            return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
+        }
+        let mut world = Self::new();
+        let mut pos = 8;
+        for tile in &mut world.channels {
+            tile.params.diffusion_q8 = i32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+            pos += 4;
+            tile.params.decay_q8 = i32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+            pos += 4;
+            tile.params.min_val_q8 = i16::from_le_bytes(bytes[pos..pos + 2].try_into().unwrap());
+            pos += 2;
+            tile.params.max_val_q8 = i16::from_le_bytes(bytes[pos..pos + 2].try_into().unwrap());
+            pos += 2;
+            if !(0..=256).contains(&tile.params.diffusion_q8)
+                || !(0..=256).contains(&tile.params.decay_q8)
+                || tile.params.min_val_q8 > tile.params.max_val_q8
+            {
+                return Err(RynvekErrorCode::DimensionMismatch);
+            }
+            for v in tile.buffers[0].iter_mut().chain(tile.sources.iter_mut()) {
+                *v = i16::from_le_bytes(bytes[pos..pos + 2].try_into().unwrap());
+                pos += 2;
+            }
+            tile.current = 0;
+        }
+        Ok(world)
     }
 
     /// 在指定通道内区写入一个脉冲（测试辅助）

@@ -754,7 +754,7 @@ impl Engine {
         if let Some(r) = render.picker.try_take() {
             self.events.push_back(EngineEvent::PickResult {
                 request_id: r.request_id,
-                dense_index: r.id.map(|p| p.dense_index()),
+                entity_serial: r.id.filter(|p| self.sim.physics().body(p.0).is_some()).map(|p| p.0),
             });
         }
     }
@@ -769,7 +769,7 @@ impl Engine {
             Some(render) if self.config.arena_faction.is_none() => render.picker.request(request_id, x, y),
             _ => self.events.push_back(EngineEvent::PickResult {
                 request_id,
-                dense_index: None,
+                entity_serial: None,
             }),
         }
     }
@@ -912,6 +912,36 @@ impl Engine {
         match cmd {
             EngineCommand::EngineInit { .. } => {}
             EngineCommand::Resize { width, height, .. } => self.resize(width, height),
+            EngineCommand::GeneralWorld { package_bytes } => {
+                self.require_local_simulation()?;
+                if self.running || self.sim.clock.tick != 0 || self.sim.physics().iter().next().is_some() {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "通用 World 只能明确安装到暂停的创世空世界".into(),
+                    });
+                }
+                let config =
+                    rynvek_world::general::GeneralWorldConfig::from_package_bytes(&package_bytes).map_err(|e| {
+                        EngineError {
+                            code: e.code,
+                            message: e.detail,
+                        }
+                    })?;
+                let world = config
+                    .instantiate(self.config.world_id)
+                    .map_err(|message| EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message,
+                    })?;
+                self.sim = world;
+                if let Some(render) = self.gpu.as_mut().and_then(|g| g.render.as_mut()) {
+                    render.picker.reset();
+                }
+                self.events.push_back(EngineEvent::TickCommitted {
+                    tick: 0,
+                    state_root: to_hex(&self.sim.parent_commit_hash),
+                });
+            }
             EngineCommand::Step { ticks } => {
                 self.require_local_simulation()?;
                 self.run_ticks(ticks)?;
@@ -956,13 +986,32 @@ impl Engine {
                 }
                 self.arena_map = Some(map);
             }
-            EngineCommand::ArenaTheme {world_id,request_id,background,factions} => {
+            EngineCommand::ArenaTheme {
+                world_id,
+                request_id,
+                background,
+                factions,
+            } => {
                 self.require_arena_binding(&world_id)?;
-                if std::iter::once(&background).chain(factions.iter()).any(|c|c>>24!=255) {
-                    return Err(EngineError {code:RynvekErrorCode::DimensionMismatch,message:"主题只许八个不透明颜色，不改变可见性规则".into()});
+                if std::iter::once(&background)
+                    .chain(factions.iter())
+                    .any(|c| c >> 24 != 255)
+                {
+                    return Err(EngineError {
+                        code: RynvekErrorCode::DimensionMismatch,
+                        message: "主题只许八个不透明颜色，不改变可见性规则".into(),
+                    });
                 }
-                self.arena_theme=crate::observation::ArenaTheme {background:rynvek_render::Rgba8(background.to_le_bytes()),factions:factions.map(|c|rynvek_render::Rgba8(c.to_le_bytes()))};
-                self.events.push_back(EngineEvent::ArenaThemeApplied {world_id,request_id,background,factions});
+                self.arena_theme = crate::observation::ArenaTheme {
+                    background: rynvek_render::Rgba8(background.to_le_bytes()),
+                    factions: factions.map(|c| rynvek_render::Rgba8(c.to_le_bytes())),
+                };
+                self.events.push_back(EngineEvent::ArenaThemeApplied {
+                    world_id,
+                    request_id,
+                    background,
+                    factions,
+                });
             }
             EngineCommand::ArenaSelection {
                 world_id,
@@ -1044,6 +1093,96 @@ impl Engine {
 mod tests {
     use super::*;
 
+    fn general_package() -> Vec<u8> {
+        use rynvek_simulation::physics::{Body, ONE};
+        rynvek_world::general::GeneralWorldConfig {
+            schema: "rynvek.general-world.v1".into(),
+            profile: rynvek_simulation::persistence::PHYSICS_PROFILE.into(),
+            bodies: vec![Body {
+                position_q32: [10 * ONE, 64 * ONE],
+                velocity_q32: [4 * ONE, 0],
+                acceleration_q32: [0; 2],
+                radius_q32: ONE / 2,
+                mass_q32: ONE,
+                fixed: false,
+            }],
+        }
+        .build_package("world.general.engine", "1.0.0")
+        .unwrap()
+    }
+
+    #[test]
+    fn general_package_worker_install_tick_and_original_frame_scene() {
+        let mut e = Engine::new(EngineConfig {
+            gpu_mode: GpuMode::Disabled,
+            ..Default::default()
+        });
+        e.handle_command(EngineCommand::GeneralWorld {
+            package_bytes: general_package(),
+        })
+        .unwrap();
+        let initial = e.frame_scene().ordered_instances()[0];
+        assert_eq!(initial.position, [10.0, 64.0]);
+        assert_eq!(initial.pick_id, 1);
+        assert!(
+            e.handle_command(EngineCommand::GeneralWorld {
+                package_bytes: general_package()
+            })
+            .is_err()
+        );
+        e.handle_command(EngineCommand::Step { ticks: 2 }).unwrap();
+        let moved = e.frame_scene().ordered_instances()[0];
+        assert!(moved.position[0] > 10.0);
+        assert_eq!(moved.pick_id, 1);
+        let bytes = e.simulation().encode_snapshot().unwrap();
+        let restored = SimulationEngine::decode_snapshot(&bytes).unwrap();
+        let mut scene = rynvek_render::FrameScene::new(2, RenderLayerMask::ALL);
+        rynvek_render::VisualizationProvider::populate(
+            &crate::provider::EntityProvider::default(),
+            &restored,
+            rynvek_render::NeuralLod::L2,
+            &mut scene,
+        );
+        assert_eq!(scene.ordered_instances()[0].position, moved.position);
+    }
+    #[test]
+    fn general_package_never_mutates_remote_arena_or_active_world() {
+        let mut remote = Engine::new(EngineConfig {
+            arena_faction: Some(0),
+            gpu_mode: GpuMode::Disabled,
+            ..Default::default()
+        });
+        assert!(
+            remote
+                .handle_command(EngineCommand::GeneralWorld {
+                    package_bytes: general_package()
+                })
+                .is_err()
+        );
+        assert_eq!(remote.simulation().physics().iter().count(), 0);
+        let mut active = Engine::new(EngineConfig {
+            gpu_mode: GpuMode::Disabled,
+            ..Default::default()
+        });
+        active.handle_command(EngineCommand::Start { tick_rate: 30 }).unwrap();
+        assert!(
+            active
+                .handle_command(EngineCommand::GeneralWorld {
+                    package_bytes: general_package()
+                })
+                .is_err()
+        );
+        active.handle_command(EngineCommand::Pause).unwrap();
+        active.run_ticks(1).unwrap();
+        assert!(
+            active
+                .handle_command(EngineCommand::GeneralWorld {
+                    package_bytes: general_package()
+                })
+                .is_err()
+        );
+    }
+
     #[test]
     fn cpu_only_engine_runs_and_reports_cpu_backend() {
         let mut e = Engine::new(EngineConfig {
@@ -1075,7 +1214,7 @@ mod tests {
             e.drain_events(),
             [EngineEvent::PickResult {
                 request_id: 4,
-                dense_index: None
+                entity_serial: None
             }]
         );
     }

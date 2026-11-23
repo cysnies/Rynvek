@@ -3,7 +3,7 @@
 
 //! 16 阶段 Tick 推进引擎（规范 03 / 审计报告 §7.1）。
 //!
-//! M2 范围：在无外部命令/神经/RTS 的最小世界中，完整走过 16 个阶段，
+//! 通用单 Chunk 物理 ECS 世界：完整走过 16 个阶段，不隐式创建 RTS 世界，
 //! 串联 `rynvek-field`（按 10Hz 多速率门控 `clock.is_field_step_due()` 推进）与 `rynvek-spatial`，
 //! 并保证 `10_000` Tick 后状态根可复现（零误差）。
 
@@ -25,14 +25,13 @@ pub enum SimulationError {
     Dispatch(String),
 }
 
-/// 最小可复现仿真世界状态（验收用）
-#[derive(Debug)]
+/// 单 Chunk 通用物理世界；神经、规则与跨 Chunk 主体仍待接入。
+#[derive(Clone, Debug)]
 pub struct SimulationEngine {
     pub clock: MultiRateClock,
     pub world_id: [u8; 16],
     pub field: FieldWorld,
-    /// 实体 Q32.32 局部坐标
-    pub positions: Vec<(u64, u64)>,
+    pub(crate) physics: crate::physics::PhysicsWorld,
     pub spatial: SpatialCsrIndex,
     pub last_manifest: Option<TickCommitManifest>,
     pub parent_commit_hash: [u8; 32],
@@ -65,24 +64,17 @@ impl Default for SimulationEngine {
 
 impl SimulationEngine {
     pub fn new(world_id: [u8; 16]) -> Self {
-        // 放置若干实体供空间索引阶段使用（均在规范坐标范围内）
-        let positions = vec![
-            (2u64 << 32, 2u64 << 32),
-            (4u64 << 32, 2u64 << 32),
-            (10u64 << 32, 10u64 << 32),
-            (20u64 << 32, 30u64 << 32),
-        ];
-        Self {
+        let mut world = Self {
             clock: MultiRateClock::new(),
             world_id,
             field: FieldWorld::new(),
-            positions,
+            physics: crate::physics::PhysicsWorld::new(world_id),
             spatial: SpatialCsrIndex::empty(),
             last_manifest: None,
             parent_commit_hash: [0u8; 32],
-            biomass: 500,
-            flux: 200,
-            neurogel: 50,
+            biomass: 0,
+            flux: 0,
+            neurogel: 0,
             biomass_capacity: 2000,
             flux_capacity: 1000,
             neurogel_capacity: 500,
@@ -95,22 +87,73 @@ impl SimulationEngine {
             backend: CpuReferenceBackend::new(),
             phase_exec_counts: [0; 16],
             field_steps_completed: 0,
+        };
+        world.publish_commit(world.authoritative_commit([0; 32]));
+        world
+    }
+
+    /// 创世物资与实体必须由调用者明确提供；不注入 RTS 阵营、战斗或生物资源。
+    pub fn with_bodies(world_id: [u8; 16], bodies: &[crate::physics::Body]) -> Result<Self, SimulationError> {
+        if bodies.len() > crate::physics::MAX_BODIES {
+            return Err(SimulationError::Invariant(RynvekErrorCode::DimensionMismatch));
         }
+        let mut world = Self::new(world_id);
+        for batch in bodies.chunks(crate::physics::MAX_COMMANDS) {
+            let commands: Vec<_> = batch
+                .iter()
+                .map(|&body| crate::physics::PhysicsCommand::Spawn { body })
+                .collect();
+            world.physics.apply(&commands, 0).map_err(SimulationError::Invariant)?;
+        }
+        world.spatial =
+            SpatialCsrIndex::build_from_local_q32(&world.physics.positions()).map_err(SimulationError::Spatial)?;
+        world.publish_commit(world.authoritative_commit([0; 32]));
+        Ok(world)
     }
 
     /// 推进一个完整 Tick（16 阶段）；成功则更新 `last_manifest`
     pub fn tick(&mut self) -> Result<TickCommitManifest, SimulationError> {
+        self.tick_with_commands(&[])
+    }
+
+    fn tick_candidate(
+        &mut self,
+        commands: &[crate::physics::PhysicsCommand],
+    ) -> Result<TickCommitManifest, SimulationError> {
         // 帧计量清零
         self.frame_biomass_harvested = 0;
         self.frame_nutrient_consumed = 0;
         self.frame_carcass_reclaimed = 0;
 
         for phase in CanonicalPhaseId::ALL {
+            if phase == CanonicalPhaseId::CommandIngressAndValidate {
+                self.physics
+                    .apply(commands, self.clock.coupling_epoch)
+                    .map_err(SimulationError::Invariant)?;
+            }
             self.run_phase(phase)?;
             self.phase_exec_counts[phase.as_u16() as usize] += 1;
         }
 
         let manifest = self.last_manifest.clone().expect("Commit 阶段必须写入 manifest");
+        Ok(manifest)
+    }
+
+    pub fn physics(&self) -> &crate::physics::PhysicsWorld {
+        &self.physics
+    }
+
+    /// 命令只改变候选世界；任意后续阶段失败，时钟、场、结构、资源和提交根全部不发布。
+    pub fn tick_with_commands(
+        &mut self,
+        commands: &[crate::physics::PhysicsCommand],
+    ) -> Result<TickCommitManifest, SimulationError> {
+        if self.clock.tick == u64::MAX || self.clock.world_revision == u64::MAX {
+            return Err(SimulationError::Invariant(RynvekErrorCode::DimensionMismatch));
+        }
+        let mut candidate = self.clone();
+        let manifest = candidate.tick_candidate(commands)?;
+        *self = candidate;
         Ok(manifest)
     }
 
@@ -127,10 +170,13 @@ impl SimulationEngine {
             CanonicalPhaseId::ScheduledEventDelivery => Ok(()),
             CanonicalPhaseId::SpatialAndVisibilityIndex => {
                 self.backend
-                    .dispatch_1d(KernelId("spatial.build_uniform_grid_csr"), self.positions.len() as u32)
+                    .dispatch_1d(
+                        KernelId("spatial.build_uniform_grid_csr"),
+                        self.physics.bodies.len() as u32,
+                    )
                     .map_err(|e| SimulationError::Dispatch(format!("{e:?}")))?;
-                self.spatial =
-                    SpatialCsrIndex::build_from_local_q32(&self.positions).map_err(SimulationError::Spatial)?;
+                self.spatial = SpatialCsrIndex::build_from_local_q32(&self.physics.positions())
+                    .map_err(SimulationError::Spatial)?;
                 Ok(())
             }
             CanonicalPhaseId::EnvironmentAndFieldSolve => {
@@ -154,14 +200,9 @@ impl SimulationEngine {
             }
             CanonicalPhaseId::ActionArbitration => Ok(()),
             CanonicalPhaseId::KinematicsAndCollision => {
-                // 静止验收世界：坐标不变，仅校验仍在规范范围内
-                for &(lx, ly) in &self.positions {
-                    if lx >= COORD_CANONICAL_MAX || ly >= COORD_CANONICAL_MAX {
-                        return Err(SimulationError::Invariant(
-                            RynvekErrorCode::CoordinateOutOfCanonicalRange,
-                        ));
-                    }
-                }
+                self.physics.step().map_err(SimulationError::Invariant)?;
+                self.spatial = SpatialCsrIndex::build_from_local_q32(&self.physics.positions())
+                    .map_err(SimulationError::Spatial)?;
                 Ok(())
             }
             CanonicalPhaseId::CombatAndEconomySettle => {
@@ -195,7 +236,7 @@ impl SimulationEngine {
                     local_coords: Vec::new(), // 坐标已在 Phase 09 校验；此处避免每 Tick 分配
                 };
                 // INV-05 复检（无分配）
-                for &(lx, ly) in &self.positions {
+                for &(lx, ly) in &self.physics.positions() {
                     if lx >= COORD_CANONICAL_MAX || ly >= COORD_CANONICAL_MAX {
                         return Err(SimulationError::Invariant(
                             RynvekErrorCode::CoordinateOutOfCanonicalRange,
@@ -209,57 +250,40 @@ impl SimulationEngine {
                 Ok(())
             }
             CanonicalPhaseId::CommitAndPublication => {
-                let entity_root = self.hash_entities();
-                let field_root = self.field.state_root().0;
-                let neural_root = [0u8; 32];
-                let economy_root = self.hash_economy();
-                let rng_root = [0u8; 32];
-                let state_root = TickCommitManifest::compute_state_root(
-                    &entity_root,
-                    &field_root,
-                    &neural_root,
-                    &economy_root,
-                    &rng_root,
-                    &self.parent_commit_hash,
-                );
-                let manifest = TickCommitManifest {
-                    world_id: self.world_id,
-                    tick: self.clock.tick,
-                    world_revision: self.clock.world_revision,
-                    parent_commit_hash: self.parent_commit_hash,
-                    entity_root_hash: entity_root,
-                    field_root_hash: field_root,
-                    neural_root_hash: neural_root,
-                    economy_root_hash: economy_root,
-                    rng_root_hash: rng_root,
-                    state_root_hash: state_root,
-                };
-                self.parent_commit_hash = state_root;
-                self.last_manifest = Some(manifest);
+                self.publish_commit(self.authoritative_commit(self.parent_commit_hash));
                 Ok(())
             }
         }
     }
 
-    fn hash_entities(&self) -> [u8; 32] {
-        let mut h = blake3::Hasher::new();
-        for &(lx, ly) in &self.positions {
-            h.update(&lx.to_le_bytes());
-            h.update(&ly.to_le_bytes());
-        }
-        // CSR 紧凑索引已含完整空间划分信息；不必每 Tick 哈希 16385 个 row_offsets
-        h.update(&(self.spatial.sorted_dense_indices.len() as u64).to_le_bytes());
-        for d in &self.spatial.sorted_dense_indices {
-            h.update(&d.to_le_bytes());
-        }
-        *h.finalize().as_bytes()
+    pub(crate) fn publish_commit(&mut self, c: rynvek_journal::CommitManifest) {
+        self.parent_commit_hash = c.state_root_hash;
+        self.last_manifest = Some(TickCommitManifest {
+            world_id: c.world_id,
+            tick: c.tick,
+            world_revision: c.world_revision,
+            parent_commit_hash: c.parent_commit_hash,
+            entity_root_hash: c.entity_root_hash,
+            field_root_hash: c.field_root_hash,
+            neural_root_hash: c.neural_root_hash,
+            economy_root_hash: c.economy_root_hash,
+            rng_root_hash: c.rng_root_hash,
+            state_root_hash: c.state_root_hash,
+        });
     }
 
-    fn hash_economy(&self) -> [u8; 32] {
+    pub(crate) fn hash_entities(&self) -> [u8; 32] {
+        self.physics.hash()
+    }
+
+    pub(crate) fn hash_economy(&self) -> [u8; 32] {
         let mut h = blake3::Hasher::new();
         h.update(&self.biomass.to_le_bytes());
         h.update(&self.flux.to_le_bytes());
         h.update(&self.neurogel.to_le_bytes());
+        h.update(&self.biomass_capacity.to_le_bytes());
+        h.update(&self.flux_capacity.to_le_bytes());
+        h.update(&self.neurogel_capacity.to_le_bytes());
         *h.finalize().as_bytes()
     }
 }

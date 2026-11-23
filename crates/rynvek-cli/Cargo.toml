@@ -21,6 +21,11 @@ rynvek-protocol.workspace = true
 rynvek-security.workspace = true
 rynvek-server.workspace = true
 serde_json.workspace = true
+rynvek-simulation.workspace = true
+rynvek-world.workspace = true
+rynvek-engine.workspace = true
+rynvek-render.workspace = true
+rynvek-journal.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

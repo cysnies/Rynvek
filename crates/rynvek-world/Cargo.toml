@@ -17,6 +17,7 @@ naga.workspace = true
 rynvek-core.workspace = true
 rynvek-ecs.workspace = true
 rynvek-rts.workspace = true
+rynvek-simulation.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

@@ -25,6 +25,17 @@ pub struct CpuReferenceBackend {
     executed_workgroups: AtomicU64,
 }
 
+// 克隆仅复制确定性内核表与计数器值，候选 Tick 不共享可变观测状态。
+impl Clone for CpuReferenceBackend {
+    fn clone(&self) -> Self {
+        Self {
+            kernels: self.kernels.clone(),
+            dispatched_work_items: AtomicU64::new(self.dispatched_work_items()),
+            executed_workgroups: AtomicU64::new(self.executed_workgroups()),
+        }
+    }
+}
+
 impl Default for CpuReferenceBackend {
     fn default() -> Self {
         Self::new()
