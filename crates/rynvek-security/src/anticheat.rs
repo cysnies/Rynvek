@@ -60,7 +60,7 @@ struct Bucket {
 }
 
 /// 每局一个的命令闸门
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CommandGate {
     config: CommandGateConfig,
     /// 已入座 Principal → 阵营

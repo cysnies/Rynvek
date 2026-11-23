@@ -36,6 +36,8 @@ pub struct GeneralInput {
     pub host_fence: u64,
     pub control_fence: u64,
     pub envelope: CommandEnvelope<Vec<PhysicsCommand>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install: Option<crate::rule_package::RuleInstallRequest>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,11 +48,24 @@ pub struct GeneralTickRecord {
     pub input: GeneralInput,
     /// 原RYC2 CommitManifest编码，不另起领域根算法。
     pub commit_bytes: Vec<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installation: Option<crate::rule_package::RuleInstallReplay>,
 }
 impl GeneralTickRecord {
+    fn valid_format(&self) -> bool {
+        match (&self.input.install, &self.installation) {
+            (None, None) => self.format == "rynvek-general-tick/1",
+            (Some(_), Some(_)) => {
+                self.format == "rynvek-general-tick/2"
+                    && self.input.envelope.target_tick % 4 == 0
+                    && self.input.envelope.payload.is_empty()
+            }
+            _ => false,
+        }
+    }
     pub fn replay(&self, world: &SimulationEngine) -> ApiResult<SimulationEngine> {
         let next = world.clock.tick.checked_add(1).ok_or_else(|| conflict("Tick溢出"))?;
-        if self.format != "rynvek-general-tick/1"
+        if !self.valid_format()
             || self.base_revision != world.clock.world_revision
             || self.base_root != world.parent_commit_hash
             || self.input.envelope.target_tick != next
@@ -70,7 +85,13 @@ impl GeneralTickRecord {
             return Err(conflict("生命日志含无来源外部命令"));
         }
         let manifest = CommitManifest::decode(&self.commit_bytes).map_err(ApiError::from)?;
-        let mut candidate = world.clone();
+        let mut candidate = if let Some(plan) = &self.installation {
+            world
+                .candidate_with_rule_install(plan.evidence_cid, &plan.graphs)
+                .map_err(ApiError::from)?
+        } else {
+            world.clone()
+        };
         candidate
             .tick_with_commands(&self.input.envelope.payload)
             .map_err(|e| ApiError::bad_request(format!("通用Tick拒绝：{e:?}")))?;
@@ -91,6 +112,7 @@ fn observation(w: &SimulationEngine) -> Value {
         .collect();
     json!({"world_id":WireUuid(w.world_id).to_string(),"commit":meta(w),"bodies":bodies,
         "components":w.component_rules().map(|r| &r.components),
+        "installed_releases":w.component_rules().map(|r| &r.installed_releases),
         "life":w.life().map(|l|json!({"genesis_energy_q":l.genesis_energy_q().to_string(),"universe_energy_q":rynvek_simulation::life::universe_energy_q(l,&w.field).ok().map(|v|v.to_string()),"accounts":l.accounts().collect::<Vec<_>>()})),
         "rule_meter":w.component_rules().map(|r|json!({"tier0_gas":r.tier0_gas,"tier1_quota":r.tier1_quota,"paid_q":r.paid_q})),
         "visibility":"private_owner_only","execution":"server-authoritative-single-chunk"})
@@ -206,6 +228,12 @@ async fn restore(
     app: &AppState,
     row: &WorldRow,
 ) -> ApiResult<(SimulationEngine, BTreeMap<IdempotencyKey, GeneralTickRecord>)> {
+    let _restore_slot = app
+        .inner
+        .agent_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| conflict("私有恢复复验名额已满"))?;
     let commits = app.store().list_commits(row.world_id).await?;
     let first = commits.first().ok_or_else(|| conflict("缺提交"))?;
     if first.world_id != row.world_id || first.world_revision != 0 || first.tick != 0 || first.parent_revision.is_some()
@@ -247,14 +275,16 @@ async fn restore(
     {
         return Err(conflict("锚点身份/根不符"));
     }
+    crate::rule_package::installed_permits(app, row.owner_principal_id, &world).await?;
     let mut receipts = BTreeMap::new();
     for (n, c) in commits
         .iter()
         .enumerate()
         .filter(|(_, c)| c.world_revision > 0 && c.tick.saturating_add(RETENTION) >= row.latest_tick)
     {
-        let r: GeneralTickRecord = serde_json::from_slice(&checked_blob(app, c.journal_segment_cid, 64 * 1024).await?)
-            .map_err(|_| conflict("不支持通用Tick日志"))?;
+        let r: GeneralTickRecord =
+            serde_json::from_slice(&checked_blob(app, c.journal_segment_cid, 2 * 1024 * 1024).await?)
+                .map_err(|_| conflict("不支持通用Tick日志"))?;
         let m = CommitManifest::decode(&r.commit_bytes).map_err(ApiError::from)?;
         if r.input.envelope.principal_id != row.owner_principal_id
             || r.input.host_fence == 0
@@ -264,7 +294,7 @@ async fn restore(
             || r.input.envelope.issued_at_tick.checked_add(1) != Some(c.tick)
             || r.base_root != commits[n - 1].state_root_blake3
             || m.parent_commit_hash != r.base_root
-            || r.format != "rynvek-general-tick/1"
+            || !r.valid_format()
             || m.world_id != row.world_id.0
             || m.tick != c.tick
             || m.world_revision != c.world_revision
@@ -272,6 +302,9 @@ async fn restore(
             || Some(r.base_revision) != c.parent_revision
         {
             return Err(conflict("日志/提交元数据不符"));
+        }
+        if let (Some(request), Some(plan)) = (&r.input.install, &r.installation) {
+            crate::rule_package::validate_replay(app, row.owner_principal_id, request, plan).await?;
         }
         if n > index {
             world = r.replay(&world)?;
@@ -287,6 +320,7 @@ async fn restore(
     {
         return Err(conflict("通用恢复终根不符"));
     }
+    crate::rule_package::installed_permits(app, row.owner_principal_id, &world).await?;
     Ok((world, receipts))
 }
 #[derive(Debug, Deserialize)]
@@ -296,6 +330,7 @@ pub enum Action {
     Acquire { host_fence: u64, level: ControlLevel },
     Release { host_fence: u64, control_fence: u64 },
     Tick { input: GeneralInput },
+    Install { input: GeneralInput },
     Close { host_fence: u64, control_fence: u64 },
 }
 struct Message {
@@ -409,13 +444,18 @@ impl Actor {
                 }
                 Ok(json!({"released":true,"closed":self.dead,"commit":meta(&self.world)}))
             }
-            Action::Tick { input } => {
+            Action::Tick { input } | Action::Install { input } => {
+                if matches!(msg.action, Action::Install { .. }) != input.install.is_some() {
+                    return Err(ApiError::bad_request(
+                        "安装必须使用显式install动作及精确请求，普通Tick不含安装",
+                    ));
+                }
                 self.check(pid, input.host_fence, input.control_fence, true)?;
                 if input.envelope.principal_id != pid {
                     return Err(ApiError::forbidden("信封主体与正式身份不符"));
                 }
                 if let Some(r) = self.receipts.get(&input.envelope.idempotency_key) {
-                    if r.input.envelope != input.envelope {
+                    if r.input.envelope != input.envelope || r.input.install != input.install {
                         return Err(conflict("同幂等键不能替换载荷"));
                     }
                     let m = CommitManifest::decode(&r.commit_bytes).map_err(ApiError::from)?;
@@ -426,8 +466,9 @@ impl Actor {
                 self.gate
                     .admit_frame(pid, self.world.clock.tick)
                     .map_err(ApiError::from)?;
-                self.gate
-                    .check_command(pid, &input.envelope, self.world.clock.tick)
+                // 失败请求仍消耗原帧速率令牌；只有耐久提交成功才发布幂等键，避免欠费污染回执。
+                let mut gate = self.gate.clone();
+                gate.check_command(pid, &input.envelope, self.world.clock.tick)
                     .map_err(ApiError::from)?;
                 if Some(input.envelope.target_tick) != self.world.clock.tick.checked_add(1)
                     || input.envelope.issued_at_tick != self.world.clock.tick
@@ -453,14 +494,68 @@ impl Actor {
                     apm.try_acquire(self.world.clock.tick)
                         .map_err(|e| ApiError::new(e.code, e.message))?;
                 }
+                let _verification_slot = if input.install.is_some()
+                    || self
+                        .world
+                        .component_rules()
+                        .is_some_and(|r| !r.installed_releases.is_empty())
+                {
+                    Some(
+                        app.inner
+                            .agent_slots
+                            .clone()
+                            .try_acquire_owned()
+                            .map_err(|_| conflict("规则复验名额已满"))?,
+                    )
+                } else {
+                    None
+                };
+                let installation = if let Some(request) = &input.install {
+                    if input.envelope.target_tick % 4 != 0 || !input.envelope.payload.is_empty() {
+                        return Err(ApiError::bad_request(
+                            "仅下一Coupling Epoch可显式安装，安装Tick不得混入物理命令",
+                        ));
+                    }
+                    apm.try_acquire(self.world.clock.tick)
+                        .map_err(|e| ApiError::new(e.code, e.message))?;
+                    Some(crate::rule_package::prepare_install(app, pid, request).await?)
+                } else {
+                    None
+                };
                 let base = self.world.clock.world_revision;
                 let root = self.world.parent_commit_hash;
-                let mut candidate = self.world.clone();
+                let mut candidate = if let Some(plan) = &installation {
+                    self.world
+                        .candidate_with_rule_install(plan.evidence_cid, &plan.graphs)
+                        .map_err(ApiError::from)?
+                } else {
+                    self.world.clone()
+                };
+                let rule_permits = crate::rule_package::installed_permits(app, pid, &candidate).await?;
+                // 先拒绝已撤销包；最终线性化点仍是同一Store提交事务内的精确pins守卫。
+                for permit in &rule_permits {
+                    for pin in &permit.pins {
+                        let current = app
+                            .store()
+                            .private_rule(pid, pin.id.clone(), pin.version.clone())
+                            .await?
+                            .ok_or_else(|| conflict("已安装版本缺失"))?;
+                        if current.revoked || hex(&current.cid) != pin.blake3_256 {
+                            return Err(conflict("已安装规则/依赖撤销，须显式整体替换包组"));
+                        }
+                    }
+                }
                 candidate
                     .tick_with_commands(&input.envelope.payload)
                     .map_err(|e| ApiError::bad_request(format!("通用候选Tick拒绝：{e:?}")))?;
                 let record = GeneralTickRecord {
-                    format: "rynvek-general-tick/1".into(),
+                    format: if installation.is_some() {
+                        "rynvek-general-tick/2"
+                    } else {
+                        "rynvek-general-tick/1"
+                    }
+                    .into(),
+                    installation,
                     base_revision: base,
                     base_root: root,
                     input: input.clone(),
@@ -491,12 +586,13 @@ impl Actor {
                 };
                 if let Err(e) = self
                     .committer
-                    .publish_row(
+                    .publish_guarded_row(
                         commit,
                         vec![EditorPermit {
                             principal_id: pid,
                             grant_id: None,
                         }],
+                        rule_permits,
                     )
                     .await
                 {
@@ -504,6 +600,7 @@ impl Actor {
                     return Err(e);
                 }
                 self.world = candidate;
+                self.gate = gate;
                 self.apm = apm;
                 self.receipts
                     .retain(|_, r| r.input.envelope.target_tick.saturating_add(RETENTION) >= self.world.clock.tick);
@@ -595,6 +692,10 @@ pub async fn control(
         let mut ordered: Vec<_> = receipts.values().collect();
         ordered.sort_by_key(|r| r.input.envelope.target_tick);
         for r in ordered {
+            if r.input.install.is_some() {
+                apm.try_acquire(r.input.envelope.issued_at_tick)
+                    .map_err(|e| ApiError::new(e.code, e.message))?;
+            }
             for _ in &r.input.envelope.payload {
                 apm.try_acquire(r.input.envelope.issued_at_tick)
                     .map_err(|e| ApiError::new(e.code, e.message))?;

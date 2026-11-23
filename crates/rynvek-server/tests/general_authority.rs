@@ -84,6 +84,7 @@ async fn acquire(s: &RunningServer, u: &User, id: WireUuid, h: u64, level: &str)
 }
 fn input(u: &User, h: u64, l: u64, tick: u64, commands: Vec<PhysicsCommand>) -> GeneralInput {
     GeneralInput {
+        install:None,
         host_fence: h,
         control_fence: l,
         envelope: CommandEnvelope {
@@ -397,6 +398,7 @@ async fn forged_private_wal_cannot_replay_even_with_a_valid_cas_digest() {
     let mut i = input(&u, 1, 1, 0, vec![]);
     i.envelope.payload.push(PhysicsCommand::Despawn { serial: 999 });
     let record = GeneralTickRecord {
+        installation:None,
         format: "rynvek-general-tick/1".into(),
         base_revision: 0,
         base_root: root,
