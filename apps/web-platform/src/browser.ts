@@ -12,6 +12,8 @@ import { mountArenaRenderer } from "./arena-renderer.js";
 import { ArenaWorldClient, ReplayObservationTransport, ObserverTransport, type ObserverFrame, type ObserverGrant, type WorldRun, type PlaybackFrame, type QueueContext, type CustomRoomView } from "./arena-remote.js";
 import { mountPrivateAgentPanel } from "./private-agent-panel.js";
 import { mountPrivateAudioPanel } from "./private-audio-panel.js";
+import {mountPrivateVisualPanel} from "./private-visual-panel.js";
+import {DEFAULT_ARENA_THEME,privateVisualTheme,cssPackedColor} from "./arena-visual.js";
 import { ArenaAudioSession } from "./arena-audio.js";
 import "./browser.css";
 
@@ -78,6 +80,12 @@ const agentRoot=document.createElement("section");agentRoot.className="panel";el
 const privateAgents=mountPrivateAgentPanel(agentRoot,()=>session&&!session.practice&&!session.custom&&session.mode==="PvE_Survival"&&connected&&!starting&&!playback&&!watching&&arena&&!arena.client.observation?.outcome?{worldId:session.world_id,principalId:session.principal_id,arena:arena.client,hub:session.client.privateAgentHub(session.principal_id)}:null);
 const audioRoot=document.createElement("section");audioRoot.className="panel";agentRoot.after(audioRoot);
 const privateAudio=mountPrivateAudioPanel(audioRoot,()=>session&&!session.practice&&connected&&!starting&&!playback&&!watching&&arena&&!arena.client.observation?.outcome?{worldId:session.world_id,principalId:session.principal_id,hub:session.client.privateAgentHub(session.principal_id).audio()}:null,audio);
+let visualTheme=DEFAULT_ARENA_THEME,visualEpoch=0;
+const visualRoot=document.createElement("section");visualRoot.className="panel";audioRoot.after(visualRoot);
+const privateVisual=mountPrivateVisualPanel(visualRoot,()=>session&&!session.practice&&connected&&!starting&&!playback&&!watching&&arena&&!arena.client.observation?.outcome?{worldId:session.world_id,principalId:session.principal_id,hub:session.client.privateAgentHub(session.principal_id).visual()}:null,{
+ async apply(loaded){const own=++visualEpoch,next=privateVisualTheme(loaded);if(gpuRequested){if(!gpuRenderer)throw Error("真实GPU未连接");await gpuRenderer.theme(next);}if(own!==visualEpoch)return;visualTheme=next;},
+ reset(){visualEpoch++;visualTheme=DEFAULT_ARENA_THEME;if(gpuRenderer)void gpuRenderer.theme(DEFAULT_ARENA_THEME).catch(()=>{});}
+});
 const labels:Partial<Record<BuildingKind,string>>={"bld.nexus_core":"主脑","bld.biomass_harvester":"萃取器","bld.signal_beacon":"信标","bld.spawning_vat":"孵化槽","bld.pulse_turret":"防御塔","bld.flux_reactor":"反应堆","bld.synapse_refinery":"精炼厂","bld.mutation_crucible":"坩埚"};
 const kinds:BuildingKind[]=["bld.biomass_harvester","bld.signal_beacon","bld.spawning_vat","bld.flux_reactor","bld.pulse_turret","bld.synapse_refinery","bld.mutation_crucible"];
 for(const kind of kinds){
@@ -102,6 +110,7 @@ function refreshPanel():void{
 function controls():void{
   privateAgents.update();
   privateAudio.update();
+  privateVisual.update();
   const active=canControl() && !arena?.client.observation?.outcome;
   button("observe-world").disabled=starting||connected||!!playback||!!watching||!!rankClient||!!customClient;
   button("leave-observer").disabled=!watching||starting;
@@ -148,6 +157,7 @@ function clearRuntime():void{
   audio.detach();
   privateAgents.reset();
   privateAudio.reset();
+  privateVisual.reset();
   request?.abort();request=null;
   if(customTimer)clearTimeout(customTimer);customTimer=null;customRead?.abort();customRead=null;
   grantRequest?.abort();grantRequest=null;grantBusy=false;observerGrants=[];el("observer-grants").replaceChildren();
@@ -519,7 +529,7 @@ function draw():void{
   if(!ctx)return;
   const dpr=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
   if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
-  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle="#070908";ctx.fillRect(0,0,w,h);
+  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle=cssPackedColor(visualTheme.background);ctx.fillRect(0,0,w,h);
   const obs=arena?.client.observation,terrain=arena?.client.terrain;
   if(arena&&obs&&terrain){
     const v=view(),scale=viewScale(v),a=unproject(v,0,h),b=unproject(v,w,0);
@@ -529,8 +539,8 @@ function draw():void{
       if(scale>9){ctx.strokeStyle="#ffffff08";ctx.lineWidth=.5;ctx.strokeRect(sx,sy,scale,scale);}
     }
     ctx.globalAlpha=1;
-    for(const building of obs.buildings){const size=buildingSpec(building.kind).footprint,[x,y]=project(v,building.origin[0],building.origin[1]+size);ctx.fillStyle=building.faction===obs.faction?"#3b5040":"#71493b";ctx.fillRect(x+1,y+1,size*scale-2,size*scale-2);ctx.strokeStyle=building.faction===obs.faction?"#a3d65c":"#ff9469";ctx.lineWidth=arena.ui.selectedBuilding===building.id?3:1;ctx.strokeRect(x+2,y+2,size*scale-4,size*scale-4);ctx.fillStyle="#d7e9c7";ctx.font=`${Math.max(9,Math.min(14,scale))}px monospace`;ctx.fillText(labels[building.kind]??building.kind.slice(4),x+4,y+15);if(!building.complete){ctx.fillStyle="#ead686";ctx.fillText(`施工 ${building.build_progress}`,x+3,y+size*scale-5);} }
-    for(const u of obs.units){const [wx,wy]=rawToFloat(u.position),[x,y]=project(v,wx,wy),r=Math.max(3,scale*.35);ctx.fillStyle=u.faction===obs.faction?"#bee78a":"#ff9269";ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y+r);ctx.lineTo(x-r,y+r);ctx.closePath();ctx.fill();if(arena.ui.selection.has(u.id)){ctx.strokeStyle="#e4ff9e";ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y,r+4,0,Math.PI*2);ctx.stroke();}ctx.fillStyle="#253229";ctx.fillRect(x-r,y-r-5,r*2,2);ctx.fillStyle="#a3d65c";ctx.fillRect(x-r,y-r-5,r*2*u.hp_milli/u.max_hp_milli,2);}
+    for(const building of obs.buildings){const size=buildingSpec(building.kind).footprint,[x,y]=project(v,building.origin[0],building.origin[1]+size);ctx.fillStyle=cssPackedColor(visualTheme.factions[building.faction%7]!);ctx.fillRect(x+1,y+1,size*scale-2,size*scale-2);ctx.strokeStyle=cssPackedColor(visualTheme.factions[building.faction%7]!);ctx.lineWidth=arena.ui.selectedBuilding===building.id?3:1;ctx.strokeRect(x+2,y+2,size*scale-4,size*scale-4);ctx.fillStyle="#d7e9c7";ctx.font=`${Math.max(9,Math.min(14,scale))}px monospace`;ctx.fillText(labels[building.kind]??building.kind.slice(4),x+4,y+15);if(!building.complete){ctx.fillStyle="#ead686";ctx.fillText(`施工 ${building.build_progress}`,x+3,y+size*scale-5);} }
+    for(const u of obs.units){const [wx,wy]=rawToFloat(u.position),[x,y]=project(v,wx,wy),r=Math.max(3,scale*.35);ctx.fillStyle=cssPackedColor(visualTheme.factions[u.faction%7]!);ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y+r);ctx.lineTo(x-r,y+r);ctx.closePath();ctx.fill();if(arena.ui.selection.has(u.id)){ctx.strokeStyle="#e4ff9e";ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(x,y,r+4,0,Math.PI*2);ctx.stroke();}ctx.fillStyle="#253229";ctx.fillRect(x-r,y-r-5,r*2,2);ctx.fillStyle="#a3d65c";ctx.fillRect(x-r,y-r-5,r*2*u.hp_milli/u.max_hp_milli,2);}
     if(arena.ui.buildMode){const size=buildingSpec(arena.ui.buildMode).footprint,[x,y]=project(v,Math.floor(pointer[0]),Math.floor(pointer[1])+size);ctx.strokeStyle="#ead686";ctx.lineWidth=2;ctx.strokeRect(x,y,size*scale,size*scale);}
     if(drag){const [x,y]=project(v,...drag.world),[x2,y2]=project(v,...pointer);ctx.strokeStyle="#c8efa0";ctx.strokeRect(x,y,x2-x,y2-y);}
   }else{ctx.fillStyle="#91a091";ctx.font="16px sans-serif";ctx.textAlign="center";ctx.fillText("连接已有Studio世界，或显式开始本地练习",w/2,h/2);ctx.textAlign="start";}

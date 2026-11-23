@@ -39,6 +39,9 @@ importers:
       '@rynvek/arena':
         specifier: workspace:*
         version: link:../../packages/arena
+      '@rynvek/assets':
+        specifier: workspace:*
+        version: link:../../packages/assets
       '@rynvek/audio':
         specifier: workspace:*
         version: link:../../packages/audio
@@ -60,6 +63,9 @@ importers:
       '@rynvek/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@rynvek/visualization':
+        specifier: workspace:*
+        version: link:../../packages/visualization
       react:
         specifier: 19.3.1
         version: 19.3.1

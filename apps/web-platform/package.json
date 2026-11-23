@@ -24,27 +24,29 @@
     "test:wasm": "node --test tools/wasm-abi.test.mjs"
   },
   "dependencies": {
+    "@rynvek/agent-sdk": "workspace:*",
     "@rynvek/arena": "workspace:*",
+    "@rynvek/assets": "workspace:*",
+    "@rynvek/audio": "workspace:*",
+    "@rynvek/client": "workspace:*",
     "@rynvek/core": "workspace:*",
+    "@rynvek/engine": "workspace:*",
     "@rynvek/lab": "workspace:*",
     "@rynvek/studio": "workspace:*",
     "@rynvek/ui": "workspace:*",
-    "@rynvek/client": "workspace:*",
-    "@rynvek/engine": "workspace:*",
+    "@rynvek/visualization": "workspace:*",
     "react": "19.3.1",
-    "react-dom": "19.3.1",
-    "@rynvek/agent-sdk": "workspace:*",
-    "@rynvek/audio": "workspace:*"
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
     "@types/node": "^22.14.0",
-    "typescript": "~5.8.3",
-    "vitest": "^3.2.4",
-    "vite": "^7.3.8",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
-    "@testing-library/react": "16.3.3",
-    "@testing-library/dom": "10.4.2",
-    "jsdom": "26.1.0"
+    "jsdom": "26.1.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.3.8",
+    "vitest": "^3.2.4"
   }
 }

@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
+import type {ArenaVisualTheme} from "./arena-visual.js";
 import type { ArenaClient, BuildingKind } from "@rynvek/client";
 import { createArenaRenderHost, type WorkerLike } from "@rynvek/engine";
 import { viewScale, type Viewport } from "./arena-view.js";
@@ -28,9 +29,13 @@ export function mountArenaRenderer(canvas: HTMLCanvasElement,
   let disposed = false, camera = "";
   let timer: ReturnType<typeof setTimeout> | undefined;
   let offReady = () => {};
+  let offTheme = () => {};
+  let requestId=0;
+  const themes=new Map<number,{resolve:()=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>;theme:ArenaVisualTheme}>();
   const dispose = () => {
     if (disposed) return;
-    disposed = true; clearTimeout(timer); offReady();
+    disposed = true; clearTimeout(timer); offReady(); offTheme();
+    for(const t of themes.values()){clearTimeout(t.timer);t.reject(new Error("渲染世界已断开"));}themes.clear();
     worker.removeEventListener("error", onWorkerError); worker.removeEventListener("messageerror", onWorkerError);
     if (renderer) renderer.dispose(); else worker.terminate?.();
   };
@@ -48,6 +53,18 @@ export function mountArenaRenderer(canvas: HTMLCanvasElement,
     });
     if (disposed) renderer.dispose();
   } catch (error) { dispose(); throw error; }
+  offTheme=renderer!.host.on("ARENA_THEME_APPLIED",event=>{
+    const t=themes.get(event.requestId);if(!t)return;
+    clearTimeout(t.timer);themes.delete(event.requestId);
+    if(event.worldId!==options.worldId||event.background!==t.theme.background||JSON.stringify(event.factions)!==JSON.stringify(t.theme.factions))t.reject(new Error("渲染主题回执不匹配"));else t.resolve();
+  });
+  const theme=(value:ArenaVisualTheme)=>new Promise<void>((resolve,reject)=>{
+    if(disposed){reject(new Error("渲染器已关闭"));return;}
+    if(themes.size>=8||value.factions.length!==7||[value.background,...value.factions].some(c=>!Number.isInteger(c)||c<0||c>0xffffffff||(c>>>24)!==255)){reject(new Error("主题颜色/请求越界"));return;}
+    const id=++requestId,timer=setTimeout(()=>{themes.delete(id);reject(new Error("WASM未确认主题，不宣称应用成功"));},5000);
+    themes.set(id,{resolve,reject,timer,theme:value});
+    renderer!.host.send({type:"ARENA_THEME",worldId:options.worldId,requestId:id,background:value.background,factions:[...value.factions]});
+  });
   const ready = () => { clearTimeout(timer); options.onStatus("WebGPU Worker 已就绪"); };
   if (!disposed) {
     offReady = renderer.host.on("ENGINE_READY", ready);
@@ -86,5 +103,5 @@ export function mountArenaRenderer(canvas: HTMLCanvasElement,
       placement: placement ? {kind: placement.kind, origin: [...placement.origin]} : null});
     overlayKey = key;
   };
-  return { sync, select, overlay, dispose };
+  return { sync, select, overlay, theme, dispose };
 }
