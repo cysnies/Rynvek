@@ -115,6 +115,7 @@ export interface EnergyRow {
   readonly repair_q:bigint|string;
   readonly secretion_q:bigint|string;
   readonly synthesis_q:bigint|string;
+  readonly continuous_q:bigint|string;
 
 }
 const q=(v:bigint|string):bigint=>{
@@ -126,7 +127,7 @@ export function energyBalance(row:EnergyRow):{externalReceived:bigint;accounted:
   if(!row.enabled) throw new Error("此样本未启用生态，不能当作零能量验收");
   const externalReceived=q(row.received_q)-q(row.transferred_q);
   const accounted=q(row.stored_q)+q(row.dissipated_q)+q(row.exported_q)+q(row.returned_q);
-  const activity=q(row.attack_q)+q(row.repair_q)+q(row.secretion_q)+q(row.synthesis_q);
+  const activity=q(row.attack_q)+q(row.repair_q)+q(row.secretion_q)+q(row.synthesis_q)+q(row.continuous_q);
   return {externalReceived,accounted,balanced:activity<=q(row.dissipated_q)&&externalReceived>=0n&&externalReceived===q(row.external_received_q)&&externalReceived===accounted};
 }
 
@@ -284,5 +285,5 @@ export const TABLE_COLUMNS = {
     "parameter_value",
   ],
   lineage: ["run", "faction", "slug", "unit", "generation", "entity", "parent", "origin", "born_tick", "genome", "parent_genome", "allocated_q"],
-  energy: ["enabled","run","tick","live_bodies","remains","natural_births","max_generation","received_q","stored_q","dissipated_q","exported_q","returned_q","transferred_q","external_received_q","state_root","attack_q","repair_q","secretion_q","synthesis_q"],
+  energy: ["enabled","run","tick","live_bodies","remains","natural_births","max_generation","received_q","stored_q","dissipated_q","exported_q","returned_q","transferred_q","external_received_q","state_root","attack_q","repair_q","secretion_q","synthesis_q","continuous_q"],
 } as const;

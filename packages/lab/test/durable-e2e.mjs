@@ -36,7 +36,7 @@ else if(input.phase==="parameter-submit"){
  const spec={name:"Studio原模型持久真实扫描",seeds:[57],ticks:4,sample_every:2,
    variants:parameterSweep(capture.model,"counter.one","param.rate",[1,3])};
  const one=await client.submit(spec,input.key);assert.equal((await client.submit(spec,input.key)).exp_id,one.exp_id);
- assert.equal(one.kernel_profile,"rynvek-lab-kernel/4");
+ assert.equal(one.kernel_profile,"rynvek-lab-kernel/5");
  await assert.rejects(()=>client.submit({...spec,variants:spec.variants.map((v,i)=>i? v:{...v,model:{...v.model,outputs:[...v.model.outputs,...v.model.outputs]}})},randomUUID()));
  process.stdout.write(JSON.stringify({id:one.exp_id,world,digest:capture.model_digest}));
 }else if(input.phase==="parameter-download"){

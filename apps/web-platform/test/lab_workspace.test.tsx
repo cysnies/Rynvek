@@ -12,7 +12,7 @@ const cid="a".repeat(64),genome="0".repeat(64),childGenome="1".repeat(64),q="900
 // 此处仅是传输/组件快验夹具；生产代码没有示范种群，真实HTTP作业另由Rust定向快验执行。
 const root={run:0,faction:0,entity:1,parent:null,slug:"root",unit:"unit.forager",generation:0,origin:"initial",born_tick:"0",genome,parent_genome:null,allocated_q:"0"};
 const child={...root,entity:2,parent:1,slug:"child",generation:1,origin:"mitosis",born_tick:"1",genome:childGenome,parent_genome:genome,allocated_q:"4000000"};
-const energy={attack_q:"0",repair_q:"0",secretion_q:"0",synthesis_q:"0",enabled:true,run:0,tick:"10",live_bodies:2,remains:0,state_root:cid,received_q:q,stored_q:q,dissipated_q:"0",exported_q:"0",returned_q:"0",transferred_q:"0",external_received_q:q};
+const energy={attack_q:"0",repair_q:"0",secretion_q:"0",synthesis_q:"0",continuous_q:"0",enabled:true,run:0,tick:"10",live_bodies:2,remains:0,state_root:cid,received_q:q,stored_q:q,dissipated_q:"0",exported_q:"0",returned_q:"0",transferred_q:"0",external_received_q:q};
 const job={exp_id:"private-job",name:"私有快验作业",status:"completed",generation:0,attempt:1,lease_expires_at_unix_s:null,runs_done:1,runs_total:1,variants:[],tables:{runs:cid,metrics:cid,lineage:cid,energy:cid}};
 const rows=(table:string)=>table==="lineage"?[root,child]:table==="energy"?[energy]:table==="runs"?[{run:0,variant:"w3-m0",seed:"57"}]:[];
 const page=(table:string)=>{const values=rows(table);return {exp_id:job.exp_id,table,cid,page:{total_rows:values.length,offset:0,next_offset:null,columns:Object.keys(values[0]??{}),rows:values}};};
@@ -20,7 +20,7 @@ function connect(){fireEvent.change(screen.getByLabelText("权限令牌"),{targe
 it("真实React入口通过LabClient提交/读取/分析，并在身份断开时清空私有结果",async()=>{
   const fetcher=vi.fn(async(input:string|URL|Request,init?:RequestInit)=>{
     const url=String(input);expect((init?.headers as Record<string,string>)["Authorization"]).toBe("Bearer fixture-private-token");
-    if(init?.method==="POST"){const sent=JSON.parse(String(init.body));expect(sent.variants[0].ecology.roles["unit.forager"].replication_mutation_rate_permille).toBe(50);expect(sent.variants[0].ecology.roles["unit.forager"].attack_cost_micro_per_shot).toBe(100);expect(sent.variants[0].ecology.roles["unit.forager"].birth_synthesis_milli).toBe(10);return Response.json(job,{status:202});}
+    if(init?.method==="POST"){const sent=JSON.parse(String(init.body));expect(sent.variants[0].ecology.roles["unit.forager"].replication_mutation_rate_permille).toBe(50);expect(sent.variants[0].ecology.roles["unit.forager"].attack_cost_micro_per_shot).toBe(100);expect(sent.variants[0].ecology.roles["unit.forager"].birth_synthesis_milli).toBe(10);expect(sent.variants[0].ecology.roles["unit.forager"].continuous_cost_micro_per_neuron_step).toBe(1);return Response.json(job,{status:202});}
     const table=new URL(url).searchParams.get("table");return Response.json(table?page(table):job);
   });
   render(<LabWorkspace fetcher={fetcher as typeof fetch} initialBaseUrl="http://test"/>);
@@ -28,7 +28,7 @@ it("真实React入口通过LabClient提交/读取/分析，并在身份断开时
   connect();expect((screen.queryByLabelText("权限令牌"))).toBeNull();
   fireEvent.click(screen.getByText("提交真实实验"));await screen.findByText(/私有快验作业 · completed/);
   fireEvent.click(screen.getByText("加载真实谱系与能量分析"));await screen.findByLabelText("真实自然出生谱系图");
-  expect(screen.getAllByText(new RegExp(q)).length).toBeGreaterThan(0);expect(screen.getByText(/个体账平衡/)).toBeTruthy();
+  expect(screen.getAllByText(new RegExp(q)).length).toBeGreaterThan(0);expect(screen.getByText(/个体账平衡/)).toBeTruthy();expect(screen.getByText(/连续计算 0 q/)).toBeTruthy();
   fireEvent.click(screen.getByLabelText("实体2 mitosis"));expect(screen.getByText(/自然亲代 1/)).toBeTruthy();
   fireEvent.click(screen.getByRole("tab",{name:"lineage"}));await waitFor(()=>expect(fetcher.mock.calls.some(c=>String(c[0]).includes("/rows?table=lineage"))).toBe(true));
   fireEvent.click(screen.getByText("断开并清空结果"));
