@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 import {validateGeneralFrame,type GeneralRenderFrame} from "@rynvek/engine";
-import { GeneralDriverClient, changeGeneralDriver, listGeneralDrivers, type GeneralDriverGrant, type RuleRequest, PrivateRuleClient, type GeneralFrame, type RuleInstallRequest, type SignedRuleRelease } from "@rynvek/agent-sdk";
+import { GeneralRunClient, type GeneralRun, type GeneralRunSpec, type GeneralRunOperation, GeneralDriverClient, changeGeneralDriver, listGeneralDrivers, type GeneralDriverGrant, type RuleRequest, PrivateRuleClient, type GeneralFrame, type RuleInstallRequest, type SignedRuleRelease } from "@rynvek/agent-sdk";
 export interface GeneralIdentity {
     principal_id: string;
     kind: "Human";
@@ -82,6 +82,7 @@ export class GeneralWorldSession {
     private readonly abort = new AbortController();
     private busy = false;
     readonly rules: PrivateRuleClient;
+    private readonly runs:GeneralRunClient;
     readonly origin: string;
     readonly identity: GeneralIdentity;
     world: string | undefined;
@@ -92,6 +93,7 @@ export class GeneralWorldSession {
         this.origin = origin;
         this.token = token;
         this.identity = Object.freeze({ ...identity });
+        this.runs=new GeneralRunClient(identity.principal_id,(p,m,b,s)=>this.raw(p,m,b,s));
         this.rules = new PrivateRuleClient(identity.principal_id, identity.ed25519_pubkey, (p, m, b, s) => this.raw(p, m, b, s));
     }
     static async open(origin: string, token: string, fetcher: typeof fetch = fetch, signal?: AbortSignal): Promise<GeneralWorldSession> {
@@ -176,6 +178,21 @@ export class GeneralWorldSession {
     async acquire(): Promise<void> { return this.exclusive(async () => { if (!this.world || this.hostFence === undefined)
         throw new Error("须先明确连接宿主"); this.controlFence = undefined; const v = await this.rules.acquire(this.world, this.hostFence, this.abort.signal); if (v.host_fence !== this.hostFence || v.lease?.level !== "Sovereign")
         throw new Error("控制租约回执不符"); this.controlFence = integer(v.lease.fencing_token); }); }
+    /** 不推进客户端Tick；断开只清本地状态，不取消服务器意图。 */
+    private readonly runReceipts=new WeakMap<GeneralRun,number>();
+    durableReceiptCurrent(run:GeneralRun):boolean{return !!this.token&&run.world_id===this.world&&this.runReceipts.get(run)===this.viewEpoch;}
+    private async runRequest(work:(world:string)=>Promise<GeneralRun>,clearControl=false):Promise<GeneralRun>{
+        return this.exclusive(async()=>{const world=this.world,epoch=this.viewEpoch;if(!world)throw new Error("未选世界");
+            const run=await work(world);if(this.world!==world||this.viewEpoch!==epoch)throw new Error("运行回执已失去会话/世界绑定");
+            if(clearControl)this.invalidatePrivate();this.runReceipts.set(run,this.viewEpoch);return run;});
+    }
+    async startDurable(spec:GeneralRunSpec):Promise<GeneralRun>{
+        const host=this.hostFence,control=this.controlFence,observation=this.observation;
+        if(host===undefined||control===undefined||!observation||spec.expected_revision!==observation.commit.revision||spec.expected_root!==observation.commit.state_root)throw new Error("须原Sovereign与精确起点");
+        return this.runRequest(w=>this.runs.start(w,host,control,spec,this.abort.signal),true);
+    }
+    async durableStatus(id:string,submission=false):Promise<GeneralRun>{return this.runRequest(w=>submission?this.runs.lookup(w,id,this.abort.signal):this.runs.get(w,id,this.abort.signal));}
+    async durableControl(id:string,op:GeneralRunOperation):Promise<GeneralRun>{return this.runRequest(w=>this.runs.control(w,id,op,this.abort.signal),true);}
     async discoverRules(): Promise<SignedRuleRelease[]> { return this.exclusive(() => this.rules.list(this.abort.signal)); }
     async verify(plan: RuleInstallRequest): Promise<string[]> { return this.exclusive(async () => { const v = await this.rules.download(plan.root, this.abort.signal); return v.map(p => p.release.manifest.package_id); }); }
     private async advanceOne(action: "tick" | "install" | "recover", plan?: RuleInstallRequest, fee?: number, signal?: AbortSignal): Promise<GeneralObservation> {

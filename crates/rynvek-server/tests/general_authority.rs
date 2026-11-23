@@ -399,7 +399,7 @@ async fn forged_private_wal_cannot_replay_even_with_a_valid_cas_digest() {
     let mut i = input(&u, 1, 1, 0, vec![]);
     i.envelope.payload.push(PhysicsCommand::Despawn { serial: 999 });
     let record = GeneralTickRecord {
-        run_step:None,
+        run_step: None,
         admission_grant_id: None,
         installation: None,
         format: "rynvek-general-tick/1".into(),
@@ -868,7 +868,7 @@ async fn general_driver_revocation_is_rechecked_in_original_store_commit_lock() 
     candidate.tick_with_commands(&[]).unwrap();
     let manifest = candidate.authoritative_commit(root);
     let record = GeneralTickRecord {
-        run_step:None,
+        run_step: None,
         format: "rynvek-general-tick/4".into(),
         base_revision: 0,
         base_root: root,
@@ -1103,6 +1103,46 @@ async fn actual_general_collaboration_web_purpose_minimal_frame_paid_ticks_revok
     assert_eq!(after["commit"]["tick"], 4);
     assert_eq!(after["commit"]["state_root"], result["root"]);
     assert!(result["paid"].as_u64().unwrap() > 0);
+    assert_eq!(after["life"]["universe_energy_q"], after["life"]["genesis_energy_q"]);
+    s.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore = "真实耐久SDK/Web HTTP：先构建agent-sdk与web，显式--include-ignored；非浏览器/PG进程恢复"]
+async fn actual_general_durable_sdk_web_explicit_budget_controls_reconnect_and_server_paid_completion() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let o = register(&s.base_url(), "durable-web-owner", "human", 158).await;
+    let id = create(&s, &o, &rules()).await;
+    let payload = json!({"base":s.base_url(),"world":id.to_string(),"token":o.token});
+    let result: Value = tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut child = std::process::Command::new("node")
+            .arg("apps/web-platform/test/general-run-http-e2e.mjs")
+            .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice(&out.stdout).unwrap()
+    })
+    .await
+    .unwrap();
+    let after = view(&s, &o, id).await;
+    assert!(after["commit"]["tick"].as_u64().unwrap() >= 6);
+    assert_eq!(after["commit"]["tick"], result["tick"]);
+    assert_eq!(after["commit"]["state_root"], result["root"]);
+    assert!(result["sdkPaid"].as_u64().unwrap() > 0);
+    assert!(result["webPaid"].as_u64().unwrap() > 0);
     assert_eq!(after["life"]["universe_energy_q"], after["life"]["genesis_energy_q"]);
     s.shutdown().await;
 }
