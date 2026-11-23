@@ -139,3 +139,100 @@ async fn csharp_real_identity_world_fog_commands_tools_and_reconnect() {
     assert!(world.latest_tick >= 64);
     server.shutdown().await;
 }
+
+#[tokio::test]
+#[ignore = "需.NET10构建新General C#主体，显式--include-ignored；非浏览器或PG恢复"]
+async fn csharp_real_general_durable_login_budget_pause_resume_cancel_relogin_and_paid_completion() {
+    use rynvek_server::{AppConfig, ServerConfig, client, store::Store};
+    let dir = tempfile::tempdir().unwrap();
+    let server = rynvek_server::start(ServerConfig {
+        http_addr: "127.0.0.1:0".parse().unwrap(),
+        webtransport_addr: None,
+        app: AppConfig {
+            blob_dir: Some(dir.path().to_owned()),
+            tick_driver: rynvek_server::host::TickDriver::Manual,
+            lobby_timeout: None,
+            ..AppConfig::default()
+        },
+        store: Store::memory(),
+        signer: server_key(),
+    })
+    .await
+    .unwrap();
+    let owner = register(&server.base_url(), "general-csharp-owner", "human", 173).await;
+    let cfg: rynvek_world::general::GeneralWorldConfig =
+        serde_json::from_str(include_str!("../../../examples/worlds/general-rules.world.json")).unwrap();
+    let bytes = cfg.build_package("world.csharp.durable", "1.0.0").unwrap();
+    let created = client::request(
+        "POST",
+        &format!("{}/api/v1/worlds/general", server.base_url()),
+        &[("Authorization", &format!("Bearer {}", owner.token))],
+        Some(&bytes),
+    )
+    .await
+    .unwrap();
+    assert_eq!(created.status, 201);
+    let world = created.json().unwrap()["world_id"].as_str().unwrap().to_owned();
+    let config = json!({"base":server.base_url(),"world":world,"principal":owner.principal_id.to_string()});
+    let result = tokio::task::spawn_blocking(move || {
+        use std::io::{BufRead as _, Write as _};
+        let dotnet = std::env::var("RYNVEK_DOTNET").unwrap_or_else(|_| "dotnet".into());
+        let mut child = std::process::Command::new(dotnet)
+            .args([
+                "sdks/csharp/Rynvek.Client.Smoke/bin/Debug/net10.0/Rynvek.Client.Smoke.dll",
+                "--general-run",
+            ])
+            .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut input = child.stdin.take().unwrap();
+        let mut output = std::io::BufReader::new(child.stdout.take().unwrap());
+        writeln!(input, "{config}").unwrap();
+        let mut signatures = 0;
+        let mut result = None;
+        loop {
+            let mut line = String::new();
+            if output.read_line(&mut line).unwrap() == 0 {
+                break;
+            }
+            let value: Value = serde_json::from_str(&line).unwrap();
+            if let Some(message) = value["sign"].as_str() {
+                let bytes = (0..message.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&message[i..i + 2], 16).unwrap())
+                    .collect::<Vec<_>>();
+                assert!(bytes.starts_with(b"rynvek-auth/1\0"));
+                assert_eq!(value["key"], "owner");
+                writeln!(
+                    input,
+                    "{}",
+                    json!({"signature":rynvek_server::ids::hex(&owner.key.sign(&bytes))})
+                )
+                .unwrap();
+                signatures += 1;
+            } else {
+                assert_eq!(value["done"], true);
+                result = Some(value);
+            }
+        }
+        drop(input);
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(signatures, 2, "C#两次挑战登录，没借夹具Bearer");
+        result.unwrap()
+    })
+    .await
+    .unwrap();
+    let id = world.parse().unwrap();
+    let row = server.state.store().get_world(id).await.unwrap().unwrap();
+    assert!(row.latest_tick >= 3);
+    assert_eq!(result["tick"], row.latest_tick);
+    assert_eq!(result["root"], rynvek_server::ids::hex(&row.latest_state_root));
+    assert!(result["paid"].as_u64().unwrap() > 0);
+    assert_eq!(result["storage"], "memory");
+    server.shutdown().await;
+}

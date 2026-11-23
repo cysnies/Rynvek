@@ -14,7 +14,7 @@ internal static class Program
     private static void Emit(object value) { Console.WriteLine(JsonSerializer.Serialize(value, Wire.Json)); }
     public static async Task<int> Main(string[] args)
     {
-        try { if (args.Contains("--self-test")) await SelfTest(); else await RealScenario(); return 0; }
+        try { if (args.Contains("--self-test")) await SelfTest(); else if(args.Contains("--general-run")) await GeneralRunScenario(); else await RealScenario(); return 0; }
         catch (Exception e) { Console.Error.WriteLine($"C# direct validation failed at {_stage} ({e.GetType().Name}); response/session/private contents redacted"); if(e is RynvekRequestException request) Console.Error.WriteLine($"HTTP={request.Status} code={request.Code:x4}"); return 1; }
     }
     private static async Task<byte[]> Sign(string label, ReadOnlyMemory<byte> message, CancellationToken ct)
@@ -60,6 +60,22 @@ internal static class Program
         var ended = await reconnected.WaitForObservationAsync(surrender.Tick, ct); Assert(ended.Outcome is not null, "Original Actor terminal observation");
         Emit(new { done = true, principal_id = principal, world_id = world.WorldId, match_id = match, exact_seed = seed, moved = true, query = query.Tool, strategy = strategy.Tool, reconnect = true, outsider_denied = true, completed = true });
     }
+    private static async Task GeneralRunScenario()
+    {
+        using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(25));var ct=deadline.Token;
+        using var config=JsonDocument.Parse(await Console.In.ReadLineAsync(ct)??throw new Exception("Missing configuration"));var p=config.RootElement;var origin=new Uri(p.GetProperty("base").GetString()!);var principal=PrincipalId.Parse(p.GetProperty("principal").GetString()!);var world=p.GetProperty("world").GetGuid();
+        await using var client=new RynvekClient(origin);_stage="general-login";await client.LoginAsync(principal,(m,t)=>new(Sign("owner",m,t)),ct);
+        var general=new GeneralWorldClient(client,world);var connected=await general.ConnectAsync(ct);var lease=await general.AcquireAsync(connected.HostFence,ct);var start=connected.Observation.GetProperty("commit");
+        var spec=new GeneralRunSpec(Guid.CreateVersion7().ToString("D"),start.GetProperty("revision").GetUInt64(),start.GetProperty("state_root").GetString()!,128,120,500,"1000000000",GeneralRunSpec.ExplicitConsent);
+        Reject(()=>(spec with{MaxEnergyQ="01"}).Validate());Reject(()=>(spec with{Consent=""}).Validate());Reject(()=>(spec with{Ticks=129}).Validate());
+        _stage="general-start";var job=await general.StartAsync(connected.HostFence,lease.FencingToken,spec,ct);Assert(job.StorageBackend=="memory","Memory不可冒称PG耐久");Assert((await general.LookupAsync(spec.SubmissionId,ct)).Id==job.Id,"原提交键只读对账");var originalDeadline=job.DeadlineS;
+        foreach(var action in new[]{"pause","resume","pause"}){var op=new GeneralRunOperation(Guid.CreateVersion7().ToString("D"),job.Generation,action);job=await general.ControlAsync(job.Id,op,ct);var replay=await general.ControlAsync(job.Id,op,ct);Assert(replay.Generation==job.Generation&&job.DeadlineS==originalDeadline,"原操作幂等且不延预算");if(action=="pause"){var before=job.Done;await Task.Delay(550,ct);Assert((await general.GetAsync(job.Id,ct)).Done==before,"暂停确认后不推进");}}
+        _stage="general-reconnect";await client.DisposeAsync();await using var resumed=new RynvekClient(origin);await resumed.LoginAsync(principal,(m,t)=>new(Sign("owner",m,t)),ct);general=new GeneralWorldClient(resumed,world);job=await general.GetAsync(job.Id,ct);Assert(job.Status=="paused"&&job.DeadlineS==originalDeadline,"重登录不续预算");job=await general.ControlAsync(job.Id,new(Guid.CreateVersion7().ToString("D"),job.Generation,"cancel"),ct);Assert(job.Status=="cancelled","明确取消");
+        connected=await general.ConnectAsync(ct);lease=await general.AcquireAsync(connected.HostFence,ct);start=connected.Observation.GetProperty("commit");spec=spec with{SubmissionId=Guid.CreateVersion7().ToString("D"),ExpectedRevision=start.GetProperty("revision").GetUInt64(),ExpectedRoot=start.GetProperty("state_root").GetString()!,Ticks=3,IntervalMs=200};job=await general.StartAsync(connected.HostFence,lease.FencingToken,spec,ct);
+        // 测试只用GET等待后台；SDK自身不含Tick或轮询循环。
+        while(job.Status!="completed"){Assert(job.Status is not ("blocked" or "expired"),"后台拒绝不能冒称成功");await Task.Delay(30,ct);job=await general.GetAsync(job.Id,ct);}
+        var obs=await general.ObserveAsync(ct);Assert(job.Done==3&&job.EnergyUsedQ>0&&obs.GetProperty("commit").GetProperty("state_root").GetString()==job.LastRoot,"原后台实付同根");Emit(new{done=true,world_id=world,tick=obs.GetProperty("commit").GetProperty("tick").GetUInt64(),root=job.LastRoot,paid=job.EnergyUsedQ,storage=job.StorageBackend});
+    }
     private static async Task SelfTest()
     {
         using var fixture = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory,"csharp-wire-v1.json")));
@@ -78,7 +94,10 @@ internal static class Program
         handler.Redirect=true; var refused=false; try { await client.GetWorldAsync(Guid.NewGuid()); } catch(RynvekRequestException e) when(e.Status==302){refused=true;} Assert(refused,"No redirect credential forwarding");
         await client.DisposeAsync(); Assert(!client.IsAuthenticated,"Dispose clears session");
         Reject(()=>new RynvekClient(new Uri("https://user:secret@invalid"))); Reject(()=>new RynvekClient(new Uri("http://remote.invalid")));
-        Emit(new{self_test_groups=3,exact_integers=true,schema_six_tools=true,transport_boundaries=true});
+        handler.Redirect=false;
+        var spec=new GeneralRunSpec(Guid.CreateVersion7().ToString("D"),ulong.MaxValue,new string('0',64),3,120,200,"1000000000000",GeneralRunSpec.ExplicitConsent);
+        Assert(Wire.Element(spec).GetProperty("expected_revision").GetUInt64()==ulong.MaxValue,"C#耐久规格u64无截断");spec.Validate();Reject(()=>(spec with{MaxEnergyQ="01"}).Validate());Reject(()=>(spec with{Ticks=129}).Validate());Reject(()=>(spec with{Consent=""}).Validate());Reject(()=>new GeneralRunOperation(Guid.CreateVersion7().ToString("D"),0,"tick").Validate());
+        Emit(new{self_test_groups=4,general_run_boundaries=true,exact_integers=true,schema_six_tools=true,transport_boundaries=true});
     }
     private sealed class RecordingHandler : HttpMessageHandler
     {

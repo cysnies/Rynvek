@@ -66,3 +66,16 @@ RYNVEK_DOTNET=/workspace/tooling/dotnet/dotnet cargo test -p rynvek-server --tes
 自检3组：精确u64/i64/Q32.32/2^96与跨语言鉴权字节、六schema构造/严格拒绝、头内凭据/重定向拒绝/销毁边界（传输夹具）。Rust2项：权威鉴权/schema跨语言夹具；**实际编译C#进程**通过本机真实服务完成注册持有证明/挑战验签取会话、HTTP私有世界、超过2^53的真实seed、WS入座/租约/fog、真实单位位移、查询结果、间隔30Tick后战略HoldPosition/真实order、交还、断开清理、同主体重新登录/原位置同match、他人私有404及真实终局。后者外部前提是.NET10及已构建DLL，普通cargo默认ignored，本阶段显式启用并实际运行，不把跳过当通过。测试签名器由Rust持有临时测试key，经stdin回签公开协议消息，**C#自己取真实会话，未借Rust会话令牌**；不碰用户真实私钥。
 
 未全workspace/Clippy/license/SBOM/soak/CI轮询，未重编WASM/Vite；真实浏览器/GPU/音频硬件/PG/多机/掉电/24h、Windows/macOS、发布NuGet未验/未做。本段未覆盖二进制Rynvek Link/WebTransport、排位/多人/观战、私有Agent包构建验签或全部Studio/Lab API，不冒称完整全域C# SDK。下一按依赖接音频主体；Pi Agent Core参考与后续Agent控制面选择记录同一ACTIVE_DEVELOPMENT/Page，不因参考建议推倒当前SDK。
+
+
+## General服务器耐久规则主体（阶段59）
+
+`GeneralWorldClient(client, worldId)` 复用同一个正式挑战认证/安全HTTP传输，提供 `ObserveAsync`、显式 `ConnectAsync`/`AcquireAsync`，以及 `StartAsync`、`GetAsync`、`LookupAsync`、`ControlAsync`。每次只发一个动作，无自动获取lease/循环Tick/重试。`GeneralRunSpec`、`GeneralRunOperation`为不可变record，u64修订/fence、规则费用与PrincipalId保持精确；查询检查世界/所有者/运行ID/预算/持久等级，启动检查精确规格，控制检查原operation收据。
+
+调用者须显式保留原submission UUIDv7/双fence/精确观察根、全部预算与 `GeneralRunSpec.ExplicitConsent`；费用只累计原规则paid_q，非世界总能耗。控制动作仅pause/resume/cancel，调用者保留原operation UUIDv7/generation；失败先只读对账，不自动换键。Memory仍仅进程内，PG持久性仍依赖原服务器Store+私有CAS；C#对象重新登录不是PG或服务进程恢复证明。
+
+本批真实.NET SDK10.0.404编译0警告、4组自检；`csharp_sdk`三项显式include-ignored通过，其中新C#进程自己两次真实挑战登录（只把公开挑战交给临时测试签名器，未借Rust Bearer），经真实HTTP启动128步有界意图、暂停/恢复/暂停/取消、操作重放、断开重登录只读对账，再新意图后台完成3实付Tick并与原Store同根。原PvE/fog/六工具/原Actor重连仍实际通过。
+
+工具恢复：本箱旧SDK的SourceLink `Microsoft.Build.Tasks.Git/build`目录缺失。正常从微软10.0.404发布元数据获取官方Linux x64包，SHA512核验后解压到独立 `/workspace/rynvek-tools/dotnet-10.0.404`，保留旧目录与归档；未关闭SourceLink或保护。可将上文命令中的工具路径换为此目录。
+
+C#尚未覆盖私有规则RYPK签名发布/完整依赖验签安装/隔离换装用户链；General所有者观察不是给driver的fog观察，也不新增协作者耐久授权。QuickJS(WASM)、真实浏览器/GPU、PG多机断电长稳、NuGet/跨OS及完整发布门禁依旧未完成。
