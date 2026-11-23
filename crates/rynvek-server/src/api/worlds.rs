@@ -585,6 +585,7 @@ pub async fn authoring(State(app): State<AppState>, headers: HeaderMap, Path(id)
     let mut params = BTreeMap::new();
     for(id,t)in &world.authoring.parameter_templates {params.insert(format!("rules.templates.{id}"),serde_json::to_string(t).unwrap());}
     for(id,i)in &world.authoring.parameter_instances {params.insert(format!("rules.instances.{id}"),serde_json::to_string(i).unwrap());}
+    for(id,b)in &world.authoring.tier1_rules {params.insert(format!("rules.tier1.{id}"),serde_json::to_string(b).unwrap());}
     for(id,b)in &world.authoring.rule_bindings {params.insert(format!("rules.bindings.{id}"),serde_json::to_string(b).unwrap());}
     if let Some(ecology) = &world.config.ecology {
         params.insert(
@@ -667,4 +668,29 @@ pub async fn lab_parameter_model(
         axum::http::HeaderValue::from_static("Authorization, X-Rynvek-Studio-Grant"),
     );
     Ok(response)
+}
+
+/// 只构建原RYPK，不求值、不安装、不取得运行席位；安装仍走原Epoch补丁与权限复核。
+pub async fn build_tier1(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<rynvek_rts::world::tier1::Tier1Draft>,
+) -> ApiResult<Response> {
+    let (_, row, permit) = super::studio_collaboration::admission(&app, &headers, &id, true).await?;
+    let install = body
+        .build()
+        .map_err(|e| ApiError::new(e, "Tier1容器/资源/访问声明无效"))?;
+    let checked = install.checked().map_err(|e| ApiError::new(e, "Tier1制品校验失败"))?;
+    app.store().check_editor(row.world_id, permit).await?;
+    let mut r=Json(serde_json::json!({"install":install,"artifact_blake3":hex(&checked.artifact_hash),"profile":checked.access.profile,"executed":false})).into_response();
+    r.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, no-store"),
+    );
+    r.headers_mut().insert(
+        axum::http::header::VARY,
+        axum::http::HeaderValue::from_static("Authorization, X-Rynvek-Studio-Grant"),
+    );
+    Ok(r)
 }

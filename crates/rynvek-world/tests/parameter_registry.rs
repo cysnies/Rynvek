@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
-use rynvek_core::Blake3Hash;
+use rynvek_core::{Blake3Hash,RynvekErrorCode};
 use rynvek_rts::{ArenaWorld, MatchConfig, runtime::ArenaRuntime};
 use rynvek_world::{HlcTimestamp, LiveEditSafetyClass, WorldPatch, WorldPatchOp};
 use serde_json::{Value, json};

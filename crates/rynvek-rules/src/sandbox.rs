@@ -98,6 +98,18 @@ fn host_error(msg: impl Into<String>) -> RuleError {
 impl QuickJsSandbox {
     /// 加载规则脚本；脚本须定义全局函数 `tick(input)`
     pub fn new(source: &str, config: QuickJsSandboxConfig) -> RuleResult<Self> {
+        let sandbox = Self::build(source, config)?;
+        sandbox.with_fresh_context(|ctx| {
+            let tick: Value = ctx.globals().get("tick").map_err(|e| host_error(e.to_string()))?;
+            if tick.is_function() { Ok(()) } else { Err(host_error("规则脚本未定义全局函数 tick(input)")) }
+        })?;
+        Ok(sandbox)
+    }
+    /// 权威单次调用不先执行一遍顶层预检，整份源只在同一预算Context内执行一次。
+    pub fn run_once(source: &str, input_json: &str, config: QuickJsSandboxConfig) -> RuleResult<SandboxTickOutput> {
+        Self::build(source, config)?.run_tick(input_json)
+    }
+    fn build(source: &str, config: QuickJsSandboxConfig) -> RuleResult<Self> {
         let runtime = Runtime::new().map_err(|e| host_error(format!("QuickJS 运行时创建失败：{e}")))?;
         runtime.set_memory_limit(config.heap_limit_bytes);
         runtime.set_max_stack_size(config.stack_limit_bytes);
@@ -115,15 +127,6 @@ impl QuickJsSandbox {
             runtime,
             polls,
         };
-        // 预检：脚本可加载且定义了 tick
-        sandbox.with_fresh_context(|ctx| {
-            let tick: Value = ctx.globals().get("tick").map_err(|e| host_error(e.to_string()))?;
-            if tick.is_function() {
-                Ok(())
-            } else {
-                Err(host_error("规则脚本未定义全局函数 tick(input)"))
-            }
-        })?;
         Ok(sandbox)
     }
 

@@ -14,7 +14,8 @@ publish.workspace = true
 arrow = ["dep:arrow", "dep:parquet", "dep:bytes"]
 
 [dependencies]
-rynvek-rules.workspace = true
+# 权威Tier1组件规则必须启用原QuickJS，不进行静默降级。
+rynvek-rules = { workspace = true, features = ["quickjs"] }
 arrow = { workspace = true, optional = true }
 blake3.workspace = true
 bytes = { version = "1", optional = true }

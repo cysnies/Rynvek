@@ -22,6 +22,7 @@ pub mod coord;
 pub mod error;
 pub mod fixed;
 pub mod hash;
+pub mod package;
 pub mod rng;
 pub mod units;
 

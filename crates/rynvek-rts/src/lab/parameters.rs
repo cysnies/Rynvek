@@ -13,7 +13,7 @@ use rynvek_rules::ir::ValueType;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const MODEL_SCHEMA: &str = "rynvek.lab-parameter-model.v1";
+pub const MODEL_SCHEMA: &str = "rynvek.lab-parameter-model.v2";
 pub const MAX_PARAMETER_ROWS: usize = 200_000;
 const MAX_MODEL_BYTES: usize = 256 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -28,8 +28,9 @@ pub struct ParameterModel {
     pub schema: String,
     pub templates: BTreeMap<String, ParameterTemplate>,
     pub instances: BTreeMap<String, ParameterInstance>,
-    /// Original bounded RuleGraph JSON, never a script, package URL or executable.
+    /// Tier0原RuleGraph；Tier1制品单列且不读取URL或共享运行时状态。
     pub rules: BTreeMap<String, String>,
+    pub tier1: BTreeMap<String, crate::world::tier1::Tier1Install>,
     pub bindings: BTreeMap<String, RuleBinding>,
     pub outputs: Vec<ParameterOutput>,
 }
@@ -37,7 +38,7 @@ impl ParameterModel {
     pub fn compile(&self) -> Result<AuthoringState, String> {
         if self.schema != MODEL_SCHEMA
             || self.instances.is_empty()
-            || self.bindings.is_empty()
+            || (self.bindings.is_empty() && self.tier1.is_empty())
             || self.rules.len() > 32
             || self.templates.len() > 16
             || self.instances.len() > 128
@@ -52,6 +53,7 @@ impl ParameterModel {
             parameter_templates: self.templates.clone(),
             parameter_instances: self.instances.clone(),
             rule_bindings: self.bindings.clone(),
+            tier1_rules: self.tier1.clone(),
             ..Default::default()
         };
         for (id, source) in &self.rules {
@@ -93,6 +95,7 @@ impl ParameterModel {
             templates: source.parameter_templates.clone(),
             instances: source.parameter_instances.clone(),
             bindings: source.rule_bindings.clone(),
+            tier1: source.tier1_rules.clone(),
             rules: modules
                 .into_iter()
                 .map(|id| {

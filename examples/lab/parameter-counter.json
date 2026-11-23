@@ -1,5 +1,6 @@
 {
-  "schema": "rynvek.lab-parameter-model.v1",
+  "schema": "rynvek.lab-parameter-model.v2",
+  "tier1": {},
   "templates": {
     "model.counter": {
       "schema": "rynvek.parameter-template.v1",

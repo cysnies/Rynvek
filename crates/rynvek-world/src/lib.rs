@@ -18,7 +18,8 @@
 
 pub mod authoring;
 pub mod federation;
-pub mod package;
+// 容器唯一实现下沉内核，World与权威规则共用，避免依赖环与重复解析器。
+pub use rynvek_core::package;
 pub mod partition;
 pub mod rworld;
 pub mod wgsl_review;

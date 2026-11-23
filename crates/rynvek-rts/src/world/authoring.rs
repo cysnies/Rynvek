@@ -31,6 +31,7 @@ pub struct AuthoringState {
     /// 最近创作提交的权威修订；普通Tick不使安全边界排队的编辑自行过期。
     pub last_edit_revision: u64,
     pub rules: BTreeMap<String, AuthoredRule>,
+    pub tier1_rules: BTreeMap<String, super::tier1::Tier1Install>,
     pub parameter_templates: BTreeMap<String, super::parameter_rules::ParameterTemplate>,
     pub parameter_instances: BTreeMap<String, super::parameter_rules::ParameterInstance>,
     pub rule_bindings: BTreeMap<String, super::parameter_rules::RuleBinding>,
@@ -137,7 +138,10 @@ impl ArenaWorld {
     }
     pub(super) fn step_authored_rules_budgeted(&mut self, gas_budget: u64) {
         let mut remaining = gas_budget;
+        self.parameter_state.tier1_gas_charged = 0;
+        let original = self.parameter_state.clone();
         self.step_parameter_rules(&mut remaining);
+        if self.parameter_state.fault.is_none() { self.step_tier1_rules(&original, &mut remaining); }
         if self.parameter_state.fault.is_some() {
             return; // 失败的参数候选已用过预算，不允许后续动作规则重新使用该份额度。
         }

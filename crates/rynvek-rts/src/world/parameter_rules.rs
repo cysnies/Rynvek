@@ -45,6 +45,7 @@ pub struct ParameterEntity {
 #[serde(deny_unknown_fields)]
 pub struct ParameterState {
     pub next_serial: u32,
+    pub tier1_gas_charged: u64,
     pub entities: BTreeMap<String, ParameterEntity>,
     pub fault: Option<(String, u16)>,
 }
@@ -126,6 +127,7 @@ impl AuthoringState {
         if total_gas > DEFAULT_TICK_GAS_BUDGET {
             return Err(RynvekErrorCode::PluginCapabilityDenied);
         }
+        self.validate_tier1(&mut writes)?;
         Ok(())
     }
 }
@@ -153,18 +155,18 @@ impl ParameterState {
         if self
             .fault
             .as_ref()
-            .is_some_and(|(id, _)| !defs.rule_bindings.contains_key(id))
+            .is_some_and(|(id, _)| !defs.rule_bindings.contains_key(id) && !id.strip_prefix("tier1:").is_some_and(|i| defs.tier1_rules.contains_key(i)))
         {
             self.fault = None;
         }
         self.validate(defs)
     }
     pub fn validate(&self, defs: &AuthoringState) -> Result<()> {
-        if self.entities.len() != defs.parameter_instances.len()
+        if self.tier1_gas_charged > DEFAULT_TICK_GAS_BUDGET || self.entities.len() != defs.parameter_instances.len()
             || self
                 .fault
                 .as_ref()
-                .is_some_and(|(id, _)| !defs.rule_bindings.contains_key(id))
+                .is_some_and(|(id, _)| !defs.rule_bindings.contains_key(id) && !id.strip_prefix("tier1:").is_some_and(|i| defs.tier1_rules.contains_key(i)))
         {
             return Err(INVALID);
         }
@@ -238,6 +240,7 @@ pub fn apply_registry_param(
     }
     apply!("rules.templates.", parameter_templates, ParameterTemplate);
     apply!("rules.bindings.", rule_bindings, RuleBinding);
+    apply!("rules.tier1.", tier1_rules, super::tier1::Tier1Install);
     Err(RynvekErrorCode::PluginCapabilityDenied)
 }
 impl ArenaWorld {

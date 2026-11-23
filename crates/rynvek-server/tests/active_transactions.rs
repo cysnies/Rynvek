@@ -22,11 +22,14 @@ struct Fixture {
     other: User,
     host: MatchHandle,
     a: StreamClient,
-    _b: StreamClient,
+    _b: Option<StreamClient>,
 }
 
 impl Fixture {
-    async fn new() -> Self {
+    async fn new() -> Self { Self::new_with_pve(false).await }
+
+    // 原私有PvE单人宿主，正常建立席位与fence，不借缺排位租约的PvP夹具。
+    async fn new_with_pve(pve:bool) -> Self {
         let server = start_server(false).await;
         let base = server.base_url();
         let owner = register(&base, "editor-owner", "human", 71).await;
@@ -35,7 +38,7 @@ impl Fixture {
             "POST",
             &format!("{base}/api/v1/worlds"),
             Some(&owner.token),
-            &json!({"title":"活动事务回归", "template":"arena_duel", "map_seed":42,"visibility":"Public"}),
+            &json!({"title":"活动事务回归", "template":if pve {"arena_pve"}else{"arena_duel"}, "map_seed":42,"visibility":if pve {"Private"}else{"Public"}}),
         )
         .await
         .unwrap();
@@ -49,7 +52,7 @@ impl Fixture {
                 MatchRow {
                     match_id,
                     world_id,
-                    game_mode: "PvP_Custom".into(),
+                    game_mode: if pve {"PvE_Survival"}else{"PvP_Custom"}.into(),
                     ruleset_blake3: rynvek_server::app::arena_ruleset_hash(),
                     map_seed: 42,
                     match_state: MatchState::Created,
@@ -62,6 +65,7 @@ impl Fixture {
                 },
                 [&owner, &other]
                     .iter()
+                    .take(if pve {1}else{2})
                     .enumerate()
                     .map(|(i, u)| ParticipantRow {
                         match_id,
@@ -81,9 +85,10 @@ impl Fixture {
             world_id,
             league: League::Human,
             ruleset_hash: rynvek_server::app::arena_ruleset_hash(),
-            config: MatchConfig::duel(42),
+            config: if pve {MatchConfig::pve(42,1)}else{MatchConfig::duel(42)},
             seats: [&owner, &other]
                 .iter()
+                .take(if pve {1}else{2})
                 .enumerate()
                 .map(|(i, u)| SeatSpec {
                     faction: i as u8,
@@ -101,14 +106,14 @@ impl Fixture {
             rynvek_network::websocket::connect(&url).await.unwrap(),
             owner.principal_id,
         );
-        let mut b = StreamClient::new(
+        let mut b = if pve {None}else{Some(StreamClient::new(
             rynvek_network::websocket::connect(&url).await.unwrap(),
             other.principal_id,
-        );
+        ))};
         a.hello(owner.token_bytes(), world_id, 0).await;
-        b.hello(other.token_bytes(), world_id, 1).await;
+        if let Some(b)=b.as_mut(){b.hello(other.token_bytes(), world_id, 1).await;}
         let _ = a.recv_on(WireChannelId::Control, |_| {}).await;
-        let _ = b.recv_on(WireChannelId::Control, |_| {}).await;
+        if let Some(b)=b.as_mut(){let _=b.recv_on(WireChannelId::Control, |_| {}).await;}
         tokio::time::timeout(
             Duration::from_secs(10),
             host.wait_for(|s| s.state == MatchState::Running),
@@ -655,4 +660,123 @@ fn ecology_authoring_change_replays_same_wal_without_relaxing_normal_config_free
     assert_eq!(record.replay(&before).unwrap().state_root(), candidate.state_root());
     record.format = "rynvek-tick/1".into();
     assert!(record.replay(&before).is_err(), "新回执结构不默默读取旧WAL版本");
+}
+
+#[tokio::test]
+async fn tier1_private_build_explicit_epoch_tick_and_wal_restore() {
+    let f = Fixture::new_with_pve(true).await;
+    let url = format!(
+        "{}/api/v1/worlds/{}/authoring/build-tier1",
+        f.server.base_url(),
+        f.host.world_id
+    );
+    let draft = json!({"package_id":"local.counter","version":"0.1.0","template_id":"model.counter","reads":["state.total","param.rate"],"writes":["state.total"],"source_js":include_str!("../../../examples/rules/tier1-counter.js"),"source_ts":include_str!("../../../examples/rules/tier1-counter.ts")});
+    assert_eq!(
+        client::send_json("POST", &url, Some(&f.other.token), &draft)
+            .await
+            .unwrap()
+            .status,
+        404
+    );
+    let built = client::send_json("POST", &url, Some(&f.owner.token), &draft)
+        .await
+        .unwrap();
+    assert_eq!(built.status, 200, "{}", String::from_utf8_lossy(&built.body));
+    assert!(
+        built
+            .headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("cache-control") && v == "private, no-store")
+    );
+    let built = built.json().unwrap();
+    assert_eq!(built["executed"], false);
+    let initial=f.runtime().await;assert!(initial.world().authoring.tier1_rules.is_empty());
+    let initial=initial.checkpoint().unwrap();let disk=tempfile::tempdir().unwrap();
+    let anchor=disk.path().join("genesis.ryn1");std::fs::write(&anchor,&initial.bytes).unwrap();
+
+    let m: rynvek_rts::lab::ParameterModel =
+        serde_json::from_str(include_str!("../../../examples/lab/parameter-counter.json")).unwrap();
+    let op = |key: &str, value: serde_json::Value| WorldPatchOp::SetWorldParam {
+        key_path: key.into(),
+        new_value_json: value.to_string(),
+    };
+    let mut input = patch(45, 0, 100);
+    input.safety_class = rynvek_world::LiveEditSafetyClass::EpochBoundarySafe;
+    input.operations = vec![
+        op(
+            "rules.templates.model.counter",
+            serde_json::to_value(&m.templates["model.counter"]).unwrap(),
+        ),
+        op(
+            "rules.instances.counter.one",
+            serde_json::to_value(&m.instances["counter.one"]).unwrap(),
+        ),
+        op("rules.tier1.counter.script", built["install"].clone()),
+    ];
+    let pending = f.post(&input);
+    f.queued(1).await;
+    f.host.advance(3).await.unwrap();
+    assert!(!pending.is_finished());
+    assert!(f.runtime().await.world().authoring.tier1_rules.is_empty());
+    f.host.advance(1).await.unwrap();
+    let ack = pending.await.unwrap();
+    assert_eq!(ack.status, 200, "{}", String::from_utf8_lossy(&ack.body));
+    assert_eq!(ack.json().unwrap()["effective_tick"], 4);
+    f.host.advance(2).await.unwrap();
+    let r = f.runtime().await;
+    assert_eq!(r.state_root(), f.host.status().state_root);
+    assert_eq!(r.world().parameter_state.entities["counter.one"].values["state.total"],9);
+    assert!((10000..=500000).contains(&r.world().parameter_state.tier1_gas_charged));
+    assert_eq!(
+        serde_json::to_value(
+            &rynvek_rts::lab::ParameterModel::capture(&r.world().authoring)
+                .unwrap()
+                .tier1["counter.script"]
+        )
+        .unwrap(),
+        built["install"]
+    );
+    let view = client::get(
+        &format!("{}/api/v1/worlds/{}/authoring", f.server.base_url(), f.host.world_id),
+        Some(&f.owner.token),
+    )
+    .await
+    .unwrap();
+    assert_eq!(view.status, 200);
+    let view = view.json().unwrap();
+    assert!(
+        view["baseline"]["params"]["rules.tier1.counter.script"]
+            .as_str()
+            .unwrap()
+            .contains(built["install"]["package_hex"].as_str().unwrap())
+    );
+    let mut deletion = patch(46, f.host.status().revision, 100);
+    deletion.safety_class = input.safety_class;
+    deletion.operations = vec![op("rules.tier1.counter.script", serde_json::Value::Null)];
+    let pending = f.post(&deletion);
+    f.queued(1).await;
+    f.host.advance(2).await.unwrap();
+    assert_eq!(pending.await.unwrap().status, 200);
+    let r = f.runtime().await;
+    let n = r.world().parameter_state.entities["counter.one"].values["state.total"];
+    assert_eq!(n,12);
+    assert!(r.world().authoring.tier1_rules.is_empty());
+    f.host.advance(1).await.unwrap();
+    let r = f.runtime().await;
+    assert_eq!(
+        r.world().parameter_state.entities["counter.one"].values["state.total"],
+        n
+    );
+    assert_eq!(r.world().parameter_state.tier1_gas_charged, 0);
+    assert_eq!(r.state_root(), f.host.status().state_root);
+    // 从原始文件锚点重放全部真实已提交WAL，覆盖包安装、运行与删除，不只恢复最新检查点。
+    let mut replayed=ArenaRuntime::restore(f.host.world_id.0,initial.revision,initial.state_root,&std::fs::read(anchor).unwrap()).unwrap();
+    for commit in f.server.state.store().list_commits(f.host.world_id).await.unwrap().into_iter().filter(|c|c.world_revision>initial.revision){
+      let bytes=f.server.state.inner.world_snapshots.get(&Blake3Hash(commit.journal_segment_cid)).unwrap();
+      let path=disk.path().join(format!("{}.wal",commit.world_revision));std::fs::write(&path,bytes).unwrap();let bytes=std::fs::read(path).unwrap();assert_eq!(Blake3Hash::of(&bytes).0,commit.journal_segment_cid);
+      let record:rynvek_server::transactions::TickRecord=serde_json::from_slice(&bytes).unwrap();replayed=record.replay(&replayed).unwrap();assert_eq!(replayed.state_root(),commit.state_root_blake3);
+    }
+    assert_eq!(replayed.state_root(),f.host.status().state_root);
+    f.host.abort("Tier1定向快验结束").await;
+    f.server.shutdown().await;
 }

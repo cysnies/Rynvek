@@ -110,6 +110,7 @@ pub fn router(state: AppState) -> Router {
             "/api/v1/worlds/{world_id}/authoring/compile-rule",
             post(worlds::compile_authoring_rule),
         )
+        .route("/api/v1/worlds/{world_id}/authoring/build-tier1", post(worlds::build_tier1))
         .route("/api/v1/worlds/{world_id}/stream", get(worlds::stream))
         .route(
             "/api/v1/matches/queue",

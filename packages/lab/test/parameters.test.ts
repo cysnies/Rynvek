@@ -22,3 +22,4 @@ it("CAS trajectory decoder keeps signed raw values and exact u64 ticks without f
  expect(()=>parameterMetrics([{...row,faction:0}])).toThrow();expect(()=>parameterMetrics([{...row,parameter_value:32768}])).toThrow();
  expect(()=>parameterMetrics([{...row,tick:9007199254740992}])).toThrow();
 });
+it("Tier1模型v2保留制品，客户端只做结构预检而非容器验签",()=>{const m=fixture();m.rules={};m.bindings={};m.tier1={script:{template_id:"model.counter",package_hex:"ab".repeat(100)}};validateParameterModel(m);m.tier1.script.package_hex="https://invalid.test/file.rpack";expect(()=>validateParameterModel(m)).toThrow();delete m.tier1;expect(()=>validateParameterModel(m)).toThrow();});

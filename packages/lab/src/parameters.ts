@@ -4,9 +4,10 @@ import type {VariantSpec} from "./spec.js";
 /** Same typed World/Rules source registry. The server remains the authoritative compiler. */
 export type ParameterType="I32"|"Q8_8"|"Bool";
 export interface ParameterModel {
- readonly schema:"rynvek.lab-parameter-model.v1";
+ readonly schema:"rynvek.lab-parameter-model.v2";
  readonly templates:Readonly<Record<string,{readonly schema:"rynvek.parameter-template.v1";readonly components:Readonly<Record<string,{readonly ty:ParameterType;readonly default:number}>>}>>;
  readonly instances:Readonly<Record<string,{readonly template_id:string;readonly parameters:Readonly<Record<string,number>>}>>;
+ readonly tier1:Readonly<Record<string,{readonly template_id:string;readonly package_hex:string}>>;
  readonly rules:Readonly<Record<string,string>>;
  readonly bindings:Readonly<Record<string,{readonly module_id:string;readonly template_id:string}>>;
  readonly outputs:readonly {readonly instance_id:string;readonly component:string}[];
@@ -18,9 +19,11 @@ const exact=(v:Record<string,unknown>,names:readonly string[])=>Object.keys(v).l
 function value(ty:ParameterType,v:number):boolean{return Number.isInteger(v)&&(ty==="Bool"?(v===0||v===1):ty==="Q8_8"?(v>=-32768&&v<=32767):ty==="I32"&&v>=-2147483648&&v<=2147483647)}
 /** Structural/value bounds only: RuleGraph compilation, write conflicts and gas are verified by the original server compiler. */
 export function validateParameterModel(input:unknown):asserts input is ParameterModel {
- if(!record(input)||!exact(input,["schema","templates","instances","rules","bindings","outputs"])||input.schema!=="rynvek.lab-parameter-model.v1"||new TextEncoder().encode(JSON.stringify(input)).byteLength>256*1024)throw new Error("无效参数模型schema/256KiB边界");
- for(const [field,min,max] of [["templates",1,16],["instances",1,128],["rules",1,32],["bindings",1,16]] as const){const map=input[field];if(!record(map)||Object.keys(map).length<min||Object.keys(map).length>max||!Object.keys(map).every(key))throw new Error(`模型${field}必须在${min}..${max}且ID有效`);}
+ if(!record(input)||!exact(input,["schema","templates","instances","rules","bindings","tier1","outputs"])||input.schema!=="rynvek.lab-parameter-model.v2"||new TextEncoder().encode(JSON.stringify(input)).byteLength>256*1024)throw new Error("无效参数模型schema/256KiB边界");
+ for(const [field,min,max] of [["templates",1,16],["instances",1,128],["rules",0,32],["bindings",0,16],["tier1",0,4]] as const){const map=input[field];if(!record(map)||Object.keys(map).length<min||Object.keys(map).length>max||!Object.keys(map).every(key))throw new Error(`模型${field}必须在${min}..${max}且ID有效`);}
  const m=input as unknown as ParameterModel;
+ if(Object.keys(m.bindings).length===0&&Object.keys(m.tier1).length===0)throw new Error("模型须有Tier0绑定或Tier1规则");
+ for(const i of Object.values(m.tier1)){if(!record(i)||!exact(i,["template_id","package_hex"])||!Object.hasOwn(m.templates,i.template_id)||typeof i.package_hex!=="string"||i.package_hex.length>24576||! /^(?:[0-9a-f]{2})+$/.test(i.package_hex))throw new Error("Tier1制品/模板非法；原RYPK/声明和冲突由服务端复验");}
  for(const t of Object.values(m.templates)){if(!record(t)||!exact(t,["schema","components"])||t.schema!=="rynvek.parameter-template.v1"||!record(t.components)||!Object.keys(t.components).length||Object.keys(t.components).length>16)throw new Error("无效参数模板");for(const [n,c] of Object.entries(t.components)){if(!key(n)||! /^(state|param)\./.test(n)||!record(c)||!exact(c,["ty","default"])||!value(c.ty,c.default))throw new Error("无效参数组件/精确整数");}}
  for(const i of Object.values(m.instances)){if(!record(i)||!exact(i,["template_id","parameters"])||typeof i.template_id!=="string"||!Object.hasOwn(m.templates,i.template_id)||!record(i.parameters))throw new Error("无效参数实例");for(const [n,v] of Object.entries(i.parameters)){const c=m.templates[i.template_id]!.components[n];if(!n.startsWith("param.")||!c||!value(c.ty,v))throw new Error("实例只允许类型正确的param覆盖");}}
  if(!Object.values(m.rules).every(s=>typeof s==="string"))throw new Error("规则必须为原始RuleGraph JSON字符串");

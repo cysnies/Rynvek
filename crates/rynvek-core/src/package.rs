@@ -26,7 +26,7 @@
 
 use std::collections::BTreeMap;
 
-use rynvek_core::error::RynvekErrorCode;
+use crate::error::RynvekErrorCode;
 use serde::{Deserialize, Serialize};
 
 /// 文件头长度

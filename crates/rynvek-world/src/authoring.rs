@@ -249,6 +249,7 @@ impl WorldPatch {
                     if key_path.starts_with("rules.templates.")
                         || key_path.starts_with("rules.instances.")
                         || key_path.starts_with("rules.bindings.")
+                        || key_path.starts_with("rules.tier1.")
                     {
                         rynvek_rts::world::parameter_rules::apply_registry_param(
                             &mut authored,

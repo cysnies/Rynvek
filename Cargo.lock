@@ -3067,6 +3067,7 @@ dependencies = [
  "blake3",
  "bytemuck",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
