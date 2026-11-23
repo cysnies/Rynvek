@@ -49,3 +49,5 @@ pub mod visual_package;
 pub mod general_host;
 
 pub mod rule_package;
+
+pub mod private_rule_client;

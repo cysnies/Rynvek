@@ -434,6 +434,18 @@ pub async fn installed_permits(app: &AppState, owner: u64, world: &SimulationEng
             pins.insert(pin.id.clone(), pin);
         }
     }
+    if let Some(recovery) = &rules.recovery {
+        let (evidence, resolved) = historical(app, owner, recovery.evidence_cid).await?;
+        let proposed = graphs(&evidence.request, &resolved)?;
+        if !proposed.keys().eq(rules.config.rule_graphs.keys()) || !rules.config.tier1_rules.is_empty() {
+            return Err(conflict("隔离维护必须有完整Tier0替换计划"));
+        }
+        // 历史撤销图只存档、不执行；原提交锁仍逐一守卫实际待激活包，绝不放宽其撤销检查。
+        return Ok(vec![RulePermit {
+            owner_id: owner,
+            pins: resolved.pins,
+        }]);
+    }
     Ok(if pins.is_empty() {
         vec![]
     } else {

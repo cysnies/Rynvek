@@ -79,6 +79,7 @@ async fn acquire(s: &RunningServer, u: &User, id: WireUuid, h: u64, level: &str)
 fn input(u: &User, h: u64, l: u64, tick: u64, commands: Vec<PhysicsCommand>) -> GeneralInput {
     GeneralInput {
         install: None,
+        recovery: None,
         host_fence: h,
         control_fence: l,
         envelope: CommandEnvelope {
@@ -743,5 +744,322 @@ async fn exact_dag_rejects_conflicting_diamond_cycles_and_depth_without_new_pars
         .status,
         400
     );
+    s.shutdown().await;
+}
+
+#[tokio::test]
+async fn explicit_paid_quarantine_reaches_epoch_without_revoked_vm_free_ticks_or_automatic_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let s = start(store.clone(), dir.path()).await;
+    let u = register(&s.base_url(), "rule-quarantine", "human", 109).await;
+    let old = published(&s, &u, &pack("rules.quarantine.old", &root_graph()), vec![]).await;
+    let new = published(&s, &u, &pack("rules.quarantine.new", &root_graph()), vec![]).await;
+    let id = create(&s, &u, &rules()).await;
+    let h = connect(&s, &u, id).await;
+    let l = acquire(&s, &u, id, h, "Sovereign").await;
+    first_three(&s, &u, id, h, l).await;
+    let old_input = install(&u, h, l, 3, &old, &[("rules.quarantine.old", "steer")]);
+    assert_eq!(install_action(&s, &u, id, &old_input).await.status, 200);
+    assert_eq!(step(&s, &u, id, &input(&u, h, l, 4, vec![])).await.status, 200);
+    let client = rynvek_server::private_rule_client::PrivateRuleClient::new(
+        &s.base_url(),
+        u.principal_id,
+        u.key.public_key(),
+        u.token.clone(),
+    )
+    .unwrap();
+    let req = RuleInstallRequest {
+        root: new.reference(),
+        modules: BTreeMap::from([("rules.quarantine.new".into(), "steer".into())]),
+    };
+    let before = view(&s, &u, id).await;
+    let key = IdempotencyKey::new(new_uuid_v7()).unwrap();
+    assert!(
+        client
+            .install(&id.to_string(), h, l, 5, key, req.clone(), true)
+            .await
+            .is_err(),
+        "未撤销不可廉价跳过规则"
+    );
+    assert_eq!(request_revoke(&s, &u, &old).await, 200);
+    assert_ne!(step(&s, &u, id, &input(&u, h, l, 5, vec![])).await.status, 200);
+    let q = client
+        .install(&id.to_string(), h, l, 5, key, req.clone(), true)
+        .await
+        .unwrap();
+    assert_eq!(q["commit"]["tick"], 6);
+    let paused = view(&s, &u, id).await;
+    assert_eq!(paused["rule_meter"]["tier0_gas"], 0);
+    assert_eq!(paused["rule_meter"]["paid_q"], 0);
+    assert_eq!(paused["rule_recovery"]["maintenance_paid_q"], 4);
+    assert_eq!(paused["rule_recovery"]["epoch_tick"], 8);
+    assert_eq!(paused["bodies"][0]["body"]["acceleration_q32"], json!([0, 0]));
+    assert_eq!(paused["components"], before["components"]);
+    assert_eq!(paused["life"]["genesis_energy_q"], paused["life"]["universe_energy_q"]);
+    assert_ne!(step(&s, &u, id, &input(&u, h, l, 6, vec![])).await.status, 200);
+    assert_eq!(view(&s, &u, id).await, paused);
+    s.shutdown().await;
+    let s = start(store.clone(), dir.path()).await;
+    assert_eq!(view(&s, &u, id).await, paused);
+    let h = connect(&s, &u, id).await;
+    let l = acquire(&s, &u, id, h, "Sovereign").await;
+    let client = rynvek_server::private_rule_client::PrivateRuleClient::new(
+        &s.base_url(),
+        u.principal_id,
+        u.key.public_key(),
+        u.token.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        client
+            .install(&id.to_string(), h, l, 5, key, req.clone(), true)
+            .await
+            .unwrap()["duplicate"],
+        true
+    );
+    client
+        .install(
+            &id.to_string(),
+            h,
+            l,
+            6,
+            IdempotencyKey::new(new_uuid_v7()).unwrap(),
+            req.clone(),
+            true,
+        )
+        .await
+        .unwrap();
+    let paused7 = view(&s, &u, id).await;
+    assert_eq!(paused7["commit"]["tick"], 7);
+    assert!(
+        client
+            .install(
+                &id.to_string(),
+                h,
+                l,
+                7,
+                IdempotencyKey::new(new_uuid_v7()).unwrap(),
+                req.clone(),
+                true
+            )
+            .await
+            .is_err(),
+        "不得以维护越过Epoch"
+    );
+    client
+        .install(
+            &id.to_string(),
+            h,
+            l,
+            7,
+            IdempotencyKey::new(new_uuid_v7()).unwrap(),
+            req,
+            false,
+        )
+        .await
+        .unwrap();
+    let active = view(&s, &u, id).await;
+    assert_eq!(active["commit"]["tick"], 8);
+    assert_eq!(active["rule_recovery"], Value::Null);
+    assert!(active["rule_meter"]["paid_q"].as_u64().unwrap() > 0);
+    assert_eq!(active["life"]["genesis_energy_q"], active["life"]["universe_energy_q"]);
+    s.shutdown().await;
+    let s = start(store, dir.path()).await;
+    assert_eq!(view(&s, &u, id).await, active);
+    s.shutdown().await;
+}
+
+async fn actual_rule_sdk(payload: Value) -> Value {
+    tokio::task::spawn_blocking(move || {
+        use std::io::Write;
+        let mut child = std::process::Command::new("node")
+            .arg("packages/agent-sdk/test/private-rule-e2e.mjs")
+            .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        serde_json::from_slice(&output.stdout).unwrap()
+    })
+    .await
+    .unwrap()
+}
+#[tokio::test]
+#[ignore = "跨TS SDK真实HTTP：先pnpm --filter @rynvek/agent-sdk build，再显式运行；Node22另须实证"]
+async fn actual_ts_sdk_signed_publish_trusted_download_lossless_u64_paid_quarantine_epoch_and_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let s = start(store.clone(), dir.path()).await;
+    let u = register(&s.base_url(), "rule-sdk-user", "human", 110).await;
+    assert!(u.principal_id > 9_007_199_254_740_991);
+    let id = create(&s, &u, &bundle_world()).await;
+    let dep = pack("rules.sdk.old-dep", &support_graph());
+    let md = manifest(&u, &dep, vec![]);
+    let root = pack("rules.sdk.old-root", &root_graph());
+    let mr = manifest(&u, &root, vec![md.reference()]);
+    let next_dep = pack("rules.sdk.new-dep", &support_graph());
+    let nd = manifest(&u, &next_dep, vec![]);
+    let next_root = pack("rules.sdk.new-root", &root_graph());
+    let nr = manifest(&u, &next_root, vec![nd.reference()]);
+    let old = RuleInstallRequest {
+        root: mr.reference(),
+        modules: BTreeMap::from([
+            ("rules.sdk.old-root".into(), "steer".into()),
+            ("rules.sdk.old-dep".into(), "support".into()),
+        ]),
+    };
+    let next = RuleInstallRequest {
+        root: nr.reference(),
+        modules: BTreeMap::from([
+            ("rules.sdk.new-root".into(), "steer".into()),
+            ("rules.sdk.new-dep".into(), "support".into()),
+        ]),
+    };
+    let packages=[(md.clone(),dep),(mr,root),(nd,next_dep),(nr,next_root)].into_iter().map(|(m,b)|json!({"signingMessage":rynvek_server::ids::hex(&rp::signing_message(&m,&b).unwrap()),"manifest":m,"bytes":base64::engine::general_purpose::STANDARD.encode(b)})).collect::<Vec<_>>();
+    let r=actual_rule_sdk(json!({"mode":"start","base":s.base_url(),"owner":u.principal_id.to_string(),"trustedKey":rynvek_server::ids::hex(&u.key.public_key()),"testSeed":rynvek_server::ids::hex(&u.key.seed()),"token":u.token,"world":id.to_string(),"old":old,"next":next,"oldDependency":md.reference(),"packages":packages})).await;
+    assert_eq!(r["observation"], view(&s, &u, id).await);
+    s.shutdown().await;
+    let s = start(store.clone(), dir.path()).await;
+    let r=actual_rule_sdk(json!({"mode":"resume","base":s.base_url(),"owner":u.principal_id.to_string(),"trustedKey":rynvek_server::ids::hex(&u.key.public_key()),"token":u.token,"world":id.to_string(),"next":next})).await;
+    let expected = view(&s, &u, id).await;
+    assert_eq!(r["observation"], expected);
+    s.shutdown().await;
+    let s = start(store, dir.path()).await;
+    assert_eq!(view(&s, &u, id).await, expected);
+    s.shutdown().await;
+}
+
+#[tokio::test]
+async fn pending_quarantine_release_revoked_after_resolve_still_fails_original_commit_guard() {
+    use rynvek_server::store::{CommitRow, EditorPermit};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let s = start(store.clone(), dir.path()).await;
+    let u = register(&s.base_url(), "quarantine-guard", "human", 113).await;
+    let old = published(&s, &u, &pack("rules.pause.old", &root_graph()), vec![]).await;
+    let pending = published(&s, &u, &pack("rules.pause.pending", &root_graph()), vec![]).await;
+    let final_root = published(&s, &u, &pack("rules.pause.final", &root_graph()), vec![]).await;
+    let cfg = rules();
+    let id = create(&s, &u, &cfg).await;
+    let h = connect(&s, &u, id).await;
+    let l = acquire(&s, &u, id, h, "Sovereign").await;
+    first_three(&s, &u, id, h, l).await;
+    assert_eq!(
+        install_action(&s, &u, id, &install(&u, h, l, 3, &old, &[("rules.pause.old", "steer")]))
+            .await
+            .status,
+        200
+    );
+    assert_eq!(step(&s, &u, id, &input(&u, h, l, 4, vec![])).await.status, 200);
+    request_revoke(&s, &u, &old).await;
+    let client = rynvek_server::private_rule_client::PrivateRuleClient::new(
+        &s.base_url(),
+        u.principal_id,
+        u.key.public_key(),
+        u.token.clone(),
+    )
+    .unwrap();
+    let request = RuleInstallRequest {
+        root: pending.reference(),
+        modules: BTreeMap::from([("rules.pause.pending".into(), "steer".into())]),
+    };
+    client
+        .install(
+            &id.to_string(),
+            h,
+            l,
+            5,
+            IdempotencyKey::new(new_uuid_v7()).unwrap(),
+            request.clone(),
+            true,
+        )
+        .await
+        .unwrap();
+    let mut engine = cfg.instantiate(id.0).unwrap();
+    for c in store.list_commits(id).await.unwrap().into_iter().skip(1) {
+        let b = s
+            .state
+            .inner
+            .world_snapshots
+            .get(&Blake3Hash(c.journal_segment_cid))
+            .unwrap();
+        engine = serde_json::from_slice::<GeneralTickRecord>(&b)
+            .unwrap()
+            .replay(&engine)
+            .unwrap();
+    }
+    let plan = rp::prepare_install(&s.state, u.principal_id, &request).await.unwrap();
+    let mut candidate = engine
+        .candidate_with_rule_recovery(plan.evidence_cid, &plan.graphs)
+        .unwrap();
+    let permits = rp::installed_permits(&s.state, u.principal_id, &candidate)
+        .await
+        .unwrap();
+    assert_eq!(permits[0].pins[0].id, "rules.pause.pending");
+    candidate.tick().unwrap();
+    let before = view(&s, &u, id).await;
+    request_revoke(&s, &u, &pending).await;
+    assert!(
+        store
+            .append_commit_guarded(
+                CommitRow {
+                    world_id: id,
+                    world_revision: 7,
+                    tick: 7,
+                    parent_revision: Some(6),
+                    state_root_blake3: candidate.parent_commit_hash,
+                    journal_segment_cid: [0; 32],
+                    snapshot_cid: None
+                },
+                h,
+                vec![EditorPermit {
+                    principal_id: u.principal_id,
+                    grant_id: None
+                }],
+                permits
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(view(&s, &u, id).await, before);
+    let next = RuleInstallRequest {
+        root: final_root.reference(),
+        modules: BTreeMap::from([("rules.pause.final".into(), "steer".into())]),
+    };
+    client
+        .install(
+            &id.to_string(),
+            h,
+            l,
+            6,
+            IdempotencyKey::new(new_uuid_v7()).unwrap(),
+            next.clone(),
+            true,
+        )
+        .await
+        .unwrap();
+    client
+        .install(
+            &id.to_string(),
+            h,
+            l,
+            7,
+            IdempotencyKey::new(new_uuid_v7()).unwrap(),
+            next,
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(view(&s, &u, id).await["rule_recovery"], Value::Null);
     s.shutdown().await;
 }

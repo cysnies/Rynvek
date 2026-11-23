@@ -85,6 +85,7 @@ async fn acquire(s: &RunningServer, u: &User, id: WireUuid, h: u64, level: &str)
 fn input(u: &User, h: u64, l: u64, tick: u64, commands: Vec<PhysicsCommand>) -> GeneralInput {
     GeneralInput {
         install:None,
+        recovery:None,
         host_fence: h,
         control_fence: l,
         envelope: CommandEnvelope {

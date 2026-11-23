@@ -130,6 +130,14 @@ impl GeneralRulesConfig {
     }
 }
 
+/// 显式撤销隔离态：只允许实付维护Tick走到紧邻Epoch，不执行旧/新作者规则。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RuleRecovery {
+    pub evidence_cid: [u8; 32],
+    pub epoch_tick: u64,
+    pub maintenance_paid_q: u64,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeneralRulesState {
@@ -141,6 +149,8 @@ pub struct GeneralRulesState {
     /// 模块到私有签名闭包证据CID；空集合沿用旧快照/配置根字节。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub installed_releases: BTreeMap<String, [u8; 32]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<RuleRecovery>,
 }
 impl GeneralRulesState {
     pub(crate) fn validate(&self, world: &SimulationEngine) -> Result<(), RynvekErrorCode> {
@@ -154,6 +164,19 @@ impl GeneralRulesState {
             return Err(ERROR);
         }
         self.config.validate_host(world, false)?;
+        if let Some(r) = &self.recovery {
+            if r.epoch_tick % 4 != 0
+                || world.clock.tick >= r.epoch_tick
+                || r.epoch_tick - world.clock.tick > 3
+                || self.tier0_gas != 0
+                || self.tier1_quota != 0
+                || self.paid_q != 0
+                || r.maintenance_paid_q == 0
+                || r.maintenance_paid_q % price_for_recovery(&self.config)? != 0
+            {
+                return Err(ERROR);
+            }
+        }
         self.components.validate_registry(&self.config.registry(&compiled))?;
         if self.components.fault.is_some()
             || self
@@ -171,7 +194,15 @@ impl GeneralRulesState {
         Ok(())
     }
     pub(crate) fn config_hash(&self) -> [u8; 32] {
-        let bytes = if self.installed_releases.is_empty() {
+        let bytes = if let Some(r) = &self.recovery {
+            serde_json::to_vec(&(
+                "rynvek-rule-recovery/1",
+                &self.config,
+                &self.installed_releases,
+                r.evidence_cid,
+                r.epoch_tick,
+            ))
+        } else if self.installed_releases.is_empty() {
             serde_json::to_vec(&self.config)
         } else {
             serde_json::to_vec(&("rynvek-installed-rules/1", &self.config, &self.installed_releases))
@@ -180,14 +211,31 @@ impl GeneralRulesState {
         *blake3::hash(&bytes).as_bytes()
     }
     pub(crate) fn state_hash(&self) -> [u8; 32] {
-        *blake3::hash(
-            &serde_json::to_vec(&(&self.components, self.tier0_gas, self.tier1_quota, self.paid_q))
-                .expect("定型组件状态可编码"),
-        )
-        .as_bytes()
+        let bytes = if let Some(r) = &self.recovery {
+            serde_json::to_vec(&(
+                &self.components,
+                self.tier0_gas,
+                self.tier1_quota,
+                self.paid_q,
+                r.maintenance_paid_q,
+            ))
+        } else {
+            serde_json::to_vec(&(&self.components, self.tier0_gas, self.tier1_quota, self.paid_q))
+        }
+        .expect("定型组件状态");
+        *blake3::hash(&bytes).as_bytes()
     }
 }
 
+fn price_for_recovery(config: &GeneralRulesConfig) -> Result<u64, RynvekErrorCode> {
+    let q = u64::from(config.rule_cost_micro_per_gas.ok_or(ERROR)?)
+        .checked_mul(4)
+        .ok_or(ERROR)?;
+    if q == 0 {
+        return Err(ERROR);
+    }
+    Ok(q)
+}
 impl SimulationEngine {
     /// 只在创世显式安装，不运行包顶层代码、不隐式启用控制。定义和动态态进入原权威根。
     pub fn with_component_rules(mut self, config: GeneralRulesConfig) -> Result<Self, RynvekErrorCode> {
@@ -205,6 +253,7 @@ impl SimulationEngine {
             tier1_quota: 0,
             paid_q: 0,
             installed_releases: BTreeMap::new(),
+            recovery: None,
         });
         self.publish_commit(self.authoritative_commit([0; 32]));
         Ok(self)
@@ -221,6 +270,13 @@ impl SimulationEngine {
         }
         let mut candidate = self.clone();
         let mut rules = self.rules.clone().ok_or(ERROR)?;
+        if rules.recovery.is_some() && !graphs.keys().eq(rules.config.rule_graphs.keys())
+            || graphs
+                .keys()
+                .any(|m| !rules.config.bindings.values().any(|b| &b.module_id == m))
+        {
+            return Err(ERROR);
+        }
         let old_bundles: std::collections::BTreeSet<_> = graphs
             .keys()
             .filter_map(|m| rules.installed_releases.get(m).copied())
@@ -246,6 +302,41 @@ impl SimulationEngine {
         let compiled = rules.config.compile()?;
         rules.config.validate_host(self, false)?;
         rules.components.reconcile_registry(&rules.config.registry(&compiled))?;
+        rules.recovery = None;
+        candidate.rules = Some(rules);
+        Ok(candidate)
+    }
+    /// 这是宿主显式隔离维护，不是热换规则：旧图不运行，新图只到Epoch才可激活。
+    pub fn candidate_with_rule_recovery(
+        &self,
+        evidence: [u8; 32],
+        graphs: &BTreeMap<String, String>,
+    ) -> Result<Self, RynvekErrorCode> {
+        let next = self.clock.tick.checked_add(1).ok_or(ERROR)?;
+        if next % 4 == 0 {
+            return Err(ERROR);
+        }
+        let mut candidate = self.clone();
+        let mut rules = self.rules.clone().ok_or(ERROR)?;
+        if self.life.is_none()
+            || rules.installed_releases.is_empty()
+            || !rules.config.tier1_rules.is_empty()
+            || rules.config.body_controllers.is_empty()
+            || !graphs.keys().eq(rules.config.rule_graphs.keys())
+        {
+            return Err(ERROR);
+        }
+        price_for_recovery(&rules.config)?;
+        let mut proposed = rules.config.clone();
+        proposed.rule_graphs = graphs.clone();
+        proposed.compile()?;
+        proposed.validate_host(self, false)?;
+        let epoch_tick = next.checked_add(4 - next % 4).ok_or(ERROR)?;
+        rules.recovery = Some(RuleRecovery {
+            evidence_cid: evidence,
+            epoch_tick,
+            maintenance_paid_q: 0,
+        });
         candidate.rules = Some(rules);
         Ok(candidate)
     }
@@ -257,6 +348,39 @@ impl SimulationEngine {
         let Some(mut rules) = self.rules.take() else {
             return Ok(());
         };
+        if let Some(recovery) = rules.recovery.as_mut() {
+            if self.clock.tick >= recovery.epoch_tick {
+                return Err(ERROR);
+            }
+            let q = price_for_recovery(&rules.config)?;
+            let life = self.life.as_mut().ok_or(ERROR)?;
+            let mut paid = 0u64;
+            for binding in &rules.config.body_controllers {
+                if let Some((dense, _, _)) = self
+                    .physics
+                    .registry
+                    .iter_alive()
+                    .find(|(_, _, id)| id.monotonic_serial() == u64::from(binding.entity_serial))
+                {
+                    if !life.accounts.get_mut(dense)?.try_dissipate_q(q) {
+                        return Err(RynvekErrorCode::ConservationLawMismatch);
+                    }
+                    paid = paid.checked_add(q).ok_or(ERROR)?;
+                    self.physics.bodies.get_mut(dense)?.acceleration_q32 = [0, 0];
+                }
+            }
+            if paid == 0 {
+                return Err(ERROR);
+            }
+            // 单列宿主隔离维护热耗，不伪造已执行指令gas，也不执行撤销规则或默认控制器。
+            recovery.maintenance_paid_q = paid;
+            rules.tier0_gas = 0;
+            rules.tier1_quota = 0;
+            rules.paid_q = 0;
+            rules.components.tier1_gas_charged = 0;
+            self.rules = Some(rules);
+            return Ok(());
+        }
         // 当前对象本身已是整Tick隔离候选；任一规则/费用/输出失败都不发布候选。
         let compiled = rules.config.compile()?;
         rules.config.validate_host(self, false)?;
