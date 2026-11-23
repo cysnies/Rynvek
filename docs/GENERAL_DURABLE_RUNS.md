@@ -18,8 +18,10 @@
 | ticks | 1..128个原规则Tick，不是CPU指令gas，也不是无限运行 |
 | wall_seconds | 10..900秒，自Store启动线性化时起，包括排队、暂停及故障等待；恢复不延长 |
 | interval_ms | 200..5000毫秒调度节流，不改变世界的确定性时间/生物能价 |
-| max_energy_q | 规范正整数字符串，至多1000000000000 EnergyQ；实际费用沿原有源计价 |
+| max_energy_q | 规范正整数字符串，至多1000000000000 EnergyQ；限定原规则实付paid_q之和，不是全部世界能耗 |
 | consent | 必须精确为 `run_installed_rules_with_bounded_budget`，手动drive许可不暗含此同意 |
+
+`energy_used_q`/`max_energy_q`对应每步原 `rule_meter.paid_q` 之和，仅计规则实付账；生命自然代谢、信号等其它原有结算仍由原Tick承担并守恒，不能把规则预算冒称世界总能耗预算。世界推进总量另受Tick数和墙钟硬上限约束。
 
 只运行已有生命来源且声明正生物费用的已装规则，拒无规则物理推进、CPU-only配额和维护态。
 不新增神经/provider/模型调用、支付、邀请或私有外发。正常人类控制租约在意图持久化成功后交还，后台取得原LeaseManager的新控制fence；不重置计数或偷抢另一人的有效控制。

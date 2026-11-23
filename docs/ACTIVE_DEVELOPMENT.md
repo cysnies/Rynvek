@@ -9,7 +9,7 @@
 
 **主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE、真实D337/D570和干净PUBLIC远端 `02fab1473990242c3c5966e874f1c53bf946fef7`。本批落实指定耐久主体，不再改选阶段57协作Web；详见 [GENERAL_DURABLE_RUNS.md](GENERAL_DURABLE_RUNS.md)。
 
-- 正式Human所有者原Sovereign双fence+显式consent+精确根启动持久意图，限定1..128 Tick、10..900秒、调度间隔和累计实付EnergyQ预算。无规则/CPU-only/维护态拒绝，不保存Bearer，不暗开协作者后台或外部provider。
+- 正式Human所有者原Sovereign双fence+显式consent+精确根启动持久意图，限定1..128 Tick、10..900秒、调度间隔和累计规则实付EnergyQ预算（原paid_q之和，非全部自然代谢/世界能耗）。无规则/CPU-only/维护态拒绝，不保存Bearer，不暗开协作者后台或外部provider。
 - 复用原Store及Lab Claim/OwnerAction/WorkerAction/租约治理，服务后台有限串行槽按PG SKIP LOCKED认领，再调原General Actor、原LeaseManager/CommandGate/规则有源Tick；没有客户端推进循环/第二世界。Memory回执明确进程内，PG还要求私有文件CAS。
 - 原TickCommitter/Store最终锁中同时检查作业fence/租约/墙钟/步号/费用上限和原ABAC/目的/宿主双fence/精确依赖撤销/前驱，原子提交进度/费用/根与世界Commit。持久步键/`/5`日志不因重启重扣；旧格式/保护不放宽。
 - pause/resume/cancel原操作CAS与持久幂等；暂停返回后旧候选拒绝，恢复不延预算或跳Epoch。暂停保留精确世界，撤包/禁用/欠费blocked不免费推进，可先cancel再沿原维护换装。失回执可按原提交键只读查询，无宿主认领。

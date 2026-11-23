@@ -23,6 +23,7 @@ pub struct RunSpec {
     /// 墙钟上限包括暂停、失联和故障等待，不能通过恢复延长。
     pub wall_seconds: u32,
     pub interval_ms: u32,
+    /// 原规则paid_q逐Tick之和上限；不冒称全部自然代谢/物理能耗预算。
     pub max_energy_q: String,
     pub consent: String,
 }
