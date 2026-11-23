@@ -1,14 +1,19 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 //! 原 RYPK/QuickJS 组件沙箱，供两个领域共同调用；无宿主I/O或跨Tick隐态。
-use super::{ExecutionMeter, ParameterState, Registry, component_name, valid_authoring_key, value_valid};
+#[cfg(not(target_arch = "wasm32"))]
+use super::{ExecutionMeter, ParameterState, value_valid};
+use super::{Registry, component_name, valid_authoring_key};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::sandbox::{GAS_PER_INTERRUPT_POLL, QuickJsSandbox, QuickJsSandboxConfig};
 use rynvek_core::{
     RynvekErrorCode,
     package::{PackageInput, PackageInputEntry, PackageKind, read_package, write_package},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(not(target_arch = "wasm32"))]
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 type Result<T> = std::result::Result<T, RynvekErrorCode>;
 const INVALID: RynvekErrorCode = RynvekErrorCode::DimensionMismatch;
 pub const MAX_PACKAGE_BYTES: usize = 12 * 1024;
@@ -175,6 +180,10 @@ impl Tier1Draft {
 }
 impl Registry<'_> {
     pub fn validate_tier1(&self, writes: &mut BTreeSet<(String, String)>) -> Result<()> {
+        // 不为编译通过而静默跳过规则；当前浏览器仅消费服务器权威结果。
+        if cfg!(target_arch = "wasm32") && !self.tier1_rules.is_empty() {
+            return Err(RynvekErrorCode::PluginCapabilityDenied);
+        }
         if self.tier1_rules.len() > 4 {
             return Err(INVALID);
         }
@@ -201,23 +210,27 @@ impl Registry<'_> {
         Ok(())
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Serialize)]
 struct InputEntity<'a> {
     id: &'a str,
     serial: u32,
     values: BTreeMap<&'a str, i32>,
 }
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Output {
     writes: Vec<OutputEntity>,
 }
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct OutputEntity {
     id: String,
     values: BTreeMap<String, i64>,
 }
+#[cfg(not(target_arch = "wasm32"))]
 impl Registry<'_> {
     /// Tier0/Tier1读同一旧状态；全部成功才发布。失败保留上一状态并记故障与实际配额扣记。
     pub(super) fn step_tier1_rules(

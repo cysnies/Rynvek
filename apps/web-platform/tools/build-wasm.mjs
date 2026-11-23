@@ -19,6 +19,16 @@ export function buildWasm({ run = spawnSync, env = process.env } = {}) {
   }
   const buildEnv = { ...env, CARGO_BUILD_JOBS: env.CARGO_BUILD_JOBS || "2",
     CARGO_INCREMENTAL: "0", CARGO_PROFILE_DEV_DEBUG: "0" };
+  // 只接受操作者明确提供的官方SDK位置；不猜工作区路径，不下载或改成WASI目标。
+  if (env.WASI_SDK_PATH) {
+    for (const [name, binary] of [["CC", "clang"], ["AR", "llvm-ar"]]) {
+      const key = `${name}_wasm32_unknown_unknown`, alias = `${name}_wasm32-unknown-unknown`;
+      if (!env[key] && !env[alias]) buildEnv[key] = resolve(env.WASI_SDK_PATH, "bin", binary);
+      const compiler = buildEnv[alias] || buildEnv[key];
+      const probe = run(compiler, ["--version"], { encoding: "utf8", env: buildEnv });
+      if (probe.status !== 0) throw new Error(`${name}工具不可用：${compiler}，停止构建，不使用旧产物`);
+    }
+  }
   const target = resolve(root, env.CARGO_TARGET_DIR || "target");
   for (const [command, args] of [
     ["cargo", ["build", "--locked", "-p", "rynvek-wasm", "--target", "wasm32-unknown-unknown"]],

@@ -3,7 +3,7 @@
 
 //! Tier-1 规则：QuickJS-NG 确定性沙箱宿主（GAP-06，规范 01 §1.1：单 Tick `500,000 Gas`、堆 `64 MiB`）。
 //!
-//! 通过 `rquickjs` 内嵌 QuickJS-NG（C 源码随 crate 编译；在 `wasm32` 目标下随 `rynvek-wasm` 一起编译为 WASM）。
+//! 通过 `rquickjs` 内嵌 QuickJS-NG（C 源码仅随原生权威宿主编译；浏览器 unknown-unknown 不支持本地 Tier1）。
 //!
 //! 确定性措施：
 //!

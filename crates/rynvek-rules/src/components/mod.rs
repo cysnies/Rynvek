@@ -333,10 +333,18 @@ impl Registry<'_> {
         world_seed: u64,
         remaining: &mut u64,
     ) -> ExecutionMeter {
+        // 防御直接调用：目标不支持时整组拒绝，不能先发布Tier0再跳过Tier1。
+        #[cfg(target_arch = "wasm32")]
+        if let Some((id, _)) = self.tier1_rules.first_key_value() {
+            state.fault = Some((id.clone(), RynvekErrorCode::PluginCapabilityDenied as u16));
+            return ExecutionMeter::default();
+        }
         state.tier1_gas_charged = 0;
+        #[cfg(not(target_arch = "wasm32"))]
         let original = state.clone();
         let mut meter = ExecutionMeter::default();
         self.step_parameter_rules(state, tick, world_seed, remaining, &mut meter);
+        #[cfg(not(target_arch = "wasm32"))]
         if state.fault.is_none() {
             self.step_tier1_rules(state, &original, tick, world_seed, remaining, &mut meter);
         }

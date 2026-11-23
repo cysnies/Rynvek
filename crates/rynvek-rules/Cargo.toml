@@ -11,19 +11,21 @@ publish.workspace = true
 
 [features]
 default = ["quickjs"]
-# Tier-1 QuickJS-NG 确定性沙箱宿主（编译内嵌的 QuickJS-NG C 源码；wasm32 目标下随 rynvek-wasm 一并编译为 WASM）
+# Tier-1 原生权威沙箱；浏览器 unknown-unknown 不支持 C 运行时，必须显式拒绝本地执行。
 quickjs = ["dep:rquickjs"]
 # Tier-2 WASM 插件宿主（Wasmtime 29 Component Model，`rynvek:plugin@1.0.0`）
 wasmtime = ["dep:wasmtime", "dep:wasmparser"]
 
 [dependencies]
 blake3.workspace = true
-rquickjs = { workspace = true, optional = true }
 rynvek-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 wasmparser = { version = "0.221", optional = true, default-features = false, features = ["std"] }
 wasmtime = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rquickjs = { workspace = true, optional = true }
 
 [dev-dependencies]
 naga.workspace = true

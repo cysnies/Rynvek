@@ -16,9 +16,9 @@
 
 #![deny(unsafe_code)]
 
+pub mod compiler;
 #[cfg(feature = "quickjs")]
 pub mod components;
-pub mod compiler;
 pub mod cpu;
 pub mod error;
 pub mod graph;
@@ -26,7 +26,7 @@ pub mod ir;
 #[cfg(feature = "wasmtime")]
 pub mod plugin;
 pub mod rir;
-#[cfg(feature = "quickjs")]
+#[cfg(all(feature = "quickjs", not(target_arch = "wasm32")))]
 pub mod sandbox;
 pub mod semantics;
 pub mod wgsl;
@@ -39,7 +39,7 @@ pub use error::{RuleError, RuleResult};
 pub use graph::{ComponentDecl, GraphNode, RULE_GRAPH_FORMAT, UntypedRuleGraph};
 pub use ir::{ComponentSlot, Instr, Opcode, RuleModule, ValueType};
 pub use rir::{RIR_MAGIC, decode_rir, encode_rir};
-#[cfg(feature = "quickjs")]
+#[cfg(all(feature = "quickjs", not(target_arch = "wasm32")))]
 pub use sandbox::{QuickJsSandbox, QuickJsSandboxConfig, SandboxTickOutput};
 pub use wgsl::emit_wgsl_compute_shader;
 

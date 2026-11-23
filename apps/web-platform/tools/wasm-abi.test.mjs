@@ -49,7 +49,7 @@ test("构建前拒绝旧CLI，不能悄悄沿用旧WASM", () => {
 
 test("实际cargo失败不得调用胶水生成或宣称成功", () => {
   const calls = [];
-  assert.throws(() => buildWasm({ run: (command) => { calls.push(command);
+  assert.throws(() => buildWasm({ env: {WASM_BINDGEN:process.env.WASM_BINDGEN}, run: (command) => { calls.push(command);
     return calls.length === 1 ? { status: 0, stdout: "wasm-bindgen 0.2.130" } : { status: 101 }; } }), /失败/);
   assert.deepEqual(calls, [process.env.WASM_BINDGEN || "wasm-bindgen", "cargo"]);
 });
@@ -79,4 +79,78 @@ test("真实WASM接收服务端校验地图和选择协议，拒绝错哈希/错
     assert.deepEqual(post({type: "ARENA_OBSERVATION", worldId, observation}), []);
     assert.ok(post({type: "ARENA_SELECTION", worldId: "f".repeat(32), units: [], building: null}).some(x => x.type === "ENGINE_ERROR"));
   } finally { worker.post('{"type":"SHUTDOWN"}'); worker.free(); }
+});
+
+
+const generalFixture = JSON.parse(readFileSync(new URL("../../../tests/engine/protocol_messages_v2.json", import.meta.url), "utf8"));
+const generalFrame = generalFixture.commands.find(c => c.type === "GENERAL_FRAME").frame;
+async function generalWorker(frame=generalFrame) {
+  const worker = new EngineWorker();
+  const ready = JSON.parse(await worker.init(null, JSON.stringify({type: "ENGINE_INIT", width: 256, height: 256,
+    gpuMode: "disabled", worldId: frame.worldId, generalRemote: true})));
+  assert.equal(ready[0].generalRemote, true, "旧WASM不得冒充新General能力");
+  return worker;
+}
+test("真实General WASM ABI：最小帧回执、禁本地推进与无GPU不伪造显示", async () => {
+  const worker = await generalWorker();
+  const post = c => JSON.parse(worker.post(JSON.stringify(c)));
+  try {
+    assert.deepEqual(post({type: "GENERAL_FRAME", frame: generalFrame}), [{type: "GENERAL_FRAME_APPLIED",
+      worldId: generalFrame.worldId, tick: generalFrame.tick, stateRoot: generalFrame.stateRoot}]);
+    for (const c of [{type: "STEP", ticks: 1}, {type: "START", tickRate: 30}, {type: "GENERAL_WORLD", packageBytes: [82,89,87,76]}])
+      assert.ok(post(c).some(e => e.type === "ENGINE_ERROR"));
+    assert.deepEqual(JSON.parse(worker.frame(9000)), [], "无GPU不得称FRAME_RENDERED");
+    assert.ok(post({type: "GENERAL_FRAME", frame: generalFrame}).some(e => e.type === "GENERAL_FRAME_APPLIED"));
+    worker.post('{"type":"SHUTDOWN"}');
+    assert.equal(worker.phase(), "shut-down");
+    assert.ok(!post({type: "GENERAL_FRAME", frame: generalFrame}).some(e => e.type === "GENERAL_FRAME_APPLIED"));
+  } finally { worker.free(); }
+});
+test("真实General WASM ABI：同Tick分歧清态且晚到正确帧也不能复活", async () => {
+  const worker = await generalWorker();
+  const post = c => JSON.parse(worker.post(JSON.stringify(c)));
+  try {
+    assert.ok(post({type: "GENERAL_FRAME", frame: generalFrame}).some(e => e.type === "GENERAL_FRAME_APPLIED"));
+    assert.ok(post({type: "GENERAL_FRAME", frame: {...generalFrame, stateRoot: "cd".repeat(32)}}).some(e => e.type === "ENGINE_ERROR"));
+    assert.ok(post({type: "GENERAL_FRAME", frame: {...generalFrame, tick: 8, revision: 8}}).some(e => e.type === "ENGINE_ERROR"));
+    assert.deepEqual(JSON.parse(worker.frame(10000)), []);
+  } finally { worker.post('{"type":"SHUTDOWN"}'); worker.free(); }
+});
+test("官方SDK显式位置与用户目标编译器优先级，仍构建unknown-unknown目标", () => {
+  const calls = [];
+  buildWasm({env: {WASI_SDK_PATH: "/official/sdk", CC_wasm32_unknown_unknown: "/custom/clang"}, run: (cmd, args, options) => {
+    calls.push({cmd,args,env:options.env});
+    return {status: 0, stdout: cmd === "wasm-bindgen" ? "wasm-bindgen 0.2.130" : "tool"};
+  }});
+  assert.deepEqual(calls.map(c=>c.cmd), ["wasm-bindgen", "/custom/clang", "/official/sdk/bin/llvm-ar", "cargo", "wasm-bindgen"]);
+  assert.ok(calls[3].args.includes("wasm32-unknown-unknown"));
+  assert.equal(calls[3].env.AR_wasm32_unknown_unknown, "/official/sdk/bin/llvm-ar");
+});
+test("显式SDK失效在cargo前失败，不能依赖旧产物", () => {
+  const calls = [];
+  assert.throws(()=>buildWasm({env:{WASI_SDK_PATH: "/missing/sdk"},run:(cmd)=>{
+    calls.push(cmd); return calls.length === 1 ? {status:0,stdout:"wasm-bindgen 0.2.130"} : {status:1};
+  }}), /工具不可用/);
+  assert.deepEqual(calls,["wasm-bindgen","/missing/sdk/bin/clang"]);
+});
+
+test("真实WASM拒绝本地Tier1整组安装，失败后仍可装原Tier0而非静默跳规则", async () => {
+  const packages = JSON.parse(readFileSync(new URL("../../../tests/engine/general_world_packages.json",import.meta.url),"utf8"));
+  const worker = new EngineWorker();
+  const post = c => JSON.parse(worker.post(JSON.stringify(c)));
+  try {
+    await worker.init(null,JSON.stringify({type:"ENGINE_INIT",width:256,height:256,gpuMode:"disabled",worldId:generalFrame.worldId}));
+    const rejected = post({type:"GENERAL_WORLD",packageBytes:[...Buffer.from(packages.tier1Hex,"hex")]});
+    assert.ok(rejected.some(e=>e.type==="ENGINE_ERROR"&&e.message.includes("PluginCapabilityDenied")),"必须是目标能力拒绝，而非损坏包误过关");
+    assert.ok(!rejected.some(e=>e.type==="TICK_COMMITTED"));
+    const accepted = post({type:"GENERAL_WORLD",packageBytes:[...Buffer.from(packages.tier0Hex,"hex")]});
+    assert.ok(accepted.some(e=>e.type==="TICK_COMMITTED" && e.tick===0),"拒绝不能部分安装或污染原世界");
+    assert.ok(post({type:"STEP",ticks:1}).some(e=>e.type==="TICK_COMMITTED" && e.tick===1));
+  } finally { worker.post('{"type":"SHUTDOWN"}');worker.free(); }
+  // 同一个真实原生Tier1实付世界，只读投影仍可进入新浏览器WASM；并非删除服务端能力。
+  const remote=await generalWorker(packages.tier1Frame);
+  try {
+    const events=JSON.parse(remote.post(JSON.stringify({type:"GENERAL_FRAME",frame:packages.tier1Frame})));
+    assert.ok(events.some(e=>e.type==="GENERAL_FRAME_APPLIED"&&e.stateRoot===packages.tier1Frame.stateRoot&&e.tick===1));
+  }finally{remote.post('{"type":"SHUTDOWN"}');remote.free();}
 });
