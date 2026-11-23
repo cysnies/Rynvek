@@ -351,7 +351,9 @@ impl ArenaWorld {
             0
         };
         if let Some(u) = self.units.get_mut(&s.id) {
-            u.fitness.damage_dealt_milli += dealt;
+            if !u.faction.is_wild() || self.pve.is_some() {
+                u.fitness.damage_dealt_milli += dealt;
+            }
         }
     }
 
@@ -464,7 +466,7 @@ impl ArenaWorld {
             self.fields
                 .add(FieldId::Nutrient, tx, ty, (nutrient_milli * 256 / 1000) as i32);
         }
-        if u.faction.is_wild() {
+        if u.faction.is_wild() && self.pve.is_some() {
             let mut fit = u.fitness;
             fit.survival_ticks = self.tick - u.born_tick;
             self.pve_records.push((u.id.0, u.genome.clone(), fit));

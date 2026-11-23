@@ -793,7 +793,7 @@ async fn ecology_lab_exports_private_real_lineage_energy_and_structured_status()
     let other = register(&base, "ecology-lab-other", "human", 42).await;
     let spec = json!({"name":"自然家谱","seeds":[57],"ticks":600,"sample_every":300,
     "submission_id":rynvek_server::ids::new_uuid_v7().to_string(),
-    "variants":[{"label":"自然复制","policy":"ecology","ecology":{"roles":{"unit.forager":{
+    "variants":[{"label":"自然复制","policy":"ecology","ecology":{"wild":{"roles":{},"population_limit":0,"seeds":[]},"roles":{"unit.forager":{
       "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
     ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":0,"material_growth_milli_per_tick":0,"material_synthesis_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50},"unit.striker":{
         "basal_cost_micro_per_tick":100,"reserve_ticks":4,"birth_energy_milli":1000,
@@ -874,7 +874,7 @@ async fn studio_authoring_real_params_genome_rule_template_commit_and_private_re
         "POST",
         "/api/v1/worlds",
         t,
-        json!({"title":"真实创作","template":"arena_pve","map_seed":42,"ecology":{"roles":{"unit.forager":role}}}),
+        json!({"title":"真实创作","template":"arena_pve","map_seed":42,"ecology":{"wild":{"roles":{},"population_limit":0,"seeds":[]},"roles":{"unit.forager":role}}}),
     )
     .await
     .json()
@@ -975,5 +975,30 @@ async fn studio_authoring_real_params_genome_rule_template_commit_and_private_re
         get(&base, &read, t).await.json().unwrap()["baseline"]["rules"],
         restored["baseline"]["rules"]
     );
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn wild_natural_creation_checks_source_contract_and_private_immutable_genesis() {
+    use rynvek_rts::{ArenaMap,ArenaMapSize,TerrainTileKind};
+    let server=start_server(false).await;let base=server.base_url();
+    let owner=register(&base,"wild-owner","human",81).await;let other=register(&base,"wild-other","human",82).await;
+    let t=Some(owner.token.as_str());let map=ArenaMap::generate(ArenaMapSize::Duel1v1,57);
+    let (x,y)=(10..30).flat_map(|y|(10..30).map(move|x|(x,y))).find(|&(x,y)|map.tile(x,y)==TerrainTileKind::OpenSubstrate).unwrap();
+    let energy=json!({"basal_cost_micro_per_tick":10,"reserve_ticks":1,"birth_energy_milli":10,"movement_cost_micro_per_tile":1,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":1,"repair_cost_micro_per_milli":1,"rule_cost_micro_per_gas":1,"material_capacity_milli":8,"material_growth_milli_per_tick":4,"material_synthesis_micro_per_milli":1,"continuous_cost_micro_per_neuron_step":1,"secretion_cost_micro_per_field_raw":1,"birth_synthesis_milli":1,"activity_reserve_milli":1,"replication_mutation_rate_permille":50});
+    let ecology=json!({"roles":{},"wild":{"roles":{"unit.forager":{"energy":energy,"uptake_raw_per_tick":128}},"population_limit":4,"seeds":[{"kind":"unit.forager","x":x,"y":y}]}});
+    let request=json!({"title":"野生自然来源链","template":"arena_pve","map_seed":57,"ecology":ecology});
+    let response=send(&base,"POST","/api/v1/worlds",t,request.clone()).await;
+    assert_eq!(response.status,201,"{}",String::from_utf8_lossy(&response.body));
+    let created=response.json().unwrap();let wid=created["world_id"].as_str().unwrap();let path=format!("/api/v1/worlds/{wid}/authoring");
+    assert_eq!(get(&base,&path,Some(&other.token)).await.status,404);
+    let view=get(&base,&path,t).await.json().unwrap();assert_eq!(view["ecology_contract"],ecology);
+    let patch=json!({"patch_id":vec![44;16],"base_authoring_revision":0,"hlc":{"wall_time_ms":1,"logical_counter":0,"author_node_id":1},"safety_class":"EpochBoundarySafe","operations":[{"SetWorldParam":{"key_path":"ecology.wild","new_value_json":ecology["wild"].to_string()}}]});
+    assert_eq!(send(&base,"POST",&format!("/api/v1/worlds/{wid}/patches"),t,patch).await.status,422);
+    assert_eq!(get(&base,&path,t).await.json().unwrap(),view);
+    let mut invalid=request;invalid["ecology"]["wild"]["seeds"][0]["x"]=json!(u32::MAX);
+    assert_eq!(send(&base,"POST","/api/v1/worlds",t,invalid.clone()).await.status,400);
+    let (nx,ny)=map.spawn_tiles()[0];invalid["ecology"]["wild"]["seeds"][0]["x"]=json!(nx);invalid["ecology"]["wild"]["seeds"][0]["y"]=json!(ny);
+    assert_eq!(send(&base,"POST","/api/v1/worlds",t,invalid).await.status,400);
     server.shutdown().await;
 }

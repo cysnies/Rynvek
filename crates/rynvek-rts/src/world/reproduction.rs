@@ -53,8 +53,15 @@ impl ArenaWorld {
                 || birth.allocated_q != birth.birth_contract.birth_q()
                 || birth.allocated_material_u % 256 != 0
                 || birth.allocated_material_u < u64::from(birth.birth_contract.material_capacity_milli / 2) * 256
-                || birth.faction.is_wild()
-                || self.faction(birth.faction).is_none()
+                || (if birth.faction.is_wild() {
+                    !self
+                        .config
+                        .ecology
+                        .as_ref()
+                        .is_some_and(|c| c.wild.roles.contains_key(&birth.unit))
+                } else {
+                    self.faction(birth.faction).is_none()
+                })
                 || birth.slug.is_empty()
                 || !parent_matches
                 || self.units.get(child).is_some_and(|u| {
@@ -86,7 +93,8 @@ impl ArenaWorld {
             .all(|(id, m)| {
                 m.is_conserved()
                     && u128::from(m.transferred_u) == materials.get(id).copied().unwrap_or(0)
-                    && m.received_u - m.external_u == ecology.births.get(id).map_or(0, |b| b.allocated_material_u)
+                    && m.received_u - m.external_u - m.converted_u
+                        == ecology.births.get(id).map_or(0, |b| b.allocated_material_u)
             })
         {
             return false;
@@ -96,7 +104,16 @@ impl ArenaWorld {
             .iter()
             .map(|(id, b)| (id, &b.account))
             .chain(ecology.remains.iter().map(|(id, r)| (id, &r.account)))
-            .all(|(id, a)| u128::from(a.transferred_q) == allocations.get(id).copied().unwrap_or(0))
+            .all(|(id, a)| {
+                let m = ecology
+                    .bodies
+                    .get(id)
+                    .map(|b| &b.material)
+                    .or_else(|| ecology.remains.get(id).map(|r| &r.material))
+                    .expect("同一实体材料账");
+                u128::from(a.transferred_q) == allocations.get(id).copied().unwrap_or(0)
+                    && u128::from(m.converted_u / 256) * 4000 <= u128::from(a.exported_q)
+            })
     }
     pub(super) fn try_mitosis(&mut self, parent: EntitySerial, retain_q: u64, occupied: &mut BTreeSet<(u32, u32)>) {
         let contract = self
@@ -128,12 +145,19 @@ impl ArenaWorld {
         if contract.material_capacity_milli > 0 && allocated_material_u == 0 {
             return;
         }
-        let (used, cap) = self.supply(unit.faction);
-        if used
-            .checked_add(crate::units::unit_spec(unit.kind).supply)
-            .is_none_or(|n| n > cap)
-        {
-            return;
+        if unit.faction.is_wild() {
+            let cap = self.config.ecology.as_ref().expect("野生契约").wild.population_limit;
+            if self.units.values().filter(|u| u.faction.is_wild()).count() >= cap as usize {
+                return;
+            }
+        } else {
+            let (used, cap) = self.supply(unit.faction);
+            if used
+                .checked_add(crate::units::unit_spec(unit.kind).supply)
+                .is_none_or(|n| n > cap)
+            {
+                return;
+            }
         }
         // 仅邻格，不允许堵塞时远程传送或退回不可通行的默认格；序号/y/x序保证重放一致。
         let (x, y) = unit.tile();

@@ -10,7 +10,7 @@ use rynvek_rts::lab::{ExperimentSpec, run_experiment};
 fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
     let spec: ExperimentSpec = serde_json::from_value(serde_json::json!({
       "name":"真实自然谱系", "seeds":[57],"ticks":600,"sample_every":300,
-      "variants":[{"label":"自然复制", "policy":"ecology", "ecology":{"roles":{"unit.forager":{
+      "variants":[{"label":"自然复制", "policy":"ecology", "ecology":{"wild":{"roles":{},"population_limit":0,"seeds":[]},"roles":{"unit.forager":{
         "basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000
       ,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":8,"material_growth_milli_per_tick":1,"material_synthesis_micro_per_milli":1,"continuous_cost_micro_per_neuron_step":1,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":10,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}}]
     }))
@@ -101,7 +101,7 @@ fn real_multigeneration_births_feed_lab_genealogy_and_exact_energy_tables() {
 fn ecology_experiment_cannot_silently_enable_ranked_or_incomplete_contract() {
     for variant in [
         serde_json::json!({"label":"x","policy":"ecology"}),
-        serde_json::json!({"label":"x","mode":"duel","ecology":{"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":8,"material_growth_milli_per_tick":1,"material_synthesis_micro_per_milli":1,"continuous_cost_micro_per_neuron_step":1,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}}),
+        serde_json::json!({"label":"x","mode":"duel","ecology":{"wild":{"roles":{},"population_limit":0,"seeds":[]},"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":8,"material_growth_milli_per_tick":1,"material_synthesis_micro_per_milli":1,"continuous_cost_micro_per_neuron_step":1,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}}),
     ] {
         let spec: ExperimentSpec =
             serde_json::from_value(serde_json::json!({"name":"bad","seeds":[1],"ticks":1,"variants":[variant]}))
@@ -130,4 +130,34 @@ fn workbench_page_preserves_decimal128_and_64bit_values_without_floating_point()
     let empty = arrow_io::parquet_page(bytes, 1, 1).unwrap();
     assert!(empty.rows.is_empty());
     assert!(empty.next_offset.is_none());
+}
+
+#[test]
+fn wild_natural_profile_uses_real_map_source_and_original_four_parquet_tables() {
+    use rynvek_rts::{ArenaMap,ArenaMapSize,TerrainTileKind};
+    let map=ArenaMap::generate(ArenaMapSize::Duel1v1,57);
+    let (x,y)=(10..30).flat_map(|y|(10..30).map(move |x|(x,y))).find(|&(x,y)|map.tile(x,y)==TerrainTileKind::OpenSubstrate).unwrap();
+    let role=serde_json::json!({"basal_cost_micro_per_tick":10,"reserve_ticks":1,"birth_energy_milli":10,"movement_cost_micro_per_tile":1,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":1,"repair_cost_micro_per_milli":1,"rule_cost_micro_per_gas":1,"material_capacity_milli":8,"material_growth_milli_per_tick":4,"material_synthesis_micro_per_milli":1,"continuous_cost_micro_per_neuron_step":1,"secretion_cost_micro_per_field_raw":1,"birth_synthesis_milli":1,"activity_reserve_milli":1,"replication_mutation_rate_permille":50});
+    let value=serde_json::json!({"name":"野生来源链","seeds":[57],"ticks":60,"sample_every":15,"variants":[{"label":"自然野生","policy":"idle","ecology":{"roles":{},"wild":{"roles":{"unit.forager":{"energy":role,"uptake_raw_per_tick":128}},"population_limit":4,"seeds":[{"kind":"unit.forager","x":x,"y":y}]}}}]});
+    let spec:ExperimentSpec=serde_json::from_value(value.clone()).unwrap();spec.validate().unwrap();
+    let result=run_experiment(&spec,&|_,_|{});
+    let wild:Vec<_>=result.lineage.iter().filter(|r|r.faction==255).collect();
+    assert_eq!(wild.len(),4);
+    assert!(wild.iter().any(|r|r.generation>=2&&r.origin=="mitosis"));
+    for row in &result.energy {
+        assert_eq!(row.external_received_q,row.stored_q+row.dissipated_q+row.exported_q+row.returned_q);
+        assert_eq!(row.material_external_u,0);
+        assert!(row.material_converted_u>0);
+        assert_eq!(row.material_received_u-row.material_transferred_u,row.material_converted_u);
+        assert_eq!(row.material_converted_u,row.material_stored_u+row.material_returned_u);
+        assert_eq!(row.exported_q,row.material_converted_u/256*4000);
+    }
+    for table in LabTable::ALL {
+        let batch=arrow_io::table_batch(&result,table).unwrap();
+        let bytes=arrow_io::to_parquet(&batch).unwrap();assert_eq!(&bytes[..4],b"PAR1");
+    }
+    assert_eq!(arrow_io::energy_schema().field_with_name("material_converted_u").unwrap().data_type(),&arrow::datatypes::DataType::Decimal128(38,0));
+    // 生成地图的非法创世位置在提交阶段失败，而不是作业线程构造世界时panic。
+    let mut invalid=value;invalid["variants"][0]["ecology"]["wild"]["seeds"][0]["x"]=serde_json::json!(u32::MAX);
+    assert!(serde_json::from_value::<ExperimentSpec>(invalid).unwrap().validate().is_err());
 }

@@ -32,6 +32,7 @@ fn fixture(kind: UnitKind, remaining_q: u64) -> (ArenaWorld, EntitySerial, Entit
     r.repair_cost_micro_per_milli = 2;
     r.secretion_cost_micro_per_field_raw = 2;
     config.ecology = Some(EcologyContract {
+        wild: Default::default(),
         roles: [
             UnitKind::Striker,
             UnitKind::Spitter,

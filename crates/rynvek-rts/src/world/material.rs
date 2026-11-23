@@ -12,13 +12,16 @@ use serde::{Deserialize, Serialize};
 pub struct MaterialAccount {
     pub received_u: u64,
     pub external_u: u64,
+    /// 从同一个身体能量/化学预算实转的材料，不是第二份外源营养。
+    pub converted_u: u64,
     pub stored_u: u64,
     pub transferred_u: u64,
     pub returned_u: u64,
 }
 impl MaterialAccount {
     pub fn is_conserved(&self) -> bool {
-        self.external_u <= self.received_u
+        u128::from(self.external_u) + u128::from(self.converted_u) <= u128::from(self.received_u)
+            && self.converted_u % 256 == 0
             && u128::from(self.received_u)
                 == u128::from(self.stored_u) + u128::from(self.transferred_u) + u128::from(self.returned_u)
     }
@@ -58,6 +61,10 @@ impl ArenaWorld {
                 continue;
             }
             let faction = u.faction;
+            if faction.is_wild() {
+                self.grow_wild_material(id, r);
+                continue;
+            }
             let b = &self.ecology.as_ref().expect("有契约").bodies[&id];
             let cap = u64::from(r.material_capacity_milli) * 256;
             let price = u64::from(r.material_synthesis_micro_per_milli) * 4;

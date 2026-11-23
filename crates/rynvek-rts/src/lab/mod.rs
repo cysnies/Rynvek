@@ -158,6 +158,13 @@ impl ExperimentSpec {
                     return Err("生态实验只允许显式PvE变体".into());
                 }
                 ecology.validate().map_err(str::to_owned)?;
+                if ecology.wild.enabled() {
+                    for seed in &self.seeds {
+                        v.match_config(*seed)
+                            .validate_generated_genesis()
+                            .map_err(str::to_owned)?;
+                    }
+                }
             }
             if v.policy == PolicyKind::Ecology && v.ecology.is_none() {
                 return Err("ecology策略必须提供显式生态契约".into());
@@ -315,6 +322,7 @@ pub struct EnergyRow {
     pub rule_q: u128,
     pub material_received_u: u128,
     pub material_external_u: u128,
+    pub material_converted_u: u128,
     pub material_stored_u: u128,
     pub material_transferred_u: u128,
     pub material_returned_u: u128,
@@ -605,6 +613,7 @@ fn sample_energy(world: &ArenaWorld, run: u32, root: [u8; 32]) -> EnergyRow {
         {
             row.material_received_u += u128::from(m.received_u);
             row.material_external_u += u128::from(m.external_u);
+            row.material_converted_u += u128::from(m.converted_u);
             row.material_stored_u += u128::from(m.stored_u);
             row.material_transferred_u += u128::from(m.transferred_u);
             row.material_returned_u += u128::from(m.returned_u);

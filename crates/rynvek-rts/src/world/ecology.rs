@@ -75,15 +75,18 @@ impl RoleEnergyContract {
 #[serde(deny_unknown_fields)]
 pub struct EcologyContract {
     pub roles: BTreeMap<UnitKind, RoleEnergyContract>,
+    pub wild: super::wild::WildEcologyContract,
 }
 impl EcologyContract {
     pub fn single(kind: UnitKind, contract: RoleEnergyContract) -> Self {
         Self {
             roles: BTreeMap::from([(kind, contract)]),
+            wild: Default::default(),
         }
     }
     pub fn validate(&self) -> Result<(), &'static str> {
-        if self.roles.is_empty() {
+        self.wild.validate()?;
+        if self.roles.is_empty() && !self.wild.enabled() {
             return Err("生态角色配置不能为空");
         }
         for role in self.roles.values() {
@@ -187,10 +190,12 @@ pub(super) fn movement_distance_raw(delta: crate::Vec2) -> u128 {
 
 impl ArenaWorld {
     pub(super) fn role_energy(&self, kind: UnitKind, faction: FactionId) -> Option<RoleEnergyContract> {
+        let c = self.config.ecology.as_ref()?;
         if faction.is_wild() {
-            return None;
+            c.wild.roles.get(&kind).map(|r| r.energy)
+        } else {
+            c.roles.get(&kind).copied()
         }
-        self.config.ecology.as_ref()?.roles.get(&kind).copied()
     }
     pub(super) fn has_neural_energy_budget(&self, id: EntitySerial) -> bool {
         let u = &self.units[&id];
@@ -250,7 +255,7 @@ impl ArenaWorld {
         b.activity.record(kind, q);
         true
     }
-    /// 自主信号发射：只对显式生态角色启用，不把免费RTS或野生身体伪装为已计价。
+    /// 自主信号发射：只对显式玩家/自然野生生态角色启用，不把免费RTS身体伪装为已计价。
     /// a_emit的[-256,256]直接映射每Tick的有符号SignalA raw，最大1.0场单位。
     /// 这是有界实验映射，不是原规范已冻结的化学产率或物质守恒模型。
     pub(super) fn step_signal_emission(&mut self) {
@@ -307,7 +312,7 @@ impl ArenaWorld {
             self.retire_dead_unit(id);
         }
     }
-    fn maintenance_q(&self, id: EntitySerial, role: RoleEnergyContract) -> u64 {
+    pub(super) fn maintenance_q(&self, id: EntitySerial, role: RoleEnergyContract) -> u64 {
         let g = &self.units[&id].genome;
         let edges = g
             .w_in
@@ -334,7 +339,7 @@ impl ArenaWorld {
                 * 4
         })
     }
-    fn neural_reserve_q(&self, id: EntitySerial) -> u64 {
+    pub(super) fn neural_reserve_q(&self, id: EntitySerial) -> u64 {
         let u = &self.units[&id];
         if !matches!(
             u.genome.model,
@@ -352,7 +357,7 @@ impl ArenaWorld {
         let ids: Vec<_> = self.units.keys().copied().collect();
         for id in ids {
             let u = &self.units[&id];
-            if u.defense.hp_milli <= 0 {
+            if u.defense.hp_milli <= 0 || u.faction.is_wild() {
                 continue;
             }
             let Some(role) = self.role_energy(u.kind, u.faction) else {
@@ -420,13 +425,14 @@ impl ArenaWorld {
             (None, None) => true,
             (Some(_), Some(e)) => {
                 self.config.mode == super::MatchMode::PveSurvival
+                    && self.validate_wild_profile()
                     && e.bodies.keys().eq(self.units.keys())
                     && e.bodies.iter().all(|(id, b)| {
                         b.material.is_conserved() && b.account.is_conserved() && b.activity.total_q() <= u128::from(b.account.dissipated_q)
                             && b.account.returned_q == 0
                             // 稳定权威边界必须已退役耗尽的激活个体，不能存成活体等待新食物复活。
                             && (!self.has_neural_energy_budget(*id)
-                                || (self.units[id].kind==UnitKind::Forager && b.account.received_q == 0)
+                                || (self.tick == 0 || (!self.units[id].faction.is_wild() && self.units[id].kind==UnitKind::Forager && b.account.received_q == 0))
                                 || b.account.stored_q > 0)
                             && (!self.has_neural_energy_budget(*id)
                                 || (b.pending_spikes == 0 && b.account.unfunded_q == 0))
@@ -590,7 +596,10 @@ mod role_energy_tests {
     }
     fn world(roles: BTreeMap<UnitKind, RoleEnergyContract>) -> ArenaWorld {
         let mut c = MatchConfig::pve(57, 1);
-        c.ecology = Some(EcologyContract { roles });
+        c.ecology = Some(EcologyContract {
+            roles,
+            wild: Default::default(),
+        });
         ArenaWorld::with_map(
             c,
             ArenaMap::from_tiles(96, 96, vec![TerrainTileKind::ConductiveBasalt; 96 * 96]),

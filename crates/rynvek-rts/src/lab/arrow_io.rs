@@ -149,6 +149,7 @@ pub fn energy_schema() -> SchemaRef {
         field("rule_q", DataType::Decimal128(38, 0), false),
         field("material_received_u", DataType::Decimal128(38, 0), false),
         field("material_external_u", DataType::Decimal128(38, 0), false),
+        field("material_converted_u", DataType::Decimal128(38, 0), false),
         field("material_stored_u", DataType::Decimal128(38, 0), false),
         field("material_transferred_u", DataType::Decimal128(38, 0), false),
         field("material_returned_u", DataType::Decimal128(38, 0), false),
@@ -357,6 +358,11 @@ pub fn energy_batch(rows: &[EnergyRow]) -> Result<RecordBatch, ArrowError> {
             arc(Decimal128Array::from_iter_values(
                 rows.iter()
                     .map(|r| i128::try_from(r.material_external_u).expect("热耗子账精确汇总")),
+            )
+            .with_precision_and_scale(38, 0)?),
+            arc(Decimal128Array::from_iter_values(
+                rows.iter()
+                    .map(|r| i128::try_from(r.material_converted_u).expect("热耗子账精确汇总")),
             )
             .with_precision_and_scale(38, 0)?),
             arc(Decimal128Array::from_iter_values(

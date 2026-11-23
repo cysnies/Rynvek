@@ -404,8 +404,10 @@ impl ArenaWorld {
             let factor =
                 speed_factor_milli(self.map.tile(tx.min(self.map.width - 1), ty.min(self.map.height - 1))).max(1);
             let vmax = Q32_32(speed_per_tick(spec.speed_milli_per_s).0 * factor / 1000);
-            let dir = self.order_direction(*id, enemy);
-            let pref = if self.units[id].order.kind == OrderKind::HoldPosition {
+            // 显式自然野生profile只消费原脑移动读出，不继承玩家默认Hold或虫潮攻击路标。
+            let autonomous_wild = self.units[id].faction.is_wild() && self.has_neural_energy_budget(*id);
+            let dir = if autonomous_wild { Vec2::ZERO } else { self.order_direction(*id, enemy) };
+            let pref = if self.units[id].order.kind == OrderKind::HoldPosition && !autonomous_wild {
                 Vec2::ZERO
             } else if dir == Vec2::ZERO {
                 brain_move.scale(vmax)
@@ -501,23 +503,23 @@ impl ArenaWorld {
     }
 
     /// 出生结算及场推进后、首个脑Epoch前从所在格摄食；不依赖空池脑先产生Harvest。
-    /// 复用原采集速率与实体序号分摊；同一Tick后续Harvest不再重复领取。
-    pub(super) fn step_forager_uptake(&mut self) {
+    /// 玩家复用原采集速率/实体序号分摊；自然野生用显式有界速率，均不在Harvest重复领取。
+    pub(super) fn step_ecology_uptake(&mut self) {
         let ids: Vec<_> = self.units.keys().copied().collect();
         for id in ids {
-            if self.units[&id].kind != UnitKind::Forager
+            if (self.units[&id].kind != UnitKind::Forager && !self.units[&id].faction.is_wild())
                 || !self.has_neural_energy_budget(id)
                 || self.units[&id].defense.hp_milli <= 0
             {
                 continue;
             }
             let u = &self.units[&id];
-            let rate = self
-                .faction(u.faction)
-                .expect("玩家阵营")
-                .modifiers()
-                .forager_harvest_milli_per_s;
-            let budget = fractional_share(rate * 256, 30_000, self.tick + u64::from(id.0)) as u32;
+            let budget = if u.faction.is_wild() {
+                self.config.ecology.as_ref().expect("显式契约").wild.roles[&u.kind].uptake_raw_per_tick
+            } else {
+                let rate = self.faction(u.faction).expect("玩家阵营").modifiers().forager_harvest_milli_per_s;
+                fractional_share(rate * 256, 30_000, self.tick + u64::from(id.0)) as u32
+            };
             let (x, y) = u.tile();
             let available = self.fields.get(FieldId::Nutrient, x as i64, y as i64) as u32;
             let accepted = self

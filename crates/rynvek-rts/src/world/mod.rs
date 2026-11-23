@@ -24,6 +24,7 @@ mod match_sys;
 pub mod parameter_rules;
 mod persistence;
 mod reproduction;
+pub mod wild;
 mod units_sys;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -139,6 +140,18 @@ impl MatchConfig {
                 return Err("未认证的能量规则不能进入PvP/排位");
             }
             contract.validate()?;
+            if contract.wild.seeds.iter().any(|s| s.x >= self.map_size.side_tiles() || s.y >= self.map_size.side_tiles()) {
+                return Err("野生种子越出配置地图边界");
+            }
+        }
+        Ok(())
+    }
+
+    /// 只在生成地图的创世入口检查地形；恢复/自定义地图不能偷偷重建另一张地图来校验。
+    pub fn validate_generated_genesis(&self) -> Result<(), &'static str> {
+        self.validate_energy_contract()?;
+        if let Some(c) = self.ecology.as_ref().filter(|c| c.wild.enabled()) {
+            c.wild.validate_map(&ArenaMap::generate(self.map_size, self.map_seed), self.players)?;
         }
         Ok(())
     }
@@ -526,7 +539,9 @@ impl ArenaWorld {
             .expect("世界能量/生存契约必须通过验证");
         let mut world = Self {
             ecology: config.ecology.as_ref().map(|_| ecology::EcologyState::default()),
-            pve: (config.mode == MatchMode::PveSurvival).then(|| PveDirector::new(config.world_seed)),
+            pve: (config.mode == MatchMode::PveSurvival
+                && !config.ecology.as_ref().is_some_and(|c| c.wild.enabled()))
+                .then(|| PveDirector::new(config.world_seed)),
             config,
             authoring: Default::default(),
             parameter_state: Default::default(),
@@ -567,6 +582,7 @@ impl ArenaWorld {
             });
             world.place_starter_kit(FactionId(f), anchors[f as usize]);
         }
+        world.seed_wild_ecology();
         world.update_fog();
         world
     }
@@ -1240,7 +1256,7 @@ impl ArenaWorld {
         if self.tick % crate::fields::FIELD_STEP_TICKS == 0 {
             self.step_fields();
         }
-        self.step_forager_uptake();
+        self.step_ecology_uptake();
         self.step_role_supply();
         if self.tick % rynvek_core::constants::COUPLING_EPOCH_TICKS as u64 == 0 {
             self.step_brains();
@@ -1330,7 +1346,7 @@ impl ArenaWorld {
         let config_root = {
             let mut h = Hasher::new();
             // 当前格式绑定整个配置，删除历史模式共用标签与二次身份来源。
-            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_13");
+            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_14");
             h.update(&serde_json::to_vec(&self.config).expect("配置仅含确定性枚举和整数"));
             h.update(&serde_json::to_vec(&self.authoring).expect("有序创作规则"));
             h.update(&self.map.width.to_le_bytes());

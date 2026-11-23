@@ -184,7 +184,7 @@ pub async fn create(
             return Err(ApiError::bad_request("未认证的能量规则仅可用于PvE新世界"));
         }
         config.ecology = req.ecology;
-        config.validate_energy_contract().map_err(ApiError::bad_request)?;
+        config.validate_generated_genesis().map_err(ApiError::bad_request)?;
         let manifest = serde_json::json!({ "template": req.template, "config": config });
         (req.title, req.org_id, req.visibility, config, mode, manifest)
     } else if content_type.starts_with(rynvek_world::rworld::RWORLD_MEDIA_TYPE)
@@ -610,7 +610,7 @@ pub async fn authoring(State(app): State<AppState>, headers: HeaderMap, Path(id)
             )
         })
         .collect();
-    let mut response=Json(serde_json::json!({"world_id":row.world_id.to_string(),"revision":runtime.revision(),"tick":world.tick,"state_root":hex(&runtime.state_root()),"rule_fault":world.authoring.rule_fault,"parameter_state":world.parameter_state,"collaboration":super::studio_collaboration::access(&row,&permit),"baseline":{"width":world.map.width,"height":world.map.height,"terrain":world.map.tiles.iter().map(|t|*t as u8).collect::<Vec<_>>(),"params":params,"genomes":genomes,"rules":rules,"templates":templates}})).into_response();
+    let mut response=Json(serde_json::json!({"world_id":row.world_id.to_string(),"revision":runtime.revision(),"tick":world.tick,"state_root":hex(&runtime.state_root()),"rule_fault":world.authoring.rule_fault,"ecology_contract":world.config.ecology,"parameter_state":world.parameter_state,"collaboration":super::studio_collaboration::access(&row,&permit),"baseline":{"width":world.map.width,"height":world.map.height,"terrain":world.map.tiles.iter().map(|t|*t as u8).collect::<Vec<_>>(),"params":params,"genomes":genomes,"rules":rules,"templates":templates}})).into_response();
     response.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,
         axum::http::HeaderValue::from_static("private, no-store"),
