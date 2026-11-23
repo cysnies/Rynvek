@@ -34,8 +34,8 @@ pub struct ErrorBody {
 pub fn default_status(code: RynvekErrorCode) -> StatusCode {
     use RynvekErrorCode as C;
     match code {
-        C::UnauthorizedCapabilityToken => StatusCode::FORBIDDEN,
-        C::DuplicateCommandIdempotencyKey | C::DependencyLockConflict | C::StructuralMutationConflict => {
+        C::UnauthorizedCapabilityToken | C::PluginCapabilityDenied => StatusCode::FORBIDDEN,
+        C::DuplicateCommandIdempotencyKey | C::DependencyLockConflict | C::StructuralMutationConflict | C::StalePartitionFencingToken => {
             StatusCode::CONFLICT
         }
         C::CommandExpiredOrFutureTooFar

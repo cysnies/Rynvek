@@ -172,7 +172,7 @@ impl PostgresStore {
         let tx = client.transaction().await.map_err(db_err)?;
         let row = tx
             .query_one(
-                "SELECT latest_revision,fencing_token,game_mode FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE",
+                "SELECT latest_revision,fencing_token,game_mode,world_profile,visibility,execution_profile FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE",
                 &[&uuid_text(&c.world)],
             )
             .await
@@ -183,7 +183,9 @@ impl PostgresStore {
             .map_err(db_err)?
             .get(0));
         let active:bool=tx.query_one("SELECT EXISTS(SELECT 1 FROM matches WHERE world_id=$1::text::uuid AND match_state NOT IN ('Completed','Aborted'))",&[&uuid_text(&c.world)]).await.map_err(db_err)?.get(0);
-        if !active || row.get::<_, String>(2) != "PvP_Ranked" {
+        let general = row.get::<_, String>(2) == "General_Controlled" && row.get::<_, String>(3) == "General_Circle_v1"
+            && row.get::<_, i16>(4) == 0 && row.get::<_, String>(5) == "D0_Strict";
+        if !general && (!active || row.get::<_, String>(2) != "PvP_Ranked") {
             return Err(crate::transactions::conflict("排位已终局"));
         }
         if let Some(r) = tx
@@ -229,7 +231,7 @@ impl PostgresStore {
         )
         .await
         .map_err(db_err)?;
-        let n=tx.execute("UPDATE ranked_host_leases h SET expires_at_s=floor(extract(epoch FROM clock_timestamp()))::bigint+$3 FROM worlds w WHERE h.world_id=$1::text::uuid AND w.world_id=h.world_id AND w.fencing_token=$2 AND h.fencing_token=$2 AND h.expires_at_s>floor(extract(epoch FROM clock_timestamp()))::bigint AND EXISTS(SELECT 1 FROM matches m WHERE m.world_id=w.world_id AND m.match_state NOT IN ('Completed','Aborted'))",&[&uuid_text(&world),&i(fence),&i(HOST_TTL_S)]).await.map_err(db_err)?;
+        let n=tx.execute("UPDATE ranked_host_leases h SET expires_at_s=floor(extract(epoch FROM clock_timestamp()))::bigint+$3 FROM worlds w WHERE h.world_id=$1::text::uuid AND w.world_id=h.world_id AND w.fencing_token=$2 AND h.fencing_token=$2 AND h.expires_at_s>floor(extract(epoch FROM clock_timestamp()))::bigint AND ((w.game_mode='General_Controlled' AND w.world_profile='General_Circle_v1' AND w.visibility=0 AND w.execution_profile='D0_Strict') OR EXISTS(SELECT 1 FROM matches m WHERE m.world_id=w.world_id AND m.match_state NOT IN ('Completed','Aborted')))",&[&uuid_text(&world),&i(fence),&i(HOST_TTL_S)]).await.map_err(db_err)?;
         tx.commit().await.map_err(db_err)?;
         Ok(n == 1)
     }

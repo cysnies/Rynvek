@@ -551,12 +551,8 @@ impl MemoryStore {
         let mut t = self.lock();
         let now = crate::ids::unix_now_s();
         let w = t.worlds.get(&c.world).ok_or_else(|| missing_fk("世界"))?;
-        if w.game_mode != "PvP_Ranked"
-            || !t
-                .matches
-                .values()
-                .any(|m| m.world_id == c.world && !m.match_state.is_terminal())
-        {
+        if !w.is_controlled_general() && (w.game_mode != "PvP_Ranked"
+            || !t.matches.values().any(|m| m.world_id == c.world && !m.match_state.is_terminal())) {
             return Err(conflict("排位已终局"));
         }
         if let Some(h) = t.ranked_hosts.get(&c.world) {
@@ -584,9 +580,8 @@ impl MemoryStore {
         let mut t = self.lock();
         let now = crate::ids::unix_now_s();
         let valid = t.worlds.get(&world).is_some_and(|w| w.fencing_token == fence)
-            && t.matches
-                .values()
-                .any(|m| m.world_id == world && !m.match_state.is_terminal())
+            && (t.worlds.get(&world).is_some_and(|w| w.is_controlled_general()) || t.matches
+                .values().any(|m| m.world_id == world && !m.match_state.is_terminal()))
             && t.ranked_hosts
                 .get(&world)
                 .is_some_and(|h| h.fence == fence && h.expires_at_s > now);

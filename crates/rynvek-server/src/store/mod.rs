@@ -72,6 +72,16 @@ pub struct WorldRow {
     pub fencing_token: u64,
 }
 
+impl WorldRow {
+    /// 明确的单Chunk受限World服务器剖面，不借用排位/无限资源沙盒语义。
+    pub fn is_controlled_general(&self) -> bool {
+        self.world_profile == "General_Circle_v1"
+            && self.game_mode == "General_Controlled"
+            && self.execution_profile == "D0_Strict"
+            && self.visibility == rynvek_security::Visibility::Private
+    }
+}
+
 /// `world_commits`
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitRow {
