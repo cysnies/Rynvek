@@ -26,5 +26,6 @@ pub use invariant::{InvariantId, InvariantRegistry, InvariantReport};
 pub use phase::{CanonicalPhaseId, KERNEL_IMMUTABLE_PHASES, TickCommitManifest};
 
 pub mod life;
+pub mod rules;
 pub mod persistence;
 pub mod physics;

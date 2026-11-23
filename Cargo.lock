@@ -3214,6 +3214,7 @@ dependencies = [
 name = "rynvek-rules"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "naga",
  "rquickjs",
  "rynvek-core",
@@ -3289,6 +3290,7 @@ dependencies = [
  "rynvek-field",
  "rynvek-journal",
  "rynvek-neural",
+ "rynvek-rules",
  "rynvek-snapshot",
  "rynvek-spatial",
  "serde",

@@ -54,6 +54,7 @@ pub struct SimulationEngine {
     pub phase_exec_counts: [u64; 16],
     /// 已执行的 10Hz 连续环境场步数（每 3 个 30Hz Tick 递增 1）
     pub field_steps_completed: u64,
+    pub(crate) rules: Option<crate::rules::GeneralRulesState>,
     pub(crate) life: Option<crate::life::LifeStore>,
 }
 
@@ -89,6 +90,7 @@ impl SimulationEngine {
             phase_exec_counts: [0; 16],
             field_steps_completed: 0,
             life: None,
+            rules: None,
         };
         world.publish_commit(world.authoritative_commit([0; 32]));
         world
@@ -131,6 +133,9 @@ impl SimulationEngine {
         life.genesis_energy_q = crate::life::nutrient_energy_q(&self.field).map_err(SimulationError::Invariant)?;
         crate::life::assert_closed(&life, &self.field).map_err(SimulationError::Invariant)?;
         self.life = Some(life);
+        if let Some(rules) = &self.rules {
+            rules.validate(&self).map_err(SimulationError::Invariant)?;
+        }
         self.publish_commit(self.authoritative_commit([0; 32]));
         Ok(self)
     }
@@ -253,7 +258,8 @@ impl SimulationEngine {
                 Ok(())
             }
             CanonicalPhaseId::ControllerAndRuleEval => {
-                // 生命世界的运动意图已在神经阶段付费写入；声明式规则主体仍待后续阶段。
+                self.step_component_rules().map_err(SimulationError::Invariant)?;
+                // 声明组件与受控运动意图沿原Phase07执行，随后才进入原物理阶段。
                 self.backend
                     .dispatch_1d(KernelId("sim.tick_phase_noop"), 1)
                     .map_err(|e| SimulationError::Dispatch(format!("{e:?}")))?;
@@ -316,6 +322,9 @@ impl SimulationEngine {
                         ));
                     }
                 }
+                if let Some(rules) = &self.rules {
+                    rules.validate(self).map_err(SimulationError::Invariant)?;
+                }
                 let report = self.invariants.check(&snap);
                 if let Some((_, code)) = report.failed.first() {
                     return Err(SimulationError::Invariant(*code));
@@ -352,7 +361,14 @@ impl SimulationEngine {
     }
 
     pub(crate) fn hash_entities(&self) -> [u8; 32] {
-        self.physics.hash()
+        if let Some(rules) = &self.rules {
+            let mut h = blake3::Hasher::new();
+            h.update(&self.physics.hash());
+            h.update(&rules.state_hash());
+            *h.finalize().as_bytes()
+        } else {
+            self.physics.hash()
+        }
     }
 
     pub(crate) fn hash_economy(&self) -> [u8; 32] {

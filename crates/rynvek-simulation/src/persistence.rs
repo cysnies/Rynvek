@@ -51,6 +51,9 @@ impl SimulationEngine {
         if let Some(life) = &self.life {
             config.extend_from_slice(&life.hash_accounts());
         }
+        if let Some(rules) = &self.rules {
+            config.extend_from_slice(&rules.config_hash());
+        }
         let roots = CommitSubRoots {
             entity_root_hash: self.hash_entities(),
             field_root_hash: hash(&self.field.authority_bytes()),
@@ -122,6 +125,14 @@ impl SimulationEngine {
                 payload: serde_json::to_vec(&life.snapshot_dto()).map_err(|_| ERROR)?,
             });
         }
+        if let Some(rules) = &self.rules {
+            rules.validate(self)?;
+            let payload = serde_json::to_vec(rules).map_err(|_| ERROR)?;
+            if payload.len() > crate::rules::MAX_RULES_STATE_BYTES {
+                return Err(ERROR);
+            }
+            chunks.push(SnapshotCustomChunk { tag: *b"RULS", payload });
+        }
         let neur = self.life.as_ref().and_then(|l| l.neur_chunk());
         Ok(SnapshotWriter::write_bytes_with_chunks(
             self.world_id,
@@ -147,16 +158,16 @@ impl SimulationEngine {
         {
             return Err(ERROR);
         }
+        let expected_chunks =
+            4 + usize::from(read.find_chunk(*b"LIFE").is_some()) + usize::from(read.find_chunk(*b"RULS").is_some());
+        let mut tags = std::collections::BTreeSet::new();
         if read.header.format_version != rynvek_snapshot::header::CANONICAL_SNAPSHOT_VERSION
             || read.header.flags != rynvek_snapshot::header::SNAPSHOT_FLAG_ZSTD
-            || !(read.custom_chunks.len() == 4 || read.custom_chunks.len() == 5)
+            || read.custom_chunks.len() != expected_chunks
+            || read.custom_chunks.iter().any(|c| {
+                !tags.insert(c.tag) || !matches!(&c.tag, b"CMIT" | b"COMP" | b"FILD" | b"RNGS" | b"LIFE" | b"RULS")
+            })
         {
-            return Err(ERROR);
-        }
-        if read.find_chunk(*b"LIFE").is_none() && read.custom_chunks.len() != 4 {
-            return Err(ERROR);
-        }
-        if read.find_chunk(*b"LIFE").is_some() && read.custom_chunks.len() != 5 {
             return Err(ERROR);
         }
         let commit = CommitManifest::decode(read.find_chunk(CMIT_TAG).ok_or(ERROR)?)?;
@@ -183,6 +194,7 @@ impl SimulationEngine {
         let mut world = Self::new(read.header.world_id);
         world.field = rynvek_field::FieldWorld::from_authority_bytes(read.find_chunk(*b"FILD").ok_or(ERROR)?)?;
         let life_bytes = read.find_chunk(*b"LIFE").map(|b| b.to_vec());
+        let rules_bytes = read.find_chunk(*b"RULS").map(|b| b.to_vec());
         let neur = read.neur;
         world.physics.registry = read.registry;
         world.physics.bodies = PagedComponentColumn::new();
@@ -199,6 +211,14 @@ impl SimulationEngine {
             crate::life::assert_closed(world.life.as_ref().unwrap(), &world.field)?;
         } else if neur.is_some() {
             return Err(ERROR);
+        }
+        if let Some(raw) = rules_bytes {
+            if raw.len() > crate::rules::MAX_RULES_STATE_BYTES {
+                return Err(ERROR);
+            }
+            let rules: crate::rules::GeneralRulesState = serde_json::from_slice(&raw).map_err(|_| ERROR)?;
+            rules.validate(&world)?;
+            world.rules = Some(rules);
         }
         world.clock.tick = commit.tick;
         world.clock.world_revision = commit.world_revision;
