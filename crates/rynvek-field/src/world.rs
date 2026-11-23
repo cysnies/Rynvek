@@ -135,6 +135,43 @@ impl FieldWorld {
         Ok(world)
     }
 
+    pub fn interior(&self, id: FieldChannelId, x: usize, y: usize) -> Result<i16, RynvekErrorCode> {
+        if x >= TILE_DIM || y >= TILE_DIM {
+            return Err(RynvekErrorCode::DimensionMismatch);
+        }
+        let tile = self.channel(id);
+        Ok(tile.current_buf()[(y + HALO) * STRIDE + (x + HALO)])
+    }
+
+    /// 只扣除当前格实际正值，永不低于 0，也不先扣后钳。
+    pub fn withdraw_positive(
+        &mut self,
+        id: FieldChannelId,
+        x: usize,
+        y: usize,
+        want: u32,
+    ) -> Result<u32, RynvekErrorCode> {
+        let cur = self.interior(id, x, y)?;
+        if cur <= 0 || want == 0 {
+            return Ok(0);
+        }
+        let take = (cur as u32).min(want);
+        let tile = self.channel_mut(id);
+        tile.current_buf_mut()[(y + HALO) * STRIDE + (x + HALO)] = cur - take as i16;
+        Ok(take)
+    }
+
+    /// 按通道上限存入，超出部分由调用方另行处理，不抬高 max_val。
+    pub fn deposit_room(&mut self, id: FieldChannelId, x: usize, y: usize, add: u32) -> Result<u32, RynvekErrorCode> {
+        let cur = self.interior(id, x, y)?;
+        let max = self.channel(id).params.max_val_q8;
+        let room = i32::from(max).saturating_sub(i32::from(cur)).max(0) as u32;
+        let add = add.min(room);
+        let tile = self.channel_mut(id);
+        tile.current_buf_mut()[(y + HALO) * STRIDE + (x + HALO)] = cur + add as i16;
+        Ok(add)
+    }
+
     /// 在指定通道内区写入一个脉冲（测试辅助）
     pub fn set_interior(&mut self, id: FieldChannelId, x: usize, y: usize, value: i16) {
         assert!(x < TILE_DIM && y < TILE_DIM);
