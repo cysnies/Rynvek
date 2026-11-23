@@ -94,7 +94,7 @@ pub fn verify(input: &VerifyInput<'_>, plugins: &PluginRuntime) -> Result<Verify
             scan_rview(&pkg, target, &mut findings)?;
             serde_json::json!({ "status": "not_applicable" })
         }
-        PackageKind::Rpack => scan_rpack(&pkg, plugins, &mut findings)?,
+        PackageKind::Rpack => scan_rpack(&pkg, input.artifact, plugins, &mut findings)?,
         PackageKind::Rworld => scan_rworld(pkg, input.lockfile)?,
     };
     Ok(VerifyReport {
@@ -139,10 +139,23 @@ fn check_json_entries(pkg: &Package) -> Result<(), ApiError> {
 
 fn scan_rpack(
     pkg: &Package,
+    artifact: &[u8],
     plugins: &PluginRuntime,
     findings: &mut Vec<serde_json::Value>,
 ) -> Result<serde_json::Value, ApiError> {
     check_json_entries(pkg)?;
+    if pkg
+        .file("rule.json")
+        .and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok())
+        .is_some_and(|v| v["profile"] == rynvek_rules::package::TIER0_BUILD_PROFILE)
+    {
+        let built = rynvek_rules::package::Tier0RulePackage::parse(artifact)
+            .map_err(|e| reject(format!("Tier0构建剖面拒绝：{}", e.detail)))?;
+        findings.push(
+            serde_json::json!({"build_profile":rynvek_rules::package::TIER0_BUILD_PROFILE,
+            "rule_module":built.module.name,"graph_rir_recompiled_equal":true,"ts_source_equivalence":false}),
+        );
+    }
     for (e, data) in pkg.entries_of("rule_module") {
         let module = rynvek_rules::rir::decode_rir(data).map_err(|err| reject(format!("{}：{err}", e.path)))?;
         findings.push(serde_json::json!({ "path": e.path, "rule_module": module.name }));

@@ -299,3 +299,90 @@ async fn rworld_publish_upload_and_fs_cas_roundtrip() {
     assert_error(&r, 400, 0x7001);
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn signed_tier0_build_recompiles_ir_and_rejects_self_attested_source_or_graph_swap() {
+    use rynvek_core::package::{PackageInput, PackageInputEntry, PackageKind, read_package, write_package};
+    let server = start_server(false).await;
+    let base = server.base_url();
+    let user = register(&base, "alice", "human", 1).await;
+    let graph = r#"{"format":"rynvek.rule-graph.v1","name":"signed-ast-build","reads":[],"writes":[{"component":"state.a","ty":"I32"}],"nodes":[{"op":"ConstI32","imm":"1"},{"op":"EmitComponentWrite","component":"state.a","args":[0]}]}"#;
+    let bytes = rynvek_rules::package::build_tier0_package("alice.ast", "1.0.0", "CC0-1.0", graph).unwrap();
+    let r = publish(
+        &base,
+        &user,
+        "rpack",
+        "alice.ast",
+        "1.0.0",
+        "CC0-1.0",
+        &bytes,
+        empty_lock(),
+    )
+    .await;
+    assert_eq!(r.status, 201, "{:?}", r.json());
+    let response = r.json().unwrap();
+    assert!(
+        response["verification"]["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["graph_rir_recompiled_equal"] == true && f["ts_source_equivalence"] == false)
+    );
+    assert_eq!(response["verification"]["sandbox"]["status"], "not_applicable");
+    let p = read_package(&bytes, Some(PackageKind::Rpack)).unwrap();
+    for (version, source) in [("1.0.1", false), ("1.0.2", true)] {
+        let mut entries: Vec<_> = p
+            .manifest
+            .entries
+            .iter()
+            .map(|e| PackageInputEntry {
+                path: e.path.clone(),
+                kind: e.kind.clone(),
+                media_type: e.media_type.clone(),
+                data: p.file(&e.path).unwrap().to_vec(),
+            })
+            .collect();
+        if source {
+            entries.push(PackageInputEntry {
+                path: "rule.ts".into(),
+                kind: "rule_source".into(),
+                media_type: "text/typescript".into(),
+                data: b"export default 0".to_vec(),
+            });
+        } else {
+            entries.iter_mut().find(|e| e.path == "graph.json").unwrap().data =
+                graph.replace("\"imm\":\"1\"", "\"imm\":\"2\"").into_bytes();
+        }
+        // 容器重封装及发布签名都合法，语义伪造仍须由唯一构建验证器拒绝。
+        let forged = write_package(&PackageInput {
+            kind: PackageKind::Rpack,
+            id: "alice.ast".into(),
+            version: version.into(),
+            name: "signed-ast-build".into(),
+            license: "CC0-1.0".into(),
+            engine_compat: p.manifest.engine_compat.clone(),
+            entries,
+        })
+        .unwrap();
+        assert_error(
+            &publish(
+                &base,
+                &user,
+                "rpack",
+                "alice.ast",
+                version,
+                "CC0-1.0",
+                &forged,
+                empty_lock(),
+            )
+            .await,
+            422,
+            0x9004,
+        );
+    }
+    assert_eq!(
+        server.state.store().package_versions("alice.ast").await.unwrap().len(),
+        1
+    );
+    server.shutdown().await;
+}

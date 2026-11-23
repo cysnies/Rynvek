@@ -42,3 +42,5 @@ pub use rir::{RIR_MAGIC, decode_rir, encode_rir};
 #[cfg(feature = "quickjs")]
 pub use sandbox::{QuickJsSandbox, QuickJsSandboxConfig, SandboxTickOutput};
 pub use wgsl::emit_wgsl_compute_shader;
+
+pub mod package;
