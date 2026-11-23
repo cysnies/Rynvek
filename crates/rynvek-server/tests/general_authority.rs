@@ -84,8 +84,8 @@ async fn acquire(s: &RunningServer, u: &User, id: WireUuid, h: u64, level: &str)
 }
 fn input(u: &User, h: u64, l: u64, tick: u64, commands: Vec<PhysicsCommand>) -> GeneralInput {
     GeneralInput {
-        install:None,
-        recovery:None,
+        install: None,
+        recovery: None,
         host_fence: h,
         control_fence: l,
         envelope: CommandEnvelope {
@@ -399,7 +399,7 @@ async fn forged_private_wal_cannot_replay_even_with_a_valid_cas_digest() {
     let mut i = input(&u, 1, 1, 0, vec![]);
     i.envelope.payload.push(PhysicsCommand::Despawn { serial: 999 });
     let record = GeneralTickRecord {
-        installation:None,
+        installation: None,
         format: "rynvek-general-tick/1".into(),
         base_revision: 0,
         base_root: root,
@@ -474,5 +474,34 @@ async fn release_duplicate_collision_bad_time_and_legacy_routes_never_publish() 
     changed.envelope.payload.push(PhysicsCommand::Despawn { serial: 1 });
     assert_eq!(step(&s, &u, id, &changed).await.status, 409);
     assert_eq!(s.state.store().get_world(id).await.unwrap().unwrap().latest_revision, 1);
+    s.shutdown().await;
+}
+
+#[tokio::test]
+async fn current_identity_is_original_authenticated_active_self_only_and_private_no_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let u = register(&s.base_url(), "general-web-identity", "human", 114).await;
+    let url = format!("{}/api/v1/auth/session", s.base_url());
+    assert_eq!(client::get(&url, None).await.unwrap().status, 401);
+    assert_eq!(
+        client::get(&url, Some("invalid-test-capability")).await.unwrap().status,
+        401
+    );
+    let r = client::get(&url, Some(&u.token)).await.unwrap();
+    assert_eq!(r.status, 200);
+    assert_eq!(r.header("cache-control"), Some("private, no-store"));
+    assert_eq!(r.header("vary"), Some("Authorization"));
+    let value = r.json().unwrap();
+    assert_eq!(value["principal_id"], u.principal_id.to_string());
+    assert_eq!(value["kind"], "Human");
+    assert_eq!(value["ed25519_pubkey"], rynvek_server::ids::hex(&u.key.public_key()));
+    assert!(value.get("token").is_none());
+    let list = client::get(&format!("{}/api/v1/worlds", s.base_url()), Some(&u.token))
+        .await
+        .unwrap();
+    assert_eq!(list.header("cache-control"), Some("private, no-store"));
+    s.state.store().tombstone_principal(u.principal_id).await.unwrap();
+    assert_eq!(client::get(&url, Some(&u.token)).await.unwrap().status, 403);
     s.shutdown().await;
 }

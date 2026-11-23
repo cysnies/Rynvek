@@ -116,12 +116,11 @@ pub async fn list(State(app): State<AppState>, headers: HeaderMap, Query(page): 
         .store()
         .list_worlds(Some(subject.principal_id), limit, offset)
         .await?;
-    Ok(Json(serde_json::json!({
+    Ok(([(axum::http::header::CACHE_CONTROL,"private, no-store"),(axum::http::header::VARY,"Authorization")], Json(serde_json::json!({
         "worlds": worlds.iter().map(world_json).collect::<Vec<_>>(),
         "limit": limit,
         "offset": offset,
-    }))
-    .into_response())
+    }))).into_response())
 }
 
 #[derive(Deserialize)]

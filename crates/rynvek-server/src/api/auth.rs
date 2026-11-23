@@ -184,3 +184,31 @@ pub async fn session(State(app): State<AppState>, headers: HeaderMap, body: Byte
         _ => Err(ApiError::bad_request("challenge 与 signature 必须同时提供")),
     }
 }
+
+/// 只读回当前正式身份，不解码前端自报主体或返回令牌；沿原认证和Active状态。
+pub async fn current(State(app): State<AppState>, headers: HeaderMap) -> ApiResult<Response> {
+    let token = app.authenticate(&headers)?;
+    let subject = app.subject(&token).await?;
+    if subject.status != PrincipalStatus::Active {
+        return Err(ApiError::forbidden("身份非Active"));
+    }
+    let principal = app
+        .store()
+        .get_principal(subject.principal_id)
+        .await?
+        .ok_or_else(|| ApiError::unauthenticated("身份不存在"))?;
+    if principal.status != PrincipalStatus::Active {
+        return Err(ApiError::forbidden("身份非Active"));
+    }
+    Ok((
+        [
+            (header::CACHE_CONTROL, "private, no-store"),
+            (header::VARY, "Authorization"),
+        ],
+        axum::Json(serde_json::json!({
+            "principal_id":subject.principal_id.to_string(),"kind":format!("{:?}",subject.kind),
+            "ed25519_pubkey":hex(&principal.ed25519_pubkey),"status":"Active"
+        })),
+    )
+        .into_response())
+}

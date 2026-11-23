@@ -84,7 +84,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/meta/health", get(meta::health))
         .route("/api/v1/meta/source-offer", get(meta::source_offer))
         .route(crate::source::SBOM_PATH, get(meta::sbom))
-        .route("/api/v1/auth/session", post(auth::session))
+        .route("/api/v1/auth/session", post(auth::session).get(auth::current))
         .route("/api/v1/worlds", get(worlds::list).post(worlds::create))
         .route("/api/v1/worlds/general", post(crate::general_host::create))
         .route("/api/v1/worlds/{world_id}/general", get(crate::general_host::observe).post(crate::general_host::control))
