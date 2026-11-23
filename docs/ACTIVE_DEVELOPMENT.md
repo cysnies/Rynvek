@@ -5,6 +5,20 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十九批：耐久运行SDK/CLI/Web可用闭环，并继续C#真实General主体（从main c86a97c继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 核干净PUBLIC远端 `c86a97c16a320d05669761d63991d102837aebb0`、原交接/ACTIVE与最终D337/D386/D570。没有重做58后台，没有改选已完成协作Web；详见 [GENERAL_RUN_CLIENTS.md](GENERAL_RUN_CLIENTS.md)。
+
+- TS GeneralRunClient、原Rust SDK/CLI完整显式budget start/status/lookup/pause/resume/cancel；await前固定规格/操作，精确绑定归属/键/预算/回执，不自动取控制或重发。规则max_energy_q只计原paid_q，不承诺世界总能耗。
+- Web独立服务器面板主动预算/consent/原双fence启动、原提交键失回执查询、状态与Memory/PG标识、显式操作键暂停恢复取消；未确认保留原动作代次，GET收据才确认。不用旧客户端Tick循环代替后台。隐藏/断开只清私有显示，不cancel；会话/世界/epoch及卸载迟到成功拒绝。
+- 主链后继续C#实际GeneralWorldClient及真实.NET挑战登录/原Actor耐久HTTP程序，不是空接口。保持u64精确和原安全传输；C#自己重登录，未借测试夹具Bearer，后台3步实付与原Store同根。私包完整C#发布/验签安装仍欠。
+- 本批100个不同自动用例通过，13新增：SDK39、Web工作台15+原driver/viewport/Studio21、真实CLI2、General20（该文件原Node ignored显式执行）、C#3（两个真实场景均显式执行）；另C#4组自检。Node22.23.5、.NET10.0.404真实重编0警告；SDK/Web类型/构建与真实wasm32/Vite包通过，非浏览器/GPU实测。
+- 原Store/Actor双fence、ABAC/目的/fog/有源计价/最终锁撤销及持久幂等无弱化、无调度器重写。58真PG17.12应用SIGKILL 3→8实证保留，本批未新跑PG，不泛称OS/DB断电/多机长稳。
+
+已交付SDK/CLI `937e8e0`、Web/真实HTTP `d0ad856`；C#真实主体 `99c3e31`；交接文档另作普通提交，最终远端见交接/Page。必要敏感特征筛查，不删原资料，无外部模型/支付/私有外发或网络绕过。旧.NET SDK缺失SourceLink build目录，正常官方包SHA512核验后独立恢复，不关闭SourceLink保护。
+
+剩余首要主体为全平台QuickJS(WASM)、C#私包/Agent与完整规范World；多节点亲和公平/实际PG并发故障、协作者明确耐久委托仍欠。真实browser/硬件GPU、PG/OS断电多机24h长稳、全项目Node矩阵与完整安全发布门禁仍欠，不把阶段数或客户端功能齐备当全项目进度。以下历史保留。
+
 ## 第五十八批：耐久运行意图→原Actor服务器后台实付→暂停取消撤权→真实PG进程恢复（从main 02fab14继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE、真实D337/D570和干净PUBLIC远端 `02fab1473990242c3c5966e874f1c53bf946fef7`。本批落实指定耐久主体，不再改选阶段57协作Web；详见 [GENERAL_DURABLE_RUNS.md](GENERAL_DURABLE_RUNS.md)。
