@@ -5,6 +5,19 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十六批：General按目的隔离准入到原Actor规则驱动与恢复（从main bb6beb9继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE/真实规范及干净 PUBLIC 远端 `bb6beb9c6e4849e0954d095a0f2a9f8d0267c029`。按依赖先接最小协作规则驱动主体，没有重做 WASM；完整链及边界见 [GENERAL_PURPOSE_RULE_DRIVE.md](GENERAL_PURPOSE_RULE_DRIVE.md)。
+
+- 同一原准入表新增明确目的，旧记录默认只限Studio；Memory键/PG迁移0012为世界+主体+目的，CAS版本/列表/配额独立，不把源码许可升级控制。所有者显式consent，仅Active正式Human与原WorldConnect/Read/Edit scopes，无Agent/组织共享扩权。
+- driver只得六字段身体帧，不得owner观察/元数据/源码/私包下载；复用原Action/GeneralInput，只限Connect/Sovereign Acquire/Release/空规则Tick，拒Close/安装/维护/结构命令/无规则物理推进。仍在原TickCommitter提交锁核目的/精确grant、ABAC/宿主双fence/RulePermit；费用沿用原世界配置，有源夹具正EnergyQ实付守恒，不把CPU配额叫生物能量。
+- 控制租约绑定grant版本；撤销或重授权清失效旧lease但不重置fence，不偷抢有效人类租约。新私有`/4`日志显式记录协作版本，旧owner日志仍严格owner；恢复不把历史grant当当前权限，同grant重启取原幂等回执，新grant不能复用旧key/控制fence。duplicate只回原提交，不假带当前帧。
+- TS SDK复用原传输/有界JSON/信封编码；owner显式列表与CAS授权，driver明确观察/连接/控制/单Tick/交还，无后台循环或重试/邀请/外部provider。真实Node→HTTP→原Actor→私有恢复及原Engine帧校验已跑；不是协作Web面板或耐久自治完成。
+
+68个不同必要定向通过，新增17，重跑不累计：General18（7新，含Node）、私库12（1新）、原Studio2、SDK33（8新）、Store3（1新）。相关Node22.23.5/TS类型、SDK与Engine构建、Rust锁定离线/必要格式/diff/敏感筛查通过；原AST/SDK/Web跨工具链显式include-ignored真跑。首次恢复日志边界与Node帧ID夹具错误已实测修正，没降生产保护或原帧validator。
+
+下一仍欠General耐久服务作业与协作Web/发现产品流、全平台QuickJS(WASM)、签名登录/分页编辑发布UI、Agent/C#规则链与全规范World等。PG迁移/SQL仅类型与人工审，实际PG并发/多机断电长稳、真实browser/硬件GPU、C#本批重编、全项目Node22矩阵与完整安全发布门禁欠实证。不重试/绕既往受管loopback、不擅部署或发私有内容，无外部模型/支付调用；保原fog/有源事务/私有隔离，不以阶段结束标整体完成。以下历史保留。
+
 ## 第五十五批：已有SDK恢复、新General真实WASM与有界实付运行（从main 724825d继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核干净PUBLIC远端、阶段54交接/ACTIVE/真实规范与历史官方SDK32记录；没有重复下载已有工具。详见[GENERAL_WASM_BOUNDED_RUN.md](GENERAL_WASM_BOUNDED_RUN.md)。

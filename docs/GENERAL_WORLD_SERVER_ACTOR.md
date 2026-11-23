@@ -71,3 +71,5 @@
 ## 阶段53：真实Web操作观察入口
 
 已有 `/general` 基于原SDK/权限Actor的创建发现、明确控制、签名包安装与维护状态，见[GENERAL_WORLD_WEB.md](GENERAL_WORLD_WEB.md)。上文阶段49“未接通Web”保留为历史；本批仍没有远程General Renderer/Worker桥接、WebSocket/协作或浏览器硬件验收，不以本地假World替代。
+
+阶段56更新：显式目的隔离的规则协作者已接同一Actor/准入提交锁/私有恢复；owner完整观察边界不变，详见 [GENERAL_PURPOSE_RULE_DRIVE.md](GENERAL_PURPOSE_RULE_DRIVE.md)。不是第二套权限或耐久自治完成。
