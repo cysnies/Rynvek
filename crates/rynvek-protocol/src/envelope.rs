@@ -18,6 +18,7 @@ pub struct CommandEnvelope<P> {
     /// UUIDv7 幂等键：服务端据此拒绝重复提交（`0x8002 DuplicateCommandIdempotencyKey`）
     pub idempotency_key: IdempotencyKey,
     /// 发起命令的 `Principal`
+    #[serde(deserialize_with = "deserialize_principal_id")]
     pub principal_id: u64,
     /// 客户端发出命令时观察到的最新权威 Tick
     pub issued_at_tick: u64,
@@ -27,6 +28,25 @@ pub struct CommandEnvelope<P> {
     pub payload: P,
 }
 
+// 原JSON数值输入兼容；JS客户端可发规范十进制字符串，禁止浮点截断u64身份。
+fn deserialize_principal_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Id {
+        Number(u64),
+        Text(String),
+    }
+    match Id::deserialize(d)? {
+        Id::Number(n) => Ok(n),
+        Id::Text(s) => {
+            let n = s.parse::<u64>().map_err(serde::de::Error::custom)?;
+            if s != n.to_string() {
+                return Err(serde::de::Error::custom("主体须规范u64十进制"));
+            }
+            Ok(n)
+        }
+    }
+}
 /// 命令可接受的 Tick 时间窗
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CommandTickWindow {
@@ -262,5 +282,33 @@ mod tests {
         };
         let text = serde_json::to_string(&event).unwrap();
         assert_eq!(serde_json::from_str::<EventEnvelope<u8>>(&text).unwrap(), event);
+    }
+}
+
+#[cfg(test)]
+mod decimal_identity_tests {
+    use super::*;
+    #[test]
+    fn exact_u64_string_accepts_without_changing_original_numeric_encoding() {
+        let base = serde_json::json!({"idempotency_key":"019aabbc-dddd-7eee-8fff-000000000001","principal_id":"18446744073709551615","issued_at_tick":0,"target_tick":1,"payload":[]});
+        let value: CommandEnvelope<Vec<u8>> = serde_json::from_value(base.clone()).unwrap();
+        assert_eq!(value.principal_id, u64::MAX);
+        assert_eq!(
+            serde_json::to_value(value).unwrap()["principal_id"],
+            serde_json::json!(u64::MAX)
+        );
+        for id in ["01", "-1", "18446744073709551616", "1.0"] {
+            let mut invalid = base.clone();
+            invalid["principal_id"] = serde_json::json!(id);
+            assert!(serde_json::from_value::<CommandEnvelope<Vec<u8>>>(invalid).is_err());
+        }
+        let mut numeric = base;
+        numeric["principal_id"] = serde_json::json!(42);
+        assert_eq!(
+            serde_json::from_value::<CommandEnvelope<Vec<u8>>>(numeric)
+                .unwrap()
+                .principal_id,
+            42
+        );
     }
 }

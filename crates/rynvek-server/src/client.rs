@@ -67,7 +67,7 @@ fn decode_chunked(mut data: &[u8]) -> Result<Vec<u8>, String> {
         if size == 0 {
             return Ok(out);
         }
-        if data.len() < size + 2 {
+        if data.len() < size.checked_add(2).ok_or("chunk大小溢出")? {
             return Err("chunk 数据截断".to_owned());
         }
         out.extend_from_slice(&data[..size]);
@@ -81,6 +81,25 @@ pub async fn request(
     url: &str,
     headers: &[(&str, &str)],
     body: Option<&[u8]>,
+) -> Result<HttpResponse, String> {
+    request_inner(method, url, headers, body, None).await
+}
+/// 私有规则客户端的有界接收；旧调用不改变传输/大小语义。
+pub async fn request_limited(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&[u8]>,
+    max: usize,
+) -> Result<HttpResponse, String> {
+    request_inner(method, url, headers, body, Some(max)).await
+}
+async fn request_inner(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<&[u8]>,
+    max: Option<usize>,
 ) -> Result<HttpResponse, String> {
     let (host, path) = split_url(url)?;
     let mut stream = tokio::net::TcpStream::connect(&host)
@@ -100,7 +119,19 @@ pub async fn request(
     }
     stream.write_all(&bytes).await.map_err(|e| e.to_string())?;
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).await.map_err(|e| e.to_string())?;
+    if let Some(max) = max {
+        let cap = max.checked_add(2 * MAX_HEADER_BYTES).ok_or("接收上限溢出")?;
+        stream
+            .take(cap as u64 + 1)
+            .read_to_end(&mut raw)
+            .await
+            .map_err(|_| "私有请求接收失败")?;
+        if raw.len() > cap {
+            return Err("私有响应超过接收界限".into());
+        }
+    } else {
+        stream.read_to_end(&mut raw).await.map_err(|e| e.to_string())?;
+    }
     let head_end = raw
         .windows(4)
         .position(|w| w == b"\r\n\r\n")
@@ -133,6 +164,9 @@ pub async fn request(
     } else {
         rest.to_vec()
     };
+    if max.is_some_and(|m| body.len() > m) {
+        return Err("私有响应正文超限".into());
+    }
     Ok(HttpResponse { status, headers, body })
 }
 
@@ -230,5 +264,13 @@ mod tests {
             ("127.0.0.1:9".to_owned(), "/api".to_owned())
         );
         assert!(split_url("https://x").is_err());
+    }
+}
+
+#[cfg(test)]
+mod bounded_response_tests {
+    #[test]
+    fn malicious_chunk_length_cannot_overflow() {
+        assert!(super::decode_chunked(b"ffffffffffffffff\r\nx\r\n").is_err());
     }
 }
