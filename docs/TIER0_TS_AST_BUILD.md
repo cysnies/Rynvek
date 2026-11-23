@@ -76,3 +76,8 @@ cargo run -p rynvek-cli --offline --locked -- world recover --snapshot "$work/ge
 本段补的是完整私有规则链**必要的真实编译/可验证制品前置**，未交付owner-private规则命名空间签名发布/精确依赖锁/DAG发现/逐级验签与撤销、显式权限Actor安装及来源日志恢复。原公共Hub已有签名扫描，原Agent/视觉/音频已有私有注册表，但不能因此声称通用规则私库链现成；后续必须复用它们的原权限/私有CAS/不变版本机制，而非另造Hub或ACL。
 
 本版本地命名模块安装不是在线Epoch热更新，也不声称已签名或自动依赖求解。需要后续把精确包身份/CID/签名/锁/撤销与安装准入、提交及恢复绑定；不能把本地嵌图当此证明。General仍为单Chunk/Private所有者显式Tick；一般World/完整生命材料生长遗传、多Chunk/三维、Agent独立赛道、协作presence/离线多主等主体仍欠。主体齐后集中完整门禁、安全及正式发布打磨，不以本批结束宣布项目完成。
+
+
+## 阶段51接续（保留上文当批历史边界）
+
+现已接通有界Tier0私有签名精确包组的真实HTTP发布/发现/逐级下载验签、原权限Actor下一Coupling Epoch显式安装、原有源实付Tick及私有来源证据恢复，详见[PRIVATE_RULE_PACKAGES.md](PRIVATE_RULE_PACKAGES.md)。不修改本地叶子RYPK三条目fence，不把此共同安装剖面称全规范跨种类锁/任意World完成；历史撤销与活Tick分开，非Epoch暂停后安全续跑仍欠，PG多机/断电/真实硬件和完整发布门禁仍待实证。

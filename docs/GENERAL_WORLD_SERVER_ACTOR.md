@@ -57,3 +57,8 @@
 本批未跑全workspace/Clippy/license/SBOM/完整安全/soak/CI轮询。Node22正式运行时、C#重编、wasm32、真实浏览器硬件GPU、真实PG并发SQL/多机/断电/24h长稳依旧未验；llvmpipe仍只保留阶段41软件回读口径。旧6个PvP_Custom Actor夹具须补真实lease前提，禁止降低生产fence。
 
 下一主体：TS AST、完整私有rpack签名依赖发现/验签/安装链；通用权限链虽已接入，还不是所有Actor单一实现/协作准入及General浏览器流。完整材料/生长/自然遗传迁入、多Chunk/三维/任意组件、Agent独立赛道、presence/离线多主等仍欠。主体齐后集中完整门禁、安全与正式发布打磨。
+
+
+## 阶段51接续（保留上文当批历史边界）
+
+现已接通有界Tier0私有签名精确包组的真实HTTP发布/发现/逐级下载验签、原权限Actor下一Coupling Epoch显式安装、原有源实付Tick及私有来源证据恢复，详见[PRIVATE_RULE_PACKAGES.md](PRIVATE_RULE_PACKAGES.md)。不修改本地叶子RYPK三条目fence，不把此共同安装剖面称全规范跨种类锁/任意World完成；历史撤销与活Tick分开，非Epoch暂停后安全续跑仍欠，PG多机/断电/真实硬件和完整发布门禁仍待实证。

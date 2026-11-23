@@ -5,6 +5,25 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十一批：私有签名精确规则包组到原权限Actor实付Tick/恢复（从main ef19014继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核阶段50交接/ACTIVE/远端均为干净 `ef19014a7be910f63fdef0ee516ac526648aa3e2`；不重做AST。实际入口/协议和明确边界见[PRIVATE_RULE_PACKAGES.md](PRIVATE_RULE_PACKAGES.md)。
+
+- 原Tier0三条目叶子RYPK不放宽；新版本化 `rynvek-private-rule-release/1` **整体签名**owner/精确身份/实际制品CID/直接锁，每层重验登记公钥、原唯一包解析与图IR。依赖仅同owner，拒绝范围/缺失/撤销/错CID/冲突/环；闭包16包/深度8/总1MiB。不是未签外层锁，不是JS import或全规范跨种类锁/迁移已经完成。
+- 原Agent/音频/视觉私库存取核心泛化、旧表/接口原位；复用原Active/HubPublish/WorldRead、私有CAS、不可变版本/配额/墓碑。真实HTTP发布/发现/逐级验签下载/撤销，不写公共Hub索引/CAS；他人404，不因知道CID即可下载，不在发布时隐式执行或拿控制权。
+- 显式 `action: install` 经原ABAC/Active/人类Sovereign/宿主与控制双fence；完整闭包一对一映射已有绑定模块，下一Coupling Epoch与原Tick共同原子提交，不能拆包组或覆盖Tier1。保留组件动态态、生命/来源账、价格与身体，原Phase07计量/正价EnergyAccount实付；欠费/坏输出不发布规则、摄食、根或回执。失败保原帧速率扣费，但修复提前污染命令幂等键的问题；成功/恢复仍走原回执/APM。
+- 安装完整签名证据CID进入原配置根/快照；私有v2安装WAL与原v1 Tick兼容，原锚点/重仿真及签名DAG恢复同根。最终撤销/pins复验在原Store提交锁/PG事务内与editor/Active/fence/前驱一起线性化，非只在路由预检。撤销不抹历史，但后续活Tick拒绝；非Epoch暂停后安全续跑流程仍欠，不假称任意时刻可换装。
+
+主体提交：`ed70a2f` 私库核心复用/原提交守卫；`fd45c35` 耦合候选/来源根；`a75250e` 签名发布发现下载；`73dd19c` 原Actor实付在线安装/私有恢复及真实链测试。文档HEAD由交接/原Page/远端记录，不制造自引用；PUBLIC普通push main核远端，不force/no-verify/admin/改历史/保护/网络策略或删原资料。
+
+### 快验与剩余主体/发布阻塞
+
+46个不同定向通过，新增7，重跑不累计：私有规则7（含显式真实Node AST重复构建→双签名依赖→在线安装/实付位移/私有恢复；301Tick含300锚点后缀；锁/身份/隔离/撤销/菱形冲突/环/深度/Epoch/双fence/欠费原子性/Store提交锁撤销竞争）；原General权限9；原私库Agent2/音频3/视觉2共7（另一Agent ignore未计）；原仿真规则10/生命8；原命令门5。必要server/CLI原生锁定编译、PG代码仅类型、新增主体格式/diff/必要敏感筛查，不是全门禁安全审计。
+
+有界Tier0共同安装链已真实贯通，**不是任意World/任意TS/全规范私有rpack所有剖面完成**。专用发布/安装CLI/TS/C#产品工作流、跨种类锁/Schema迁移/组织信任、撤销后非Epoch安全续跑、General浏览器流/协作主体准入/统一调度、完整生命材料/生长/自然遗传迁入、多Chunk/三维/任意World、Agent独立赛道和presence/离线多主仍欠。旧6个PvP_Custom Actor夹具补真实lease，不降生产fence。
+
+实际Node24.22.1/TS5.8.3；Node22/C#本批重编/wasm32/真实browser硬件GPU/PG并发SQL多机断电24h长稳仍须实证，MemoryStore+文件CAS不是替身证明。未跑全workspace/Clippy/license/SBOM/完整安全/soak/CI轮询；主体齐后集中门禁安全运行时与正式发布打磨，不以本阶段宣布项目完成。以下旧批次保留为当时历史口径，以本节为当前状态。
+
 ## 第五十批：真实TS AST、可复验Tier0构建与原World实付链（从main d44e92a继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核阶段49交接/ACTIVE/远端均为干净 `d44e92af451b3fde1821f28357235388f03102da`，不重做统一权限入口。依最终规范08的AST/Builder→图→原三遍编译，先补私有规则链必要的真实源码/制品前置，非作者自附TS伪证；精确入口/限制见[TIER0_TS_AST_BUILD.md](TIER0_TS_AST_BUILD.md)。
