@@ -5,6 +5,27 @@
 
 更新时间：2026-11-18，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第四十一批：私有受限.rview主题与原renderer真实消费（从main 2082bd3继续）
+
+**主体继续，整体未完成。** 已闭合原签名RYVW私有主题 → 有界扫描/精确library依赖 → SDK发现下载验签 → `/arena`显式应用 → 原FrameScene/WorldRenderer真实八色参数，不是未消费容器或工业美术。入口/格式/限制见[PRIVATE_VISUAL_THEMES.md](PRIVATE_VISUAL_THEMES.md)。
+
+### 实际入口与安全范围
+
+- `/arena`自己的真实控制席位 → 私有受限视觉主题 / RVIEW：原SDK签名JSON显式发布到本人私库、发现精确版本、校验下载/应用、查看许可证署名；应用只改世界背景与七阵营不透明色，须显式点击。原API/鉴权/Store/CAS/签名/精确依赖/owner隔离复用，新表`private_visual_versions`，无外部发行或部署。
+- 私有profile `rynvek.private-visual.v1` / `opaque-palette/1`：只许palette.json/theme.json，包≤64KiB、令牌≤8、仅`--rv-world-bg`与七阵营`#RRGGBB`。拒shader/纹理/脚本/应用层令牌/透明色；通用.rview着色器不在本链加载或执行。精确依赖与撤销边界同既有私库。只许CC0/CC-BY，CC-BY须署名。
+- 原WorldRenderer/FrameScene消费打包色：单位/建筑用主题阵营色，未知格用主题背景遮挡地形；fog可见性规则不变，隐藏实体不进场景。Canvas2D回退同步同一主题；GPU路径须Worker回执才确认。换世界/断连/撤销恢复内置，不补播。
+- 不冒称HRTF无关；亦不伪装最终工业美术、任意危险shader或完整视觉编辑器。Arena/11、CURRENT_11、WAL/2、Lab kernel/4不变。
+
+### 必要验证与未验
+
+8个不同直接用例通过（新增8，重跑不累计）：主题解析/拒绝2、面板显式应用与换世界隔离2、协议1、原FrameScene主题/隐藏实体1（本机llvmpipe软件GPU离线回读未知格背景在同一用例内实际执行）、Rust扫描1、本机认证HTTP→Node SDK签名根/library→发现/下载/验签→实际`privateVisualTheme`1。必要包build、web类型、engine/server编译与diff检查通过。
+
+**llvmpipe离线回读不是真实浏览器WebGPU或独立显卡听验式验收**；真实浏览器/硬件GPU/PG实库/断电多机长稳未验。不把MemoryStore/文件CAS当PG灾备。未跑workspace/Clippy/license/SBOM/soak/CI轮询，无额外运行时依赖/公共发行/外部部署/外采美术或网络浏览器策略绕过。
+
+### 下一主体
+
+优先收拢完整生命成本仍欠项：通用生长/材料体量、EMIT、连续神经/规则计价。一般TS/rpack/物理ECS、独立Agent赛道/真实LLM、协作presence/离线多主等仍保留；Pi仍MIT设计借鉴未引代码。主体齐后集中全面验收，不宣称全产品完成。
+
 ## 第四十批：正式PCM采样与原Arena二维空间化（从main 9bf6584继续）
 
 **主体继续，整体未完成。** 已闭合原签名私有RYPK真实PCM采样 → 有界扫描/精确library依赖 → SDK发现下载/校验 → 原Arena手势采样图 → 当前可见实体位置/真实renderer相机声像与距离衰减，不是未消费容器。视觉registry/.rview主题与音频无直接模型依赖，留作下一完整主体，不塞静态视觉空壳。入口/生成示例/数学/格式及限制见[PCM_SPATIAL_AUDIO.md](PCM_SPATIAL_AUDIO.md)。
@@ -628,7 +649,8 @@ Lab这段已闭合后转**Pi参考的受控Agent Adapter/独立Agent执行治理
 | 已推进，仍有边界 | 第三十八批一般参数模型→持久Lab/W3扫描→原四表/UI SDK真实消费 | 无原生身体/自然谱系/生命账；bounded RuleGraph不是任意TS/rpack，真HTTP/同Store重建非PG灾备 |
 | 已推进，仍有边界 | 第三十九批真实发射、护盾/治疗、Spitter分泌与出生合成实付、规范根/WAL与Lab精确子账 | 显式玩家角色；不是一般生长/材料合成或EMIT/连续计算计价，真实PG/硬件仍未验 |
 | 已推进，仍有边界 | 第四十批签名私有受限PCM→精确依赖→原Arena手势采样与可见实体/真实相机二维空间化 | 真HTTP/SDK/WS/PCM节点路径，录制设备不是DSP听验；旧v1数据保留不加适配 |
-| 下一主体优先 | 视觉registry/签名受限.rview主题与原renderer消费 | 私有扫描/精确依赖/发现下载→真实受限主题/视觉应用，不跑任意危险shader/脚本，不冒称工业美术 |
+| 已推进，仍有边界 | 第四十一批签名私有受限.rview主题→精确依赖→原FrameScene/WorldRenderer八色消费 | 真HTTP/SDK/场景与llvmpipe离线回读，不是浏览器/独立显卡；不伪装工业美术 |
+| 下一主体优先 | 完整生命成本仍欠的通用生长/材料体量、EMIT、连续神经/规则计价 | 按已有权威动作链实付，不造免费能量/体量，不把收费项名当完整生态 |
 | 主体完成后集中 | 集成门禁、长期种群/资源稳定、性能、浏览器、硬件GPU、真实PG、断电、24小时 | 届时真实执行记录，不复用旧CI截图；现有网络策略不绕过 |
 
-本阶段交付签名私有受限PCM采样与原Arena真实可见音源/原相机二维空间化完整消费链；下一视觉registry/.rview主题及原renderer消费。生命成本剩余一般生长/材料体量、EMIT、计算等与其它全产品欠项持续保留，不把音频链完成当全项目完成。每个可交付阶段普通commit/push后继续主体，只有真实阻塞才请求最小用户动作。
+本阶段交付签名私有受限.rview主题与原renderer真实八色消费链；下一优先收拢生命成本仍欠的通用生长/材料体量、EMIT与连续计算计价。其它全产品欠项持续保留，不把视觉链完成当全项目完成。每个可交付阶段普通commit/push后继续主体，只有真实阻塞才请求最小用户动作。
