@@ -215,7 +215,7 @@ struct RemoteArgs {
 
 async fn run(cli: Cli) -> CliResult {
     match cli.command {
-        Command::Rule(command) => rule::execute(command),
+        Command::Rule(command) => rule::execute(command).await,
         Command::World(command) => general::execute(command),
         Command::Server(a) => remote::serve(a).await,
         Command::Keygen { out } => keys::keygen(&out),
