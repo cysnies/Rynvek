@@ -5,6 +5,43 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第四十五批：原RYPK Tier1组件执行与Studio/Lab真实消费（从main a426d11继续）
+
+**主体继续，整体未完成。** 复用原容器/QuickJS与Phase07，原owner/editor只构建不执行→明确Epoch安装→真实组件变化/粗CPU回执→快照/WAL恢复与原Lab精确源捕获；不是文档占位或新建假World。能力、来源、限制与入口见[TIER1_COMPONENT_PACKAGES.md](TIER1_COMPONENT_PACKAGES.md)。PUBLIC普通续推授权保持，未改可见性/历史/保护/网络策略。
+
+- core承载原唯一RYPK解析器，world复用；限定rule.json/rule.js/可选rule.ts，构建不执行顶层，不加载URL/模块/插件，TS只作可选来源，不伪证已自动转译。
+- 原模板/实例的显式reads、精确有序整数写集；Tier0/Tier1读同一旧态并组件整组原子提交，声明冲突安装时拒绝，运行错或非法输出回滚参数候选。新鲜Context无跨Tick隐态，原500000共享CPU配额/QuickJS堆栈限制，回执不是生物能价。
+- `/studio` 原工作台新增“构建受控RYPK（不执行）”与“显式提交Tier1制品”；原修订/权限/fence/撤销/重做/私有读回。身份断开或401/403/404清私有草稿和待提交包，不留假可写结果。原Lab参数模型v2带原包精确字节，不静默丢Tier1。
+- Arena快照15、CURRENT_15、Lab kernel/8；线上Arena JSON仍/2、WAL仍2。不接旧格式、不删资料。仅有界参数组件，仍欠通用World/真实物理ECS、Tier0 TS AST/完整rpack依赖与私有Hub安装链、Agent独立赛道/实际智能、协作presence/离线多主等主体。
+
+### 定向验证与未验
+
+实现提交：`b97cf008336339890f1d202bb68bfcfae99592c9`（原容器/QuickJS权威组件链、私有构建、源捕获与恢复实证）、`dcd3fbe9aca9877b366a986aacaa38e635640c7d`（原Studio/SDK明确应用、制品摘要及身份清理）。
+
+55个不同定向用例通过（新增13，重跑不累计）：Tier1原包/访问/整数类型/同Tick事务/沙箱边界/真实Lab扫描8、原Lab参数模型/四表3、原QuickJS7、原唯一包解析器4、原World参数registry2、真实本机私有HTTP/WS Actor与WAL1、Studio远端/协作/参数SDK11、Lab TS模型4、原React Studio/Lab15。
+
+`examples/rules/tier1-counter.ts` 经当前tsc编译为单文件全局JS，真实构建API只出RYPK、不安装；非所有者404，显式Epoch4提交，Tick6组件值精确为9，Epoch8删除后冻结12，私有源码读回与完整源捕获一致。原初始快照文件回读→全部真实已提交WAL文件副本逐条重演（含安装/执行/删除）→逐根核对Actor成功；另含原快照恢复后继续Tick、4组seed/参数轨迹与实际四表Parquet，不拿内存镜像当恢复。Store/CAS仍为本机内存夹具，文件回读不等于PG/进程崩溃/物理断电验收。
+
+必要RTS库检查、真实server测试编译、Studio/Lab及被修复box清掉的必要依赖build、web类型与diff检查通过。开发中box曾超时并恢复较早快照，部分未提交测试/产物丢失；已在保留主体基础上恢复快验、固定lockfile恢复本地依赖，未重做已推阶段44。定向测试补上原registry测试遗漏的错误码import；旧PvP_Custom Actor测试夹具缺真实排位lease的前置问题曾触发正确fence退役，本批新增测试使用真实私有PvE单席位，不关闭或绕过fence。其余6个未选中旧Actor用例不计通过，夹具与真实租约前置对齐仍属集中门禁整改项。
+
+本批必要更改/新增文件凭据、私人联系信息与敏感文件名筛查无命中，提交身份与既有公开提交一致；不是完整秘密审计。未做全workspace/Clippy/license/SBOM/soak/CI轮询或外部部署/模型/支付。
+
+本批定向命令（重跑不累计，其他过滤用例不算通过）：
+
+```sh
+cargo check -p rynvek-rts --lib --offline
+cargo test -p rynvek-server --test active_transactions tier1_private_build_explicit_epoch_tick_and_wal_restore --offline
+cargo test -p rynvek-rts --features arrow --test tier1_rules --test lab_parameters --offline
+cargo test -p rynvek-rules --features quickjs --test sandbox_quickjs --offline
+cargo test -p rynvek-core package::tests --offline
+cargo test -p rynvek-world --test parameter_registry --offline
+pnpm --filter @rynvek/studio exec vitest run test/remote.test.ts test/collaboration.test.ts test/parameter_registry.test.ts
+pnpm --filter @rynvek/lab exec vitest run test/parameters.test.ts
+pnpm --filter @rynvek/web-platform exec vitest run test/studio_workspace.test.tsx test/lab_workspace.test.tsx
+```
+
+Node24检查不是Node22运行时验收；本批C#重编、真实浏览器WebGPU/硬件GPU、真实PG多机断电长稳仍未验，llvmpipe仍只是阶段41软件回读。完整workspace/Clippy/license/SBOM/安全/运行时/发布验收留主体齐后集中执行，不以本批或M0–M8宣布项目完成。
+
 ## 第四十四批：野生有来源供能与原生命因果链（从main 56231b5继续）
 
 **主体继续，整体未完成。** 保持PUBLIC普通续推；沿用本地checkout与认证gh持续授权，未改可见性、历史、保护或网络策略。来源、完整契约、实际入口、格式与未验边界见[WILD_SOURCE_ECOLOGY.md](WILD_SOURCE_ECOLOGY.md)。
