@@ -218,6 +218,7 @@ impl PostgresStore {
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0009_studio_editors.sql")).await.map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0010_private_visual.sql")).await.map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0011_private_rules.sql")).await.map_err(db_err)?;
+        c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0012_admission_purpose.sql")).await.map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -296,26 +297,31 @@ impl PostgresStore {
     }
 
     async fn editor_allowed(tx:&tokio_postgres::Transaction<'_>,world:WireUuid,p:&super::EditorPermit)->StoreResult<()> {
-        let r=tx.query_one("SELECT EXISTS(SELECT 1 FROM worlds w JOIN principals p ON p.principal_id=$2 JOIN principals o ON o.principal_id=w.owner_principal_id AND o.status=0 WHERE w.world_id=$1::text::uuid AND p.status=0 AND ((w.owner_principal_id=$2 AND $3::text IS NULL) OR (w.visibility=0 AND EXISTS(SELECT 1 FROM world_editor_grants g WHERE g.world_id=w.world_id AND g.principal_id=$2 AND g.active AND g.grant_id::text=$3))))",&[&uuid_text(&world),&i(p.principal_id),&p.grant_id.map(|g|uuid_text(&g))]).await.map_err(db_err)?;
+        let r=tx.query_one("SELECT EXISTS(SELECT 1 FROM worlds w JOIN principals p ON p.principal_id=$2 JOIN principals o ON o.principal_id=w.owner_principal_id AND o.status=0 WHERE w.world_id=$1::text::uuid AND p.status=0 AND ($4::smallint=0 OR ((w.owner_principal_id=$2 OR p.principal_kind=0) AND w.world_profile='General_Circle_v1' AND w.game_mode='General_Controlled' AND w.execution_profile='D0_Strict' AND w.visibility=0)) AND ((w.owner_principal_id=$2 AND $3::text IS NULL) OR (w.visibility=0 AND EXISTS(SELECT 1 FROM world_editor_grants g WHERE g.world_id=w.world_id AND g.principal_id=$2 AND g.active AND g.purpose=$4 AND g.grant_id::text=$3))))",&[&uuid_text(&world),&i(p.principal_id),&p.grant_id.map(|g|uuid_text(&g)),&(p.purpose as i16)]).await.map_err(db_err)?;
         if !r.get::<_,bool>(0){return Err(ApiError::forbidden("创作准入已撤销或身份失效"));} Ok(())
     }
     pub async fn check_editor(&self,world:WireUuid,p:super::EditorPermit)->StoreResult<()> {let mut c=self.client.lock().await;let tx=c.transaction().await.map_err(db_err)?;Self::editor_allowed(&tx,world,&p).await}
     pub async fn editor_grants(&self,world:WireUuid)->StoreResult<Vec<super::EditorGrant>> {
         let c=self.client.lock().await;
-        c.query("SELECT principal_id,grant_id::text,active FROM world_editor_grants WHERE world_id=$1::text::uuid ORDER BY principal_id",&[&uuid_text(&world)]).await.map_err(db_err)?.iter().map(|r|Ok(super::EditorGrant{world_id:world,principal_id:u(r.get(0)),grant_id:parse_uuid(r.get::<_,String>(1))?,active:r.get(2)})).collect()
+        c.query("SELECT principal_id,grant_id::text,active,purpose FROM world_editor_grants WHERE world_id=$1::text::uuid ORDER BY principal_id,purpose",&[&uuid_text(&world)]).await.map_err(db_err)?.iter().map(|r|Ok(super::EditorGrant{world_id:world,principal_id:u(r.get(0)),grant_id:parse_uuid(r.get::<_,String>(1))?,active:r.get(2),purpose:super::AdmissionPurpose::from_code(r.get(3)).ok_or_else(||corrupt("未知准入目的"))?})).collect()
     }
     pub async fn change_editor(&self,owner:u64,g:super::EditorGrant,expected:Option<WireUuid>)->StoreResult<()> {
         let mut c=self.client.lock().await;let tx=c.transaction().await.map_err(db_err)?;
-        let w=tx.query_opt("SELECT owner_principal_id,visibility FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE",&[&uuid_text(&g.world_id)]).await.map_err(db_err)?.ok_or_else(||ApiError::not_found("世界不存在"))?;
+        let w=tx.query_opt("SELECT owner_principal_id,visibility,world_profile,game_mode,execution_profile FROM worlds WHERE world_id=$1::text::uuid FOR UPDATE",&[&uuid_text(&g.world_id)]).await.map_err(db_err)?.ok_or_else(||ApiError::not_found("世界不存在"))?;
         if u(w.get(0))!=owner||w.get::<_,i16>(1)!=0||g.principal_id==owner {return Err(ApiError::forbidden("仅私有世界所有者可授权他人创作"));}
         let count:i64=tx.query_one("SELECT count(*) FROM principals WHERE principal_id=ANY($1) AND status=0",&[&vec![i(owner),i(g.principal_id)]]).await.map_err(db_err)?.get(0);
         if count!=2{return Err(ApiError::forbidden("正式身份不可用"));}
-        let old=tx.query_opt("SELECT grant_id::text FROM world_editor_grants WHERE world_id=$1::text::uuid AND principal_id=$2",&[&uuid_text(&g.world_id),&i(g.principal_id)]).await.map_err(db_err)?;
+        if g.purpose==super::AdmissionPurpose::GeneralRuleDrive {
+            if w.get::<_,String>(2)!="General_Circle_v1"||w.get::<_,String>(3)!="General_Controlled"||w.get::<_,String>(4)!="D0_Strict"{return Err(ApiError::forbidden("General准入目的与World不符"));}
+            let human:bool=tx.query_one("SELECT principal_kind=0 FROM principals WHERE principal_id=$1",&[&i(g.principal_id)]).await.map_err(db_err)?.get(0);
+            if !human{return Err(ApiError::forbidden("General驱动须正式人类主体"));}
+        }
+        let old=tx.query_opt("SELECT grant_id::text FROM world_editor_grants WHERE world_id=$1::text::uuid AND principal_id=$2 AND purpose=$3",&[&uuid_text(&g.world_id),&i(g.principal_id),&(g.purpose as i16)]).await.map_err(db_err)?;
         let actual=old.as_ref().map(|r|parse_uuid(r.get::<_,String>(0))).transpose()?;
         if actual!=expected {return Err(crate::transactions::conflict("准入版本改变，请刷新"));}
-        let counts=tx.query_one("SELECT count(*),count(*) FILTER(WHERE active AND principal_id<>$2) FROM world_editor_grants WHERE world_id=$1::text::uuid",&[&uuid_text(&g.world_id),&i(g.principal_id)]).await.map_err(db_err)?;
+        let counts=tx.query_one("SELECT count(*),count(*) FILTER(WHERE active AND principal_id<>$2) FROM world_editor_grants WHERE world_id=$1::text::uuid AND purpose=$3",&[&uuid_text(&g.world_id),&i(g.principal_id),&(g.purpose as i16)]).await.map_err(db_err)?;
         if old.is_none()&&counts.get::<_,i64>(0)>=64||g.active&&counts.get::<_,i64>(1)>=16{return Err(crate::transactions::conflict("创作准入配额已满"));}
-        tx.execute("INSERT INTO world_editor_grants(world_id,principal_id,grant_id,active) VALUES($1::text::uuid,$2,$3::text::uuid,$4) ON CONFLICT(world_id,principal_id) DO UPDATE SET grant_id=EXCLUDED.grant_id,active=EXCLUDED.active",&[&uuid_text(&g.world_id),&i(g.principal_id),&uuid_text(&g.grant_id),&g.active]).await.map_err(db_err)?;
+        tx.execute("INSERT INTO world_editor_grants(world_id,principal_id,grant_id,active,purpose) VALUES($1::text::uuid,$2,$3::text::uuid,$4,$5) ON CONFLICT(world_id,principal_id,purpose) DO UPDATE SET grant_id=EXCLUDED.grant_id,active=EXCLUDED.active",&[&uuid_text(&g.world_id),&i(g.principal_id),&uuid_text(&g.grant_id),&g.active,&(g.purpose as i16)]).await.map_err(db_err)?;
         tx.commit().await.map_err(db_err)
     }
     pub async fn observer_grants(&self, world: WireUuid) -> StoreResult<Vec<super::ObserverGrant>> {

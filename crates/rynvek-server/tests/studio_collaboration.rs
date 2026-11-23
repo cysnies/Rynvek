@@ -137,7 +137,7 @@ async fn real_private_multi_editor_sync_undo_revoke_regrant_and_same_store_conte
                 snapshot_cid: None,
             },
             row.fencing_token,
-            vec![EditorPermit {
+            vec![EditorPermit { purpose: rynvek_server::store::AdmissionPurpose::StudioSourceEdit,
                 principal_id: editor.principal_id,
                 grant_id: Some(out["oldGrant"].as_str().unwrap().parse().unwrap()),
             }],
@@ -193,7 +193,7 @@ async fn queued_editor_revocation_rejects_patch_without_aborting_owner_actor() {
     let task = tokio::spawn(async move {
         h.apply_patch_as(
             patch,
-            Some(EditorPermit {
+            Some(EditorPermit { purpose: rynvek_server::store::AdmissionPurpose::StudioSourceEdit,
                 principal_id: b.principal_id,
                 grant_id: Some(gid.parse().unwrap()),
             }),

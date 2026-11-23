@@ -47,6 +47,7 @@ pub mod transactions;
 pub mod visual_package;
 
 pub mod general_host;
+pub mod general_collaboration;
 
 pub mod rule_package;
 

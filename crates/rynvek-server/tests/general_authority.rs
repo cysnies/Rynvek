@@ -399,6 +399,7 @@ async fn forged_private_wal_cannot_replay_even_with_a_valid_cas_digest() {
     let mut i = input(&u, 1, 1, 0, vec![]);
     i.envelope.payload.push(PhysicsCommand::Despawn { serial: 999 });
     let record = GeneralTickRecord {
+        admission_grant_id: None,
         installation: None,
         format: "rynvek-general-tick/1".into(),
         base_revision: 0,
@@ -557,5 +558,459 @@ async fn minimal_private_render_frame_is_authoritative_read_only_and_never_conta
     assert_eq!(engine.simulation().clock.tick, 0);
     s.state.store().tombstone_principal(u.principal_id).await.unwrap();
     assert_ne!(client::get(&url, Some(&u.token)).await.unwrap().status, 200);
+    s.shutdown().await;
+}
+
+// 目的隔离规则驱动：共用上述真实HTTP/签名身份/有源世界辅助，不创建第二种世界。
+async fn driver_change(
+    s: &RunningServer,
+    o: &User,
+    id: WireUuid,
+    d: &User,
+    expected: Option<WireUuid>,
+    active: bool,
+) -> WireUuid {
+    let r=client::send_json("POST",&format!("{}/api/v1/worlds/{id}/general/drivers",s.base_url()),Some(&o.token),&json!({"principal_id":d.principal_id.to_string(),"expected_grant_id":expected,"active":active,"consent":"general-installed-rule-drive/1"})).await.unwrap();
+    assert_eq!(r.status, 200, "{:?}", r.json());
+    r.json().unwrap()["grant_id"].as_str().unwrap().parse().unwrap()
+}
+async fn driver_request(
+    s: &RunningServer,
+    d: &User,
+    id: WireUuid,
+    g: WireUuid,
+    command: Option<Value>,
+) -> client::HttpResponse {
+    let body = command.map_or_else(
+        || json!({"grant_id":g,"frame":true}),
+        |c| json!({"grant_id":g,"command":c}),
+    );
+    client::send_json(
+        "POST",
+        &format!("{}/api/v1/worlds/{id}/general/drive", s.base_url()),
+        Some(&d.token),
+        &body,
+    )
+    .await
+    .unwrap()
+}
+async fn driver_ok(s: &RunningServer, d: &User, id: WireUuid, g: WireUuid, c: Value) -> Value {
+    let r = driver_request(s, d, id, g, Some(c)).await;
+    assert_eq!(r.status, 200, "{:?}", r.json());
+    r.json().unwrap()
+}
+async fn driver_control(s: &RunningServer, d: &User, id: WireUuid, g: WireUuid) -> (u64, u64) {
+    let c = driver_ok(s, d, id, g, json!({"action":"connect"})).await;
+    assert!(c.get("observation").is_none());
+    let h = c["host_fence"].as_u64().unwrap();
+    let a = driver_ok(
+        s,
+        d,
+        id,
+        g,
+        json!({"action":"acquire","host_fence":h,"level":"Sovereign"}),
+    )
+    .await;
+    (h, a["lease"]["fencing_token"].as_u64().unwrap())
+}
+#[tokio::test]
+async fn general_driver_consent_and_studio_purpose_never_upgrade_or_overwrite_each_other() {
+    use rynvek_server::store::{AdmissionPurpose, EditorPermit};
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let o = register(&s.base_url(), "driver-purpose-owner", "human", 141).await;
+    let d = register(&s.base_url(), "driver-purpose-guest", "human", 142).await;
+    let id = create(&s, &o, &rules()).await;
+    let base = format!("{}/api/v1/worlds/{id}", s.base_url());
+    let bad = json!({"principal_id":d.principal_id.to_string(),"expected_grant_id":null,"active":true,"consent":"studio-source-edit/1"});
+    assert_eq!(
+        client::send_json("POST", &format!("{base}/general/drivers"), Some(&o.token), &bad)
+            .await
+            .unwrap()
+            .status,
+        400
+    );
+    let old = client::send_json("POST", &format!("{base}/authoring/editors"), Some(&o.token), &bad)
+        .await
+        .unwrap();
+    assert_eq!(old.status, 200);
+    let studio = old.json().unwrap()["grant_id"]
+        .as_str()
+        .unwrap()
+        .parse::<WireUuid>()
+        .unwrap();
+    assert_eq!(driver_request(&s, &d, id, studio, None).await.status, 404);
+    let general = driver_change(&s, &o, id, &d, None, true).await;
+    assert!(
+        s.state
+            .store()
+            .check_editor(
+                id,
+                EditorPermit {
+                    principal_id: d.principal_id,
+                    grant_id: Some(general),
+                    purpose: AdmissionPurpose::StudioSourceEdit
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert!(
+        s.state
+            .store()
+            .check_editor(
+                id,
+                EditorPermit {
+                    principal_id: d.principal_id,
+                    grant_id: Some(studio),
+                    purpose: AdmissionPurpose::GeneralRuleDrive
+                }
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(s.state.store().editor_grants(id).await.unwrap().len(), 2);
+    for suffix in ["", "/general", "/general/frame", "/commits"] {
+        assert_eq!(
+            client::get(&format!("{base}{suffix}"), Some(&d.token))
+                .await
+                .unwrap()
+                .status,
+            404
+        );
+    }
+    assert_eq!(action(&s, &d, id, json!({"action":"connect"})).await.status, 404);
+    let a = client::get(&format!("{base}/authoring/editors"), Some(&o.token))
+        .await
+        .unwrap()
+        .json()
+        .unwrap();
+    assert_eq!(a["grants"].as_array().unwrap().len(), 1);
+    assert_eq!(a["grants"][0]["grant_id"], studio.to_string());
+    let b = client::get(&format!("{base}/general/drivers"), Some(&o.token))
+        .await
+        .unwrap()
+        .json()
+        .unwrap();
+    assert_eq!(b["grants"].as_array().unwrap().len(), 1);
+    assert_eq!(b["grants"][0]["grant_id"], general.to_string());
+    let revoke = json!({"principal_id":d.principal_id.to_string(),"expected_grant_id":studio,"active":false,"consent":"studio-source-edit/1"});
+    assert_eq!(
+        client::send_json("POST", &format!("{base}/authoring/editors"), Some(&o.token), &revoke)
+            .await
+            .unwrap()
+            .status,
+        200
+    );
+    assert_eq!(driver_request(&s, &d, id, general, None).await.status, 200);
+    s.shutdown().await;
+}
+#[tokio::test]
+async fn general_driver_only_minimal_frames_and_empty_installed_rule_ticks_are_paid() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let o = register(&s.base_url(), "driver-paid-owner", "human", 143).await;
+    let d = register(&s.base_url(), "driver-paid-guest", "human", 144).await;
+    let id = create(&s, &o, &rules()).await;
+    let g = driver_change(&s, &o, id, &d, None, true).await;
+    let before = view(&s, &o, id).await;
+    let r = driver_request(&s, &d, id, g, None).await;
+    assert_eq!(r.status, 200);
+    assert!(
+        r.headers
+            .iter()
+            .any(|(k, v)| k.eq_ignore_ascii_case("cache-control") && v.contains("no-store"))
+    );
+    let f = r.json().unwrap()["frame"].clone();
+    let mut keys = f.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(keys, ["bodies", "format", "revision", "stateRoot", "tick", "worldId"]);
+    assert!(s.state.store().ranked_host(id).await.unwrap().is_none());
+    let (h, l) = driver_control(&s, &d, id, g).await;
+    for action in [
+        json!({"action":"close","host_fence":h,"control_fence":l}),
+        json!({"action":"install","input":input(&d,h,l,0,vec![])}),
+        json!({"action":"recover","input":input(&d,h,l,0,vec![])}),
+        json!({"action":"tick","input":input(&d,h,l,0,vec![PhysicsCommand::Despawn{serial:1}])}),
+    ] {
+        assert_eq!(driver_request(&s, &d, id, g, Some(action)).await.status, 403);
+    }
+    let mut forged = input(&d, h, l, 0, vec![]);
+    forged.envelope.principal_id = o.principal_id;
+    assert_eq!(
+        driver_request(&s, &d, id, g, Some(json!({"action":"tick","input":forged})))
+            .await
+            .status,
+        403
+    );
+    assert_eq!(view(&s, &o, id).await, before);
+    let i = input(&d, h, l, 0, vec![]);
+    let r = driver_ok(&s, &d, id, g, json!({"action":"tick","input":i})).await;
+    assert!(r.get("observation").is_none());
+    assert_eq!(r["frame"]["tick"], 1);
+    assert_ne!(r["frame"]["bodies"], f["bodies"]);
+    let after = view(&s, &o, id).await;
+    assert!(after["rule_meter"]["paid_q"].as_u64().unwrap() > 0);
+    assert_eq!(after["life"]["universe_energy_q"], before["life"]["universe_energy_q"]);
+    let dup = driver_ok(&s, &d, id, g, json!({"action":"tick","input":i})).await;
+    assert_eq!(dup["duplicate"], true);
+    assert!(dup.get("frame").is_none());
+    assert_eq!(view(&s, &o, id).await, after);
+    let commits = s.state.store().list_commits(id).await.unwrap();
+    let row = commits.last().unwrap();
+    let raw = s
+        .state
+        .inner
+        .world_snapshots
+        .get(&Blake3Hash(row.journal_segment_cid))
+        .unwrap();
+    let record: GeneralTickRecord = serde_json::from_slice(&raw).unwrap();
+    assert_eq!(record.admission_grant_id, Some(g));
+    assert_eq!(record.format, "rynvek-general-tick/4");
+    assert_eq!(record.input.envelope.principal_id, d.principal_id);
+    let genesis = rules().instantiate(id.0).unwrap();
+    assert!(record.replay(&genesis).is_ok());
+    let mut wrong = record.clone();
+    wrong.admission_grant_id = None;
+    assert!(wrong.replay(&genesis).is_err(), "/4不可抹去目的版本");
+    let mut wrong = record.clone();
+    wrong.format = "rynvek-general-tick/1".into();
+    assert!(wrong.replay(&genesis).is_err(), "旧格式不可偷带协作目的");
+    let mut wrong = record.clone();
+    wrong.input.envelope.payload.push(PhysicsCommand::Despawn { serial: 1 });
+    assert!(wrong.replay(&genesis).is_err(), "目的版本不授结构编辑");
+    assert!(s.state.inner.blobs.get(&Blake3Hash(row.journal_segment_cid)).is_err());
+    s.shutdown().await;
+}
+#[tokio::test]
+async fn general_driver_regrant_cannot_reuse_old_control_fence_or_receipt() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let o = register(&s.base_url(), "driver-fence-owner", "human", 145).await;
+    let d = register(&s.base_url(), "driver-fence-guest", "human", 146).await;
+    let id = create(&s, &o, &rules()).await;
+    let g = driver_change(&s, &o, id, &d, None, true).await;
+    let (h, l) = driver_control(&s, &d, id, g).await;
+    let old = input(&d, h, l, 0, vec![]);
+    driver_ok(&s, &d, id, g, json!({"action":"tick","input":old})).await;
+    assert_eq!(
+        action(
+            &s,
+            &o,
+            id,
+            json!({"action":"acquire","host_fence":h,"level":"Sovereign"})
+        )
+        .await
+        .status,
+        403,
+        "不能偷抢有效人类租约"
+    );
+    let revoked = driver_change(&s, &o, id, &d, Some(g), false).await;
+    assert_eq!(driver_request(&s, &d, id, g, None).await.status, 404);
+    let fresh = driver_change(&s, &o, id, &d, Some(revoked), true).await;
+    assert_ne!(
+        driver_request(
+            &s,
+            &d,
+            id,
+            fresh,
+            Some(json!({"action":"tick","input":input(&d,h,l,1,vec![])}))
+        )
+        .await
+        .status,
+        200
+    );
+    let l2 = driver_ok(
+        &s,
+        &d,
+        id,
+        fresh,
+        json!({"action":"acquire","host_fence":h,"level":"Sovereign"}),
+    )
+    .await["lease"]["fencing_token"]
+        .as_u64()
+        .unwrap();
+    assert!(l2 > l);
+    let mut retry = old.clone();
+    retry.control_fence = l2;
+    assert_eq!(
+        driver_request(&s, &d, id, fresh, Some(json!({"action":"tick","input":retry})))
+            .await
+            .status,
+        409
+    );
+    assert_eq!(view(&s, &o, id).await["commit"]["tick"], 1);
+    driver_ok(
+        &s,
+        &d,
+        id,
+        fresh,
+        json!({"action":"tick","input":input(&d,h,l2,1,vec![])}),
+    )
+    .await;
+    assert_eq!(view(&s, &o, id).await["commit"]["tick"], 2);
+    s.shutdown().await;
+}
+#[tokio::test]
+async fn general_driver_revocation_is_rechecked_in_original_store_commit_lock() {
+    use rynvek_server::store::{AdmissionPurpose, CommitRow, EditorPermit};
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let o = register(&s.base_url(), "driver-lock-owner", "human", 147).await;
+    let d = register(&s.base_url(), "driver-lock-guest", "human", 148).await;
+    let id = create(&s, &o, &rules()).await;
+    let g = driver_change(&s, &o, id, &d, None, true).await;
+    let (h, l) = driver_control(&s, &d, id, g).await;
+    let before = view(&s, &o, id).await;
+    let mut candidate = rules().instantiate(id.0).unwrap();
+    let root = candidate.parent_commit_hash;
+    candidate.tick_with_commands(&[]).unwrap();
+    let manifest = candidate.authoritative_commit(root);
+    let record = GeneralTickRecord {
+        format: "rynvek-general-tick/4".into(),
+        base_revision: 0,
+        base_root: root,
+        input: input(&d, h, l, 0, vec![]),
+        commit_bytes: manifest.encode(),
+        installation: None,
+        admission_grant_id: Some(g),
+    };
+    let cid = s
+        .state
+        .inner
+        .world_snapshots
+        .put(&serde_json::to_vec(&record).unwrap())
+        .unwrap();
+    driver_change(&s, &o, id, &d, Some(g), false).await;
+    assert!(
+        s.state
+            .store()
+            .append_commit_guarded(
+                CommitRow {
+                    world_id: id,
+                    world_revision: 1,
+                    tick: 1,
+                    parent_revision: Some(0),
+                    state_root_blake3: candidate.parent_commit_hash,
+                    journal_segment_cid: cid.0,
+                    snapshot_cid: None
+                },
+                h,
+                vec![EditorPermit {
+                    principal_id: d.principal_id,
+                    grant_id: Some(g),
+                    purpose: AdmissionPurpose::GeneralRuleDrive
+                }],
+                vec![]
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(view(&s, &o, id).await, before);
+    assert_eq!(s.state.store().list_commits(id).await.unwrap().len(), 1);
+    let own = acquire(&s, &o, id, h, "Sovereign").await;
+    assert!(own > l, "撤销后所有者能经原租约管理器收回，不重置fence");
+    s.shutdown().await;
+}
+#[tokio::test]
+async fn general_driver_requires_scopes_active_human_and_exact_world_binding() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let o = register(&s.base_url(), "driver-scope-owner", "human", 149).await;
+    let d = register(&s.base_url(), "driver-scope-guest", "human", 150).await;
+    let agent = register(&s.base_url(), "driver-scope-agent", "agent", 151).await;
+    let id = create(&s, &o, &rules()).await;
+    let other = create(&s, &o, &rules()).await;
+    let g = driver_change(&s, &o, id, &d, None, true).await;
+    let token = s.state.inner.tokens.write().unwrap().issue(
+        d.principal_id,
+        rynvek_protocol::CapabilityScopeSet::default()
+            .with(CapabilityScope::WorldRead)
+            .with(CapabilityScope::WorldConnect),
+        rynvek_server::ids::unix_now_s(),
+        60,
+    );
+    let limited = User {
+        principal_id: d.principal_id,
+        token: rynvek_server::app::encode_token_text(&token),
+        key: server_key(),
+    };
+    assert_eq!(driver_request(&s, &limited, id, g, None).await.status, 200);
+    assert_eq!(
+        driver_request(&s, &limited, id, g, Some(json!({"action":"connect"})))
+            .await
+            .status,
+        403
+    );
+    assert_eq!(driver_request(&s, &d, other, g, None).await.status, 404);
+    let b = json!({"principal_id":agent.principal_id.to_string(),"expected_grant_id":null,"active":true,"consent":"general-installed-rule-drive/1"});
+    assert_eq!(
+        client::send_json(
+            "POST",
+            &format!("{}/api/v1/worlds/{id}/general/drivers", s.base_url()),
+            Some(&o.token),
+            &b
+        )
+        .await
+        .unwrap()
+        .status,
+        403
+    );
+    let bare = create(&s, &o, &physical()).await;
+    let bg = driver_change(&s, &o, bare, &d, None, true).await;
+    let (bh, bl) = driver_control(&s, &d, bare, bg).await;
+    assert_eq!(
+        driver_request(
+            &s,
+            &d,
+            bare,
+            bg,
+            Some(json!({"action":"tick","input":input(&d,bh,bl,0,vec![])}))
+        )
+        .await
+        .status,
+        403
+    );
+    assert_eq!(
+        view(&s, &o, bare).await["commit"]["tick"],
+        0,
+        "规则目的不偷授无规则物理推进"
+    );
+    s.state.store().tombstone_principal(d.principal_id).await.unwrap();
+    assert_ne!(driver_request(&s, &d, id, g, None).await.status, 200);
+    assert_eq!(view(&s, &o, id).await["commit"]["tick"], 0);
+    s.shutdown().await;
+}
+#[tokio::test]
+async fn general_driver_same_grant_private_recovery_keeps_receipt_and_double_fences() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let s = start(store.clone(), dir.path()).await;
+    let o = register(&s.base_url(), "driver-restore-owner", "human", 152).await;
+    let d = register(&s.base_url(), "driver-restore-guest", "human", 153).await;
+    let id = create(&s, &o, &rules()).await;
+    let g = driver_change(&s, &o, id, &d, None, true).await;
+    let (h, l) = driver_control(&s, &d, id, g).await;
+    let mut i = input(&d, h, l, 0, vec![]);
+    driver_ok(&s, &d, id, g, json!({"action":"tick","input":i})).await;
+    let expected = view(&s, &o, id).await;
+    s.shutdown().await;
+    let s = start(store, dir.path()).await;
+    assert_eq!(view(&s, &o, id).await, expected);
+    let (h2, l2) = driver_control(&s, &d, id, g).await;
+    assert!(h2 > h);
+    assert_ne!(
+        driver_request(&s, &d, id, g, Some(json!({"action":"tick","input":i})))
+            .await
+            .status,
+        200
+    );
+    i.host_fence = h2;
+    i.control_fence = l2;
+    assert_eq!(
+        driver_ok(&s, &d, id, g, json!({"action":"tick","input":i})).await["duplicate"],
+        true
+    );
+    assert_eq!(view(&s, &o, id).await, expected);
     s.shutdown().await;
 }

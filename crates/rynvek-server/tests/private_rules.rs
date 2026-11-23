@@ -616,6 +616,7 @@ async fn revocation_after_resolution_is_rechecked_inside_original_store_commit_l
             },
             h,
             vec![EditorPermit {
+                purpose: rynvek_server::store::AdmissionPurpose::GeneralRuleDrive,
                 principal_id: u.principal_id,
                 grant_id: None,
             }],
@@ -1023,6 +1024,7 @@ async fn pending_quarantine_release_revoked_after_resolve_still_fails_original_c
                 },
                 h,
                 vec![EditorPermit {
+                    purpose: rynvek_server::store::AdmissionPurpose::GeneralRuleDrive,
                     principal_id: u.principal_id,
                     grant_id: None
                 }],
@@ -1119,4 +1121,111 @@ async fn actual_general_web_identity_create_discover_fences_install_quarantine_a
     let restored = start(store, dir.path()).await;
     assert_eq!(view(&restored, &u, id).await, before);
     restored.shutdown().await;
+}
+
+#[tokio::test]
+async fn purpose_driver_runs_owner_installed_signed_bundle_without_private_package_access() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::memory();
+    let s = start(store.clone(), dir.path()).await;
+    let owner = register(&s.base_url(), "private-driver-owner", "human", 154).await;
+    let driver = register(&s.base_url(), "private-driver-guest", "human", 155).await;
+    let id = create(&s, &owner, &bundle_world()).await;
+    let dep = published(&s, &owner, &pack("rules.drive.dep", &support_graph()), vec![]).await;
+    let root = published(
+        &s,
+        &owner,
+        &pack("rules.drive.root", &root_graph()),
+        vec![dep.reference()],
+    )
+    .await;
+    let h = connect(&s, &owner, id).await;
+    let l = acquire(&s, &owner, id, h, "Sovereign").await;
+    first_three(&s, &owner, id, h, l).await;
+    let i = install(
+        &owner,
+        h,
+        l,
+        3,
+        &root,
+        &[("rules.drive.root", "steer"), ("rules.drive.dep", "support")],
+    );
+    assert_eq!(install_action(&s, &owner, id, &i).await.status, 200);
+    ok_action(
+        &s,
+        &owner,
+        id,
+        json!({"action":"release","host_fence":h,"control_fence":l}),
+    )
+    .await;
+    let r=request(&s,Some(&owner),"POST",&format!("/api/v1/worlds/{id}/general/drivers"),json!({"principal_id":driver.principal_id.to_string(),"expected_grant_id":null,"active":true,"consent":"general-installed-rule-drive/1"})).await;
+    assert_eq!(r.status, 200, "{:?}", r.json());
+    let grant = r.json().unwrap()["grant_id"].clone();
+    let path = format!("/api/v1/worlds/{id}/general/drive");
+    let drive = |command: Value| json!({"grant_id":grant,"command":command});
+    let r = request(
+        &s,
+        Some(&driver),
+        "POST",
+        &path,
+        drive(json!({"action":"acquire","host_fence":h,"level":"Sovereign"})),
+    )
+    .await;
+    assert_eq!(r.status, 200, "{:?}", r.json());
+    let l = r.json().unwrap()["lease"]["fencing_token"].as_u64().unwrap();
+    let before = view(&s, &owner, id).await;
+    let r = request(
+        &s,
+        Some(&driver),
+        "POST",
+        &path,
+        drive(json!({"action":"tick","input":input(&driver,h,l,4,vec![])})),
+    )
+    .await;
+    assert_eq!(r.status, 200, "{:?}", r.json());
+    assert!(r.json().unwrap().get("observation").is_none());
+    let expected = view(&s, &owner, id).await;
+    assert_eq!(expected["commit"]["tick"], 5);
+    assert!(expected["rule_meter"]["paid_q"].as_u64().unwrap() > 0);
+    assert_ne!(before["bodies"], expected["bodies"]);
+    assert_eq!(
+        before["life"]["universe_energy_q"],
+        expected["life"]["universe_energy_q"]
+    );
+    for suffix in ["", "/artifact", "/resolved"] {
+        assert_eq!(
+            request(
+                &s,
+                Some(&driver),
+                "GET",
+                &format!("/api/v1/private-hub/rules/{}/{}{suffix}", root.package_id, root.version),
+                json!({})
+            )
+            .await
+            .status,
+            404
+        );
+    }
+    assert_eq!(request_revoke(&s, &owner, &dep).await, 200);
+    assert_ne!(
+        request(
+            &s,
+            Some(&driver),
+            "POST",
+            &path,
+            drive(json!({"action":"tick","input":input(&driver,h,l,5,vec![])}))
+        )
+        .await
+        .status,
+        200
+    );
+    assert_eq!(view(&s, &owner, id).await, expected);
+    s.shutdown().await;
+    let s = start(store, dir.path()).await;
+    assert_eq!(
+        view(&s, &owner, id).await,
+        expected,
+        "撤包不抹历史，也不把历史授权当当前准入"
+    );
+    s.shutdown().await;
 }

@@ -288,13 +288,25 @@ pub struct ObserverGrant {
     pub active: bool,
 }
 
-/// 每个自创PvP世界一份冻结席位生命周期；关闭后须显式fork/新建，不热换玩家或抹历史。
-/// 定向Studio源码/创作准入，不授予WorldRead、控制、分叉或归档。
+/// 同一持久准入表的目的；旧Studio记录绝不隐式升级General控制。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all="snake_case")]
+#[repr(i16)]
+pub enum AdmissionPurpose {
+    #[default]
+    StudioSourceEdit = 0,
+    GeneralRuleDrive = 1,
+}
+impl AdmissionPurpose {
+    pub fn from_code(code:i16)->Option<Self>{match code{0=>Some(Self::StudioSourceEdit),1=>Some(Self::GeneralRuleDrive),_=>None}}
+}
+/// 保留原名称兼容调用方；键为世界/主体/目的，撤销与Tick提交共用原Store锁。
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct EditorGrant { pub world_id: WireUuid, pub principal_id: u64, pub grant_id: WireUuid, pub active: bool }
+pub struct EditorGrant { pub world_id: WireUuid, pub principal_id: u64, pub grant_id: WireUuid, pub active: bool, #[serde(default)] pub purpose:AdmissionPurpose }
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EditorPermit { pub principal_id: u64, pub grant_id: Option<WireUuid> }
+pub struct EditorPermit { pub principal_id: u64, pub grant_id: Option<WireUuid>, pub purpose:AdmissionPurpose }
 
+/// 每个自创PvP世界一份冻结席位生命周期；关闭后须显式fork/新建，不热换玩家或抹历史。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustomRoom {
     pub world_id: WireUuid,
@@ -606,5 +618,15 @@ impl Store {
     }
     pub async fn audit_of(&self, principal_id: u64) -> StoreResult<Vec<AuditRow>> {
         dispatch!(self.audit_of(principal_id))
+    }
+}
+
+#[cfg(test)]
+mod admission_purpose_tests {
+    #[test]
+    fn legacy_grant_without_purpose_is_studio_only() {
+        let g:super::EditorGrant=serde_json::from_value(serde_json::json!({"world_id":"019aabbc-dddd-7eee-8fff-000000000001","principal_id":1,"grant_id":"019aabbc-dddd-7eee-8fff-000000000002","active":true})).unwrap();
+        assert_eq!(g.purpose,super::AdmissionPurpose::StudioSourceEdit);
+        assert_ne!(g.purpose,super::AdmissionPurpose::GeneralRuleDrive);
     }
 }

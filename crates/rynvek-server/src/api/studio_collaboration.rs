@@ -62,7 +62,7 @@ pub async fn admission(
             .editor_grants(wid)
             .await?
             .into_iter()
-            .find(|g| g.principal_id == s.principal_id && g.active)
+            .find(|g| g.purpose==crate::store::AdmissionPurpose::StudioSourceEdit && g.principal_id == s.principal_id && g.active)
             .ok_or_else(missing)?;
         let supplied = headers.get("x-rynvek-studio-grant").and_then(|v| v.to_str().ok());
         if (bound || supplied.is_some()) && supplied != Some(g.grant_id.to_string().as_str()) {
@@ -70,7 +70,7 @@ pub async fn admission(
         }
         Some(g.grant_id)
     };
-    let permit = EditorPermit {
+    let permit = EditorPermit { purpose: crate::store::AdmissionPurpose::StudioSourceEdit,
         principal_id: s.principal_id,
         grant_id: grant,
     };
@@ -96,7 +96,7 @@ fn grant_view(g: &EditorGrant) -> Value {
 pub async fn list(State(app): State<AppState>, headers: HeaderMap, Path(id): Path<String>) -> ApiResult<Response> {
     let w = owner(&app, &headers, &id).await?;
     Ok(response(
-        json!({"world_id":id,"grants":app.store().editor_grants(w.world_id).await?.iter().map(grant_view).collect::<Vec<_>>()}),
+        json!({"world_id":id,"grants":app.store().editor_grants(w.world_id).await?.iter().filter(|g|g.purpose==crate::store::AdmissionPurpose::StudioSourceEdit).map(grant_view).collect::<Vec<_>>()}),
     ))
 }
 #[derive(Debug, Deserialize)]
@@ -131,6 +131,7 @@ pub async fn change(
         return Err(conflict("撤销必须指定当前准入版本"));
     }
     let g = EditorGrant {
+        purpose: crate::store::AdmissionPurpose::StudioSourceEdit,
         world_id: w.world_id,
         principal_id: pid,
         grant_id: new_uuid_v7(),
