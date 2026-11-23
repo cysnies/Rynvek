@@ -57,3 +57,7 @@ cargo test -p rynvek-server --test private_rules --test general_authority --offl
 ## 阶段54追加：原Worker远程桥接代码与构建阻塞
 
 已有最小权威帧→原EntityProvider/FrameScene/Renderer及显式只读画布生命周期，详见[GENERAL_REMOTE_RENDERER.md](GENERAL_REMOTE_RENDERER.md)。上文“尚未桥接”保留阶段53历史；本箱新wasm32因缺clang构建失败，旧产物会被General能力握手主动拒显；不能将原生软件回读/TS打包称浏览器可用或硬件验收。
+
+## 阶段55续：新WASM已真实重构与有界运行
+
+阶段54缺clang源于未恢复已有官方SDK环境，本批复核原归档并正常构建新wasm32/胶水、真实General ABI与Worker打包通过，不再复用旧WASM。另有明确有界逐Tick实付运行/停止；非耐久自治或协作准入。浏览器本地Tier1当前明确整组拒绝，原生权威Tier1及其远程身体投影保持，不能称规范QuickJS(WASM)已完成。完整证据、Node22相关快验和剩余真实浏览器/硬件/PG欠项见[GENERAL_WASM_BOUNDED_RUN.md](GENERAL_WASM_BOUNDED_RUN.md)；上文阶段53/54未验口径保留为历史。

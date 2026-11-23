@@ -5,6 +5,19 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十五批：已有SDK恢复、新General真实WASM与有界实付运行（从main 724825d继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核干净PUBLIC远端、阶段54交接/ACTIVE/真实规范与历史官方SDK32记录；没有重复下载已有工具。详见[GENERAL_WASM_BOUNDED_RUN.md](GENERAL_WASM_BOUNDED_RUN.md)。
+
+- 重新核对既有官方SDK32与wasm-bindgen0.2.130归档SHA256，使用原Clang22.1/llvm-ar。标准构建新增显式WASI_SDK_PATH前置检测与目标CC/AR优先级；不改Rust浏览器目标、不下载、不用旧产物充数。
+- 恢复clang后暴露原rquickjs-sys无unknown-unknown绑定/C运行时缺口。将原生QuickJS宿主依赖放入正确target，浏览器明确拒含Tier1的本地整体安装/执行，不假执行或跳过规则；服务器沙箱/预算/有源费用不变。**不是完成规范QuickJS-NG(WASM)：浏览器本地Tier1仍欠。** General远程消费原生权威Tier1身体投影已验。
+- **新wasm32-unknown-unknown标准构建、同版胶水、真实General ABI与生产Worker打包实际通过**；新WASM SHA256 `2524a68fe82e116fd49cc8a9c56570ce3a6064649e27677942b5986e8b2b4e23`，12,264,321字节，dev profile非发布性能结论。没有WASI导入，不是复用旧产物；仍没有真实browser/GPU验收。
+- /general明确1..128有界运行，经原SDK/原Actor逐Tick实付与确认，固定世界/双fence/会话互斥，独立幂等键；撤销/失败即停，不重试/续租/抢控制/自动安装维护。停止/断线/隐藏清私有状态，报告已确认数量及末请求不确定性，不把取消说成服务端回滚。是在线客户端调度，不冒称耐久自治或协作准入完成。
+
+109个不同定向用例通过，新增10，重跑不累计：Engine TS54、Web DOM/路由15（4新）、真实WASM/构建10（5新）、原生沙箱7、实付/可复现夹具1新、server General11/私库11；含真实Node→Rust有界实付/守恒、签名链/撤销/维护换装/私有恢复。相关类型/tsc/AST与SDK构建/Vite/必要格式/diff/敏感筛查通过。实际Node22.23.5是本批新实证，不把此前Node24更名，不等于全项目Node22矩阵通过。
+
+下一主体/发布阻塞：按目的隔离的General协作准入与耐久自治、全平台QuickJS(WASM)、签名登录/分页编辑发布UI、Agent/C#与全规范World等；C#本批重编/真实browser硬件GPU/实际PG多机断电长稳与完整门禁仍欠。原Store/Simulation/ABAC双fence/fog/最终提交锁撤销和源能量事务保持。无外部模型/支付或私有内容外发，无浏览器工具、不绕过既往受管loopback，不擅公开部署。以下旧批为历史，阶段54缺clang/新ABI未验已由本批恢复，不修改旧证据。
+
 ## 第五十四批：远程General最小观察到原Worker/FrameScene/Renderer（从main a1be0c3继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核阶段53交接/ACTIVE/规范7.1与干净PUBLIC远端 `a1be0c3fb2271a0930b467fc680b59ae52db2948`；不重做既有用户/规则链。完整边界和父代理验项见[GENERAL_REMOTE_RENDERER.md](GENERAL_REMOTE_RENDERER.md)。

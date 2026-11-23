@@ -52,3 +52,7 @@ cargo test -p rynvek-server --test general_authority --test private_rules --offl
 General协作主体准入/自治调度、浏览器签名注册登录、分页/映射编辑器/发布UI、Agent独立赛道/真实provider、C#规则消费、全规范跨种类锁/Schema迁移/组织信任、来源长期保留、完整生命材料生长遗传、多Chunk/三维/任意World、presence/离线多主仍欠。无新外部模型/支付授权，未调用外部模型或发送私有内容。
 
 Node22/C#本批重编/新wasm32 ABI/真实browser硬件GPU/实际PG SQL并发多机OS断电24h长稳仍欠；MemoryStore+文件CAS/原生llvmpipe非替身。旧6个PvP_Custom夹具须补真实lease，禁降生产fence。原Store、Simulation、规则计价与提交锁零改动；未跑全workspace/Clippy/license/SBOM/完整安全/soak/CI轮询，主体齐后集中正式发布门禁，不以阶段54结束标整体完成。
+
+## 阶段55续：新WASM已真实重构与有界运行
+
+阶段54缺clang源于未恢复已有官方SDK环境，本批复核原归档并正常构建新wasm32/胶水、真实General ABI与Worker打包通过，不再复用旧WASM。另有明确有界逐Tick实付运行/停止；非耐久自治或协作准入。浏览器本地Tier1当前明确整组拒绝，原生权威Tier1及其远程身体投影保持，不能称规范QuickJS(WASM)已完成。完整证据、Node22相关快验和剩余真实浏览器/硬件/PG欠项见[GENERAL_WASM_BOUNDED_RUN.md](GENERAL_WASM_BOUNDED_RUN.md)；上文阶段53/54未验口径保留为历史。
