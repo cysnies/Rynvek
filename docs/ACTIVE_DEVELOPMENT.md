@@ -5,6 +5,21 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十八批：耐久运行意图→原Actor服务器后台实付→暂停取消撤权→真实PG进程恢复（从main 02fab14继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE、真实D337/D570和干净PUBLIC远端 `02fab1473990242c3c5966e874f1c53bf946fef7`。本批落实指定耐久主体，不再改选阶段57协作Web；详见 [GENERAL_DURABLE_RUNS.md](GENERAL_DURABLE_RUNS.md)。
+
+- 正式Human所有者原Sovereign双fence+显式consent+精确根启动持久意图，限定1..128 Tick、10..900秒、调度间隔和累计实付EnergyQ预算。无规则/CPU-only/维护态拒绝，不保存Bearer，不暗开协作者后台或外部provider。
+- 复用原Store及Lab Claim/OwnerAction/WorkerAction/租约治理，服务后台有限串行槽按PG SKIP LOCKED认领，再调原General Actor、原LeaseManager/CommandGate/规则有源Tick；没有客户端推进循环/第二世界。Memory回执明确进程内，PG还要求私有文件CAS。
+- 原TickCommitter/Store最终锁中同时检查作业fence/租约/墙钟/步号/费用上限和原ABAC/目的/宿主双fence/精确依赖撤销/前驱，原子提交进度/费用/根与世界Commit。持久步键/`/5`日志不因重启重扣；旧格式/保护不放宽。
+- pause/resume/cancel原操作CAS与持久幂等；暂停返回后旧候选拒绝，恢复不延预算或跳Epoch。暂停保留精确世界，撤包/禁用/欠费blocked不免费推进，可先cancel再沿原维护换装。失回执可按原提交键只读查询，无宿主认领。
+- 首次真实PG17.12合成实库/至0013迁移与独立服务OS进程SIGKILL恢复：第3步崩溃后新进程等待旧健康租约，从同一PG+私有文件CAS自动续至8步，与原Engine同根/160 EnergyQ/9个含genesis提交；新job/host fence递增，旧提交键不重复应用。另实测PG暂停最终锁旧候选及原子进度拒绝。
+- 42个不同必要定向通过，新增9：状态机3、后台HTTP4、签名私包撤销1、真PG进程恢复1，加原General19/私库12/Studio2；重跑不累计，另一个辅助子进程入口不计业务用例。原Node22.23.5 AST/SDK/Web ignored显式真跑，新代码必要格式/diff通过。不是Memory重建、浏览器、PG/OS断电或多机长稳证明。
+
+本批主体提交 `bc15da6`，HTTP/私包撤销/真PG子进程实证提交 `532d3dc`；原Node22实际为v22.23.5。最终必要42项（辅助入口另计）及严格driver 403复验通过；20变更文件敏感特征0命中，非安全审计。PG测试服务已正常停止，合成库与私有CAS证据保留，不删除原资料。
+
+剩余：此后台功能SDK/CLI/管理产品封装/多节点宿主亲和公平与诊断、协作者显式耐久委托/私有发现邀请、全平台QuickJS(WASM)、C#/Agent与全规范World；真实browser/硬件GPU、全项目Node22矩阵、PG多机断电24h长稳及完整安全发布门禁仍欠。未擅部署/网络绕过/外部模型支付或私有外发，不标整体完成。以下历史保留。
+
 ## 第五十七批：原General目的协作Web闭环与私有最小态生命周期（从main eeaac42继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE/最终D337/D569–570与干净PUBLIC远端 `eeaac42fbb82ea2cd49704e0cc5b8b632f3c5b4d`；不重做阶段56。本批落实请求允许的必要协作Web闭环，详见 [GENERAL_COLLABORATION_WEB.md](GENERAL_COLLABORATION_WEB.md)。**没有交付耐久自治意图/服务调度/进程重启恢复**，不拿Lab/Pi控制面或同内存重建冒称完成。
