@@ -96,3 +96,5 @@ CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test --l
 下一主体仍有 General 耐久自治及协作 Web/发现/邀请产品流、全平台 QuickJS(WASM)、浏览器签名登录/分页/编辑发布 UI、Agent/C#规则链、组织信任/Schema迁移/来源长期保留、完整生命材料生长遗传、多Chunk/三维/任意World/presence/离线多主等。全项目 Node22 矩阵、C#本批重编、真实 browser/硬件 GPU、实际 PG SQL并发/多机OS断电/24h长稳、完整 workspace/Clippy/license/SBOM/安全发布门禁仍欠。
 
 执行器没有浏览器工具，未尝试部署或受管 loopback；父代理仅在已有获准可达部署验证原 Worker/OffscreenCanvas/WebGPU、真实私有清屏/撤权/断线/换世界与停止末请求确认。禁止代理/隧道或策略绕过，不擅公开私有数据。阶段54 llvmpipe软件GPU与本批MemoryStore+文件CAS证据不冒充真实浏览器/PG。
+
+阶段57更新：上述API/SDK已进入原General所有者/协作者互斥Web流程与原只读Worker，见 [GENERAL_COLLABORATION_WEB.md](GENERAL_COLLABORATION_WEB.md)。耐久运行意图/调度/进程恢复仍未实现，不改写本页阶段56历史证据。

@@ -5,6 +5,18 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十七批：原General目的协作Web闭环与私有最小态生命周期（从main eeaac42继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE/最终D337/D569–570与干净PUBLIC远端 `eeaac42fbb82ea2cd49704e0cc5b8b632f3c5b4d`；不重做阶段56。本批落实请求允许的必要协作Web闭环，详见 [GENERAL_COLLABORATION_WEB.md](GENERAL_COLLABORATION_WEB.md)。**没有交付耐久自治意图/服务调度/进程重启恢复**，不拿Lab/Pi控制面或同内存重建冒称完成。
+
+- /general所有者与协作者互斥挂载，切模式销毁旧凭据/私有态/Worker。所有者明确consent与精确CAS授予/撤销规则驱动，列表/当前版本只属此目的，不发送邀请、不共享令牌。
+- 协作者本人身份+明确世界/版本，只取原SDK最小帧；连接/原Sovereign/一个真实规则Tick/交还分别明确操作，无owner完整观察/源码/私包/安装/维护或自动循环。提交元数据与原Engine帧同Tick/revision/root才确认。
+- 草稿换世界/准入立即清旧帧和双fence，未重绑不得误推进旧世界。断开/离线/隐藏/晚回执均清态；未启GPU也12秒失鲜清最小态。显示复用原Viewport/Worker/FrameScene/Renderer，不另造画布或前端World。本地清态不等于服务端交还/回滚，需显式交还或owner撤销接管。
+- 58个不同定向通过，新增11：Web25（10新）、General19（1新真实Web控制器HTTP）、私库12/原Studio2；原ignored跨AST/SDK/Web在Node22.23.5显式真跑。新链真实三Tick实付守恒、撤销清态、旧版本拒绝、显式新准入/新控制fence、Tick4/交还。非浏览器/PG/耐久进程恢复实证。
+- 类型/生产TS/Vite JS与原Worker打包、必要Rust格式/diff/敏感筛查通过；WASM只复用阶段55已有资源，不重复构建或冒称新ABI验收。服务器src/Store/Simulation/ABAC双fence/fog/源能量与提交锁零修改，权限保护未降。
+
+下一首位仍是General耐久服务运行意图/有界预算/原Actor调度/原子进度/暂停取消/真实进程恢复；随后协作发现邀请、全平台QuickJS(WASM)、签名登录/分页编辑发布UI、C#/Agent与全规范World。真实browser/硬件GPU/实际PG并发多机断电长稳、全项目Node22矩阵及完整安全发布门禁欠实证。无新模型/支付/provider调用或私有外发，不重试/绕受管loopback，不擅部署。以下历史保留。
+
 ## 第五十六批：General按目的隔离准入到原Actor规则驱动与恢复（从main bb6beb9继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE/真实规范及干净 PUBLIC 远端 `bb6beb9c6e4849e0954d095a0f2a9f8d0267c029`。按依赖先接最小协作规则驱动主体，没有重做 WASM；完整链及边界见 [GENERAL_PURPOSE_RULE_DRIVE.md](GENERAL_PURPOSE_RULE_DRIVE.md)。
