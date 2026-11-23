@@ -20,7 +20,7 @@ it("已有世界只走正式run，凭据只在头/hello，断开后不能继续�
  const result=await client.run(world.toUpperCase());expect(result.world_id).toBe(world);expect(fetcher.mock.calls[0]?.[0]).toBe(`http://srv/api/v1/worlds/${world}/arena`);
  const init=fetcher.mock.calls[0]?.[1] as RequestInit;expect(init.headers).toMatchObject({Authorization:"Bearer only-memory"});expect(init.redirect).toBe("error");expect(init.cache).toBe("no-store");
  expect(client.streamURL(world)).not.toContain("only-memory");expect(client.streamURL(world)).toContain("format=arena-json");
- const hello={type:"hello",protocol:"rynvek-arena/1",principal_id:"123",kind:"Human",faction:0} as const;
+ const hello={type:"hello",protocol:"rynvek-arena/2",principal_id:"123",kind:"Human",faction:0} as const;
  expect(client.hello(hello)).toMatchObject({capability_token:"only-memory"});expect(hello).not.toHaveProperty("capability_token");
  client.destroy();await expect(client.run(world)).rejects.toThrow("断开");expect(fetcher).toHaveBeenCalledTimes(1);expect(()=>client.hello(hello)).toThrow("断开");
 });
@@ -36,5 +36,5 @@ it("只读回放复用原Arena reducer/控制器/地图，任何写请求拒绝�
  await app.client.connect();expect(app.client.observation).toEqual(message.observation);expect(app.client.terrain?.width).toBe(welcome.map.width);
  expect(app.client.lease).toBeNull();expect(()=>source.send({type:"acquire_lease",seq:1,level:"Sovereign"})).toThrow("禁止写命令");
  expect(()=>source.send({type:"command",seq:2,fencing_token:1,command:{type:"surrender"}})).toThrow("禁止写命令");
- app.dispose();expect(()=>source.send({type:"hello",protocol:"rynvek-arena/1",principal_id:"owner",kind:"Human",faction:0})).toThrow("关闭");
+ app.dispose();expect(()=>source.send({type:"hello",protocol:"rynvek-arena/2",principal_id:"owner",kind:"Human",faction:0})).toThrow("关闭");
 });

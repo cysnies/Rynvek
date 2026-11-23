@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 namespace Rynvek;
 
-/// <summary>One real authenticated rynvek-arena/1 JSON WS, one reader and serialized writes. No local simulation/reconnect/retry.</summary>
+/// <summary>One real authenticated rynvek-arena/2 JSON WS, one reader and serialized writes. No local simulation/reconnect/retry.</summary>
 public sealed class ArenaConnection : IAsyncDisposable
 {
     private readonly RynvekClient _client;
@@ -40,7 +40,7 @@ public sealed class ArenaConnection : IAsyncDisposable
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _lifetime.Token); linked.CancelAfter(TimeSpan.FromSeconds(10));
         var uri = new UriBuilder(_client.Origin) { Scheme = _client.Origin.Scheme == "https" ? "wss" : "ws", Path = $"/api/v1/worlds/{Run.WorldId:D}/stream", Query = "format=arena-json" }.Uri;
         await _socket.ConnectAsync(uri, _client.Http, linked.Token); _reader = ReceiveLoopAsync();
-        await SendAsync(new { type = "hello", protocol = "rynvek-arena/1", principal_id = Run.PrincipalId.ToString(), kind = PrincipalKind.Human, faction = Run.Faction, capability_token = _client.Capability() }, linked.Token);
+        await SendAsync(new { type = "hello", protocol = "rynvek-arena/2", principal_id = Run.PrincipalId.ToString(), kind = PrincipalKind.Human, faction = Run.Faction, capability_token = _client.Capability() }, linked.Token);
         await _welcome.Task.WaitAsync(linked.Token);
     }
     private async Task SendAsync(object value, CancellationToken ct)
@@ -87,7 +87,7 @@ public sealed class ArenaConnection : IAsyncDisposable
         {
             case "welcome":
                 var welcome = Wire.Read<Welcome>(m);
-                if (welcome.Protocol != "rynvek-arena/1" || welcome.Faction != Run.Faction || welcome.Mode != Run.Mode || welcome.Tools.Select(t => t.Name).Distinct().Count() != 6 || welcome.Tools.Any(t => !ToolCall.Names.Contains(t.Name))) throw new RynvekProtocolException("Welcome protocol/seat/tool set mismatch");
+                if (welcome.Protocol != "rynvek-arena/2" || welcome.Faction != Run.Faction || welcome.Mode != Run.Mode || welcome.Tools.Select(t => t.Name).Distinct().Count() != 6 || welcome.Tools.Any(t => !ToolCall.Names.Contains(t.Name))) throw new RynvekProtocolException("Welcome protocol/seat/tool set mismatch");
                 lock (_state) { if (_info is not null) throw new RynvekProtocolException("Duplicate welcome"); _info = welcome; } _welcome.TrySetResult(welcome); break;
             case "observation":
                 var observation = Wire.Read<FactionObservation>(m.GetProperty("observation"));

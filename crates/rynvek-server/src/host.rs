@@ -8,7 +8,7 @@
 //! | 通道 | 上行（客户端 → 服务端） | 下行（服务端 → 客户端） |
 //! |---|---|---|
 //! | `0 Control` | Protobuf `ClientHello` / `Heartbeat` / `KeyframeRequest` / `Disconnect` | `ServerHello` / `HeartbeatAck` / `Disconnect` |
-//! | `1 Command` | JSON `CommandEnvelope<ArenaClientMessage>`（`rynvek-arena/1` 负载） | JSON [`CommandReply`]（`ArenaServerMessage`） |
+//! | `1 Command` | JSON `CommandEnvelope<ArenaClientMessage>`（`rynvek-arena/2` 负载） | JSON [`CommandReply`]（`ArenaServerMessage`） |
 //! | `2 Query` | JSON [`QueryRequest`] | JSON [`QueryReply`] |
 //! | `3 Event` | —（上行即违例） | JSON `RtsEvent` 数组（已按阵营过滤） |
 //! | `4 StateStream` | —（上行即违例） | 二进制 [`StatePacket`]（迷雾物理裁剪，关键帧置 `KEYFRAME` 标志） |

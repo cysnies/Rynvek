@@ -229,7 +229,7 @@ async fn private_signed_dependency_consumes_real_fog_and_existing_fenced_toolbro
     ))
     .await
     .unwrap();
-    send(&mut ws,json!({"type":"hello","protocol":"rynvek-arena/1","principal_id":alice.principal_id.to_string(),"kind":"human","faction":0,"capability_token":alice.token})).await;
+    send(&mut ws,json!({"type":"hello","protocol":"rynvek-arena/2","principal_id":alice.principal_id.to_string(),"kind":"human","faction":0,"capability_token":alice.token})).await;
     assert_eq!(recv(&mut ws, "welcome").await["mode"], "PvE_Survival");
     send(&mut ws, json!({"type":"acquire_lease","seq":1,"level":"Sovereign"})).await;
     let lease = recv(&mut ws, "lease").await;

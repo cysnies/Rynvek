@@ -81,7 +81,7 @@ async fn ws(server: &rynvek_server::RunningServer, user: &User, seat: &Value) ->
     ))
     .await
     .unwrap();
-    send(&mut s,json!({"type":"hello","protocol":"rynvek-arena/1","principal_id":"不得授权的客户端字段","kind":"human","faction":seat["faction"],"capability_token":user.token})).await;
+    send(&mut s,json!({"type":"hello","protocol":"rynvek-arena/2","principal_id":"不得授权的客户端字段","kind":"human","faction":seat["faction"],"capability_token":user.token})).await;
     assert_eq!(recv(&mut s, "welcome").await["faction"], seat["faction"]);
     let observation = recv(&mut s, "observation").await;
     for entity in observation["observation"]["units"].as_array().unwrap() {

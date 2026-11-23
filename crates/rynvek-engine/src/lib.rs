@@ -7,7 +7,7 @@
 //! `rynvek-wgpu`（独占设备与核心内核）与 `rynvek-render`（世界渲染），对 `rynvek-wasm` / 原生宿主提供统一的
 //! [`Engine`]、[`WorldRuntime`] 与 Worker 消息协议。
 //!
-//! - [`arena`]：Rynvek Arena 对局会话（`rynvek-rts` + `rynvek-agent`）与 `rynvek-arena/1` 客户端协议；
+//! - [`arena`]：Rynvek Arena 对局会话（`rynvek-rts` + `rynvek-agent`）与 `rynvek-arena/2` 客户端协议；
 //! - [`engine`]：主循环、GPU 驻留镜像核对与 DeviceLost 5 步恢复编排；
 //! - [`protocol`]：`ENGINE_INIT` 等主线程 ⇄ Worker 消息；
 //! - [`gpu_field`] / [`gpu_neural`] / `gpu_rules`：场、LIF 神经与规则 WGSL 后端的 GPU 宿主适配（CPU/GPU 差分测试对象）；

@@ -136,7 +136,7 @@ impl StreamClient {
         }
     }
 
-    /// 发一条 `rynvek-arena/1` 命令并等待带同一幂等键的回复
+    /// 发一条 `rynvek-arena/2` 命令并等待带同一幂等键的回复
     pub async fn command(&mut self, tick: u64, payload: serde_json::Value) -> serde_json::Value {
         let key = IdempotencyKey::new(rynvek_server::ids::new_uuid_v7()).unwrap();
         let env = CommandEnvelope {

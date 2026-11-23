@@ -42,7 +42,7 @@ async fn bridge(app: AppState, world: WireUuid, socket: &mut WebSocket) -> ApiRe
         return Err(ApiError::bad_request("JSON 模式首帧必须是 hello"));
     };
     let hello: Value = serde_json::from_str(&raw).map_err(|e| ApiError::bad_request(e.to_string()))?;
-    if hello["type"] != "hello" || hello["protocol"] != "rynvek-arena/1" {
+    if hello["type"] != "hello" || hello["protocol"] != rynvek_engine::arena::ARENA_PROTOCOL {
         return Err(ApiError::forbidden("不支持的 Arena hello"));
     }
     let token = crate::app::decode_token_text(hello["capability_token"].as_str().unwrap_or_default())?;

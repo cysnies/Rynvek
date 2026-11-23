@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * `rynvek-arena/1` 线上协议类型：与 Rust `rynvek_engine::arena` / `rynvek_rts` / `rynvek_agent` 的 serde 形态逐字段一致
+ * `rynvek-arena/2` 线上协议类型：与 Rust `rynvek_engine::arena` / `rynvek_rts` / `rynvek_agent` 的 serde 形态逐字段一致
  * （`tests/arena/opening.transcript.json` 夹具双向断言）。
  *
  * - 所有资源、生命、强度等数值均为 **milli 定点整数**；
@@ -10,7 +10,7 @@
  * - 实体 ID 为十进制序号 `number`（工具调用中使用其文本形态）。
  */
 
-export const ARENA_PROTOCOL = "rynvek-arena/1";
+export const ARENA_PROTOCOL = "rynvek-arena/2";
 
 export type BuildingKind =
   | "bld.nexus_core"
@@ -127,6 +127,7 @@ export function commandLevel(cmd: RtsCommand): ControlLevel {
 // ------------------------------------------------------------------ 观测
 
 export interface UnitView {
+  readonly radius_milli: number;
   readonly id: number;
   readonly faction: number;
   readonly kind: UnitKind;

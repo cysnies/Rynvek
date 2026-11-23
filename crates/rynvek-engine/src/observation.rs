@@ -79,7 +79,9 @@ pub fn validate(obs: &FactionObservation) -> Result<(), EngineError> {
     let (width, height) = dimensions(obs);
     for unit in &obs.units {
         // 判界与迷雾索引保留 Q32.32 精度，避免舍入到相邻可见格。
-        if unit.position.x.0 < 0
+        if unit.radius_milli < 0
+            || unit.radius_milli > rynvek_rts::units::unit_spec(unit.kind).radius_milli
+            || unit.position.x.0 < 0
             || unit.position.y.0 < 0
             || unit.position.x.0 >= (i64::from(width) << 32)
             || unit.position.y.0 >= (i64::from(height) << 32)
@@ -257,7 +259,7 @@ pub(crate) fn presentation_scene(
         scene.push(InstanceData::new(
             RenderLayer::Organisms,
             p,
-            0.8,
+            unit.radius_milli as f32 * 0.002,
             theme.factions[unit.faction.0 as usize % 7],
             InstanceShape::Circle,
         ));

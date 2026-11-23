@@ -4,7 +4,7 @@
 // Rynvek 实时流控制信令（WireChannelId 0 = Control，GAP-16：网络控制信令用 Protobuf v3）。
 //
 // 每个 Control 通道帧的负载恰好是一条 ControlMessage。其他通道：
-//   1 Command / 2 Query / 3 Event —— UTF-8 JSON（见 rynvek-server 的 rynvek-arena/1 映射）；
+//   1 Command / 2 Query / 3 Event —— UTF-8 JSON（见 rynvek-server 的 rynvek-arena/2 映射）；
 //   4 StateStream —— 16B 对齐列式二进制 + LZ4（rynvek-network::replication）；
 //   5 Telemetry —— UTF-8 JSON。
 syntax = "proto3";

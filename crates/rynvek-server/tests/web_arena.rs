@@ -23,7 +23,7 @@ async fn browser_json_stream_uses_the_existing_authorized_actor() {
         .unwrap();
     ws.send(tokio_tungstenite::tungstenite::Message::Text(
         json!({
-            "type":"hello","protocol":"rynvek-arena/1","principal_id":alice.principal_id.to_string(),
+            "type":"hello","protocol":"rynvek-arena/2","principal_id":alice.principal_id.to_string(),
             "kind":"human","faction":a.faction,"capability_token":alice.token
         })
         .to_string()
@@ -110,7 +110,7 @@ async fn json_connect(
     ))
     .await
     .unwrap();
-    send_json(&mut ws,json!({"type":"hello","protocol":"rynvek-arena/1","principal_id":"伪造字段不得成为权威","kind":"Human","faction":faction,"capability_token":token})).await;
+    send_json(&mut ws,json!({"type":"hello","protocol":"rynvek-arena/2","principal_id":"伪造字段不得成为权威","kind":"Human","faction":faction,"capability_token":token})).await;
     ws
 }
 

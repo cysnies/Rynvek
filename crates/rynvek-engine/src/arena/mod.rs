@@ -3,7 +3,7 @@
 
 //! Rynvek Arena 对局会话：把 `rynvek-rts` 权威世界、`rynvek-agent` 控制协议与客户端消息协议组合成可玩闭环。
 //!
-//! 线上协议 `rynvek-arena/1`（JSON，`type` 标签、snake_case，ERRATA E-035）：
+//! 线上协议 `rynvek-arena/2`（JSON，`type` 标签、snake_case，ERRATA E-035）：
 //!
 //! | 客户端 → 服务端 | 服务端 → 客户端 |
 //! |---|---|
@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 pub use tool_host::{ArenaPlan, ArenaToolHost};
 
 /// 协议版本标识
-pub const ARENA_PROTOCOL: &str = "rynvek-arena/1";
+pub const ARENA_PROTOCOL: &str = "rynvek-arena/2";
 /// 单条 `advance` 最多推进的 Tick 数（30 s）
 pub const MAX_ADVANCE_TICKS: u32 = 900;
 /// 租约时长：覆盖整局（时限 + 突然死亡），中途可续期

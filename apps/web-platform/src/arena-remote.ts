@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /** 当前权威世界的 HTTP/WS 与只读重演适配。不造世界、帧、资源、基因或本地仿真。 */
+import { ARENA_PROTOCOL } from "@rynvek/client";
 import type { ArenaClientMessage, ArenaServerMessage, ArenaTransport, FactionObservation, MapInfo, MatchMode, RtsEvent } from "@rynvek/client";
 
 import { PrivateAgentHubClient } from "@rynvek/agent-sdk";
@@ -133,7 +134,7 @@ export class ArenaWorldClient {
   async observe(world:string,signal?:AbortSignal):Promise<ObserverFrame>{
     const r=await this.request<ObserverFrame>(`worlds/${uuid(world)}/observation`,"GET",undefined,signal);checkGrant(r);uuid(r.match_id);
     const w=r.messages?.welcome,o=r.messages?.observation;
-    if(r.world_id!==world||!["Human","Agent","Service"].includes(r.principal_kind)||w?.type!=="welcome"||w.protocol!=="rynvek-arena/1"||w.faction!==r.faction
+    if(r.world_id!==world||!["Human","Agent","Service"].includes(r.principal_kind)||w?.type!=="welcome"||w.protocol!==ARENA_PROTOCOL||w.faction!==r.faction
       ||!Array.isArray(w.tools)||w.tools.length!==0||o?.type!=="observation"||o.observation.faction!==r.faction
       ||o.observation.tick!==w.tick||!Number.isSafeInteger(w.tick)||w.tick<0||!Array.isArray(o.events))throw new Error("观战世界/阵营/投影回执非法");
     return r;
@@ -188,7 +189,7 @@ export class ReplayObservationTransport implements ArenaTransport {
   }
   publish(frame:PlaybackFrame):void{
     if(this.closed)return;this.frame=frame;
-    for(const h of [...this.handlers])h({type:"welcome",protocol:"rynvek-arena/1",faction:frame.faction,mode:frame.mode,tick:frame.tick,map:frame.map,tools:[]});
+    for(const h of [...this.handlers])h({type:"welcome",protocol:ARENA_PROTOCOL,faction:frame.faction,mode:frame.mode,tick:frame.tick,map:frame.map,tools:[]});
     for(const h of [...this.handlers])h({type:"observation",observation:frame.observation,events:frame.events});
   }
   close():void{this.closed=true;this.handlers.clear();}

@@ -4,7 +4,7 @@
 /**
  * `@rynvek/client`：Rynvek Arena 客户端运行时。
  *
- * - `protocol`：`rynvek-arena/1` 线上协议类型（与 Rust serde 形态逐字段一致）；
+ * - `protocol`：`rynvek-arena/2` 线上协议类型（与 Rust serde 形态逐字段一致）；
  * - `client`：`ArenaClient` 对局连接（租约、Fencing Token、序号关联、本地预检）；
  * - `balance` / `terrain` / `fixed`：平衡表镜像、地形解码与定点坐标工具；
  * - `apm`：600 APM 预算镜像；

@@ -78,7 +78,7 @@ public enum OrderKind { Move, AttackMove, Harvest, HoldPosition, Patrol }
 public sealed record ErrorBody(uint Code, string Name, string Message) { public override string ToString() => $"Rynvek error 0x{Code:x4}"; }
 public sealed record ResourceAmounts(long Biomass, long Flux, long Neurogel);
 public sealed record ResourceLedger(ResourceAmounts Balance, ResourceAmounts Capacity, long BiomassHarvestedTotal);
-public sealed record UnitView(uint Id, byte Faction, string Kind, RawVec2 Position, long HpMilli, long MaxHpMilli, long ShieldMilli, OrderKind? Order, short[]? Modulators);
+public sealed record UnitView(uint Id, byte Faction, string Kind, RawVec2 Position, long RadiusMilli, long HpMilli, long MaxHpMilli, long ShieldMilli, OrderKind? Order, short[]? Modulators);
 public sealed record BreedingView(string Unit, uint RemainingTicks);
 public sealed record BeaconConfig(string Channel, short StrengthQ8, short[] Modulators);
 public sealed record BuildingView(uint Id, byte Faction, string Kind, uint[] Origin, long HpMilli, long MaxHpMilli, bool Complete, bool Powered, uint BuildProgress, string[] Queue, string? Research, BeaconConfig? Beacon, uint? ResearchRemainingTicks = null, BreedingView? Breeding = null);

@@ -107,12 +107,12 @@ impl VisualizationProvider<ArenaWorld> for ArenaVisualizationProvider {
         for u in snapshot.units.values() {
             let x = (u.position.x.0 as f64 * scale) as f32;
             let y = (u.position.y.0 as f64 * scale) as f32;
-            let r = (u.radius().0 as f64 * scale) as f32;
+            let r = (snapshot.unit_radius(u.id).0 as f64 * scale) as f32;
             scene.push(
                 InstanceData::new(
                     RenderLayer::Organisms,
                     [x, y],
-                    r.max(0.35) * 2.0,
+                    r * 2.0,
                     Rgba8(Self::faction_color(u.faction.0, false).map(|v| (v * 255.0).round() as u8)),
                     InstanceShape::Circle,
                 )

@@ -531,3 +531,19 @@ fn applied_theme_reaches_frame_scene_and_does_not_reveal_hidden_units() {
         assert_eq!(gpu_engine.simulation().clock.tick, 0);
     }
 }
+
+#[test]
+fn declared_body_radius_reaches_original_scene_and_rejects_out_of_bounds_size() {
+    let mut arena = engine();
+    let mut obs = world().observe(FactionId(0)).unwrap();
+    let full = obs.units[0].radius_milli;
+    arena.handle_command(frame(obs.clone())).unwrap();
+    let old = arena.frame_scene().layer_instances(RenderLayer::Organisms)[0].size;
+    obs.units[0].radius_milli = full / 2;
+    arena.handle_command(frame(obs.clone())).unwrap();
+    let small = arena.frame_scene().layer_instances(RenderLayer::Organisms)[0].size;
+    assert!((small - (full / 2) as f32 * 0.002).abs() < 0.0001);
+    assert!(small < old);
+    obs.units[0].radius_milli = i64::MAX;
+    assert!(arena.handle_command(frame(obs)).is_err());
+}
