@@ -3,6 +3,8 @@
 
 # 通用 World 声明组件、受控规则与有来源计价
 
+阶段49补充：单Chunk通用World现已通过原服务器身份/权限/控制租约/宿主fence/Tick提交与私有恢复链接入；精确入口和仍未交付范围见[GENERAL_WORLD_SERVER_ACTOR.md](GENERAL_WORLD_SERVER_ACTOR.md)。下文阶段48当批验项/缺口保留为历史口径。原本地Engine限制仍适用于该原入口，不代表新受限服务器入口已具备浏览器流/协作或任意World。
+
 阶段48从干净 `56982a0` 继续。此段实现原 RYWL → 声明模板/实例/RuleGraph 或受限 RYPK → 原 Phase07 → 真实刚体加速度/位移 → 原权威根/文件快照/WAL 恢复，不是只存规则或另造平行执行器。仍是单 Chunk 圆形物理剖面的受控组件适配，不称任意 World 或正式发行。
 
 ## 复用关系与安装边界

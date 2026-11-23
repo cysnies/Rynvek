@@ -3,6 +3,8 @@
 
 # 通用 World 的有来源生命场（实现剖面）
 
+阶段49当前补充见[通用World服务器权限与双fence](GENERAL_WORLD_SERVER_ACTOR.md)：已有受限Private所有者真实Actor/提交/恢复入口。下文阶段47当批能力与待办保留为历史口径，不把旧“无Actor”描述当作当前全项目状态；多人General fog/浏览器流/任意World仍未交付。
+
 阶段47从干净 `a22fbe5` 继续，在阶段46单 Chunk 圆形刚体 World 上接入**有来源**营养与可选付费 LIF。这不是把 Arena 生态/Tier1 迁入通用 World，也不是声明式任意组件或统一权限 Actor。原 Tick 事务、迷雾、权限与生产 fence 未放宽。
 
 阶段48已复用同一有来源账户接入[声明组件/受控规则计价](GENERAL_WORLD_COMPONENT_RULES.md)，下文“未接规则”保留为阶段47历史边界；当前有规则身体与LIF互斥，不双写/双记。

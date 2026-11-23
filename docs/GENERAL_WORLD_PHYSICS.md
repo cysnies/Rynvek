@@ -3,6 +3,8 @@
 
 # 原16阶段内核的非RTS物理World
 
+阶段49当前补充见[通用World服务器权限与双fence](GENERAL_WORLD_SERVER_ACTOR.md)：已有受限Private所有者真实Actor/提交/恢复入口。下文阶段46当批能力与待办保留为历史口径，不把旧“无Actor”描述当作当前全项目状态；多人General fog/浏览器流/任意World仍未交付。
+
 阶段46从干净 `83427c0` 继续。本段不是参数表追加：原 `SimulationEngine` 不再隐式创建四个静止坐标或500/200/50资源，而是实际持有原 `EntityRegistry` 与分页刚体组件列；没有阵营、主脑、RTS生产或免费生物营养。原Arena权威路径、fence、观察权限和迷雾未改变。
 
 ## 来源与明确的实现边界

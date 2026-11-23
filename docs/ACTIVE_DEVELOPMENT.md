@@ -5,6 +5,21 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第四十九批：通用World贯通原权限/双租约fence/私有提交恢复（从main 1581eb2继续）
+
+**主体继续，整体未完成、未达正式发布验收。** 已先核交接、ACTIVE与远端均为干净 `1581eb27928ec7321d4c05243c202629500c3b59`，没有重做阶段48声明/计价主体。优先实现统一权限链的通用领域适配：原认证/Active/ABAC、LeaseManager/CommandGate/APM、原宿主持久租约和TickCommitter/Store提交机制共用，不复制第二套权限、租约或提交架构。详见[GENERAL_WORLD_SERVER_ACTOR.md](GENERAL_WORLD_SERVER_ACTOR.md)。
+
+- 原服务器新增RYWL二进制创建与 `/worlds/{id}/general` 观察/控制；个人组织配额、Private所有者边界。受限World配置→原SimulationEngine真实付费组件/物理/账户→原私有CAS与Store WorldRow/CommitRow，不伪造Arena阵营/比赛。当前仅Human所有者Sovereign精确下一Tick显式调度，无自治30Hz/General浏览器流或协作共享fog；原Arena fog不动。
+- 原ranked_host_leases仅扩展给四字段精确受控profile，原排位资格/过期校验不弱化；健康节点不抢占。每请求同时宿主fence与原控制token，重建不得在仍健康同fence下重置计数；执行与回执前重验正式准入/fence。有界消息邮箱、原UUIDv7/主体/时序门/APM；旧token、冒名、缺scope及撤销拒绝。
+- 原候选Tick→私有输入日志/每300Tick锚点→**同一TickCommitter.publish_row/Store.append_commit_checked**原子复验ownerActive/fence/前驱→才发布内存。恢复原RYC2全部领域根与至多300Tick真实后缀，恢复1800Tick幂等回执/APM；同键换载荷拒绝，不凭客户端镜像恢复。生命World禁止外部Spawn/免费加速度，只许原回收，规则/欠费/非法命令整Tick不发布；CPU额度不冒称生物能量。
+- `1610299` 原Store租约/共用提交点、`db2e07a` 真实服务器主体、`c25de3e` 十个新增定向证明；最终文档HEAD由交接与同一Page记录，避免本文自引用。PUBLIC普通push main并核远端，不force/no-verify/admin/改历史或网络策略，不删原资料。
+
+### 本批必要快验与真实发布阻塞
+
+14个不同定向用例通过，新增10，重跑不累计：真实HTTP general_authority 9、新MemoryStore过期/撤销提交1、原ranked_discovery 2、原过期宿主1、原PvP私有fog/恢复1。含临时Ed25519登录、scope/Active/控制级别/双fence、付费组件真实位移与能量闭包、欠费/坏命令不发布、私有CAS与损坏WAL拒绝、新AppState同MemoryStore+文件CAS恢复/去重、301Tick跨周期锚点+后缀。**不是PG实库/多机/断电证据**；过期测试只调内存夹具边界，未做30秒长稳。必要server原生编译（含PG代码类型）、新增Rust文件/模块rustfmt、diff与必要敏感模式筛查通过；SQL未连接PG执行，不等同完整安全审计。
+
+TS AST与完整私有rpack签名依赖发现/验签/安装链仍欠；通用权限链已接入但General浏览器流/协作主体准入与统一调度仍欠，不称全部Actor完成。单Chunk受控组件不是任意World，完整材料/生长/自然遗传迁入、多Chunk/三维、Agent独立赛道与协作presence/离线多主仍欠。旧6个PvP_Custom Actor夹具须补真实lease前提，不能弱化生产fence。Node22、C#本批重编、wasm32、真实浏览器/硬件GPU、PG并发SQL/多机/断电/24h长稳未验；llvmpipe仍仅阶段41软件回读。本批未跑全workspace/Clippy/license/SBOM/完整安全/soak/CI轮询，主体齐后集中完整门禁、安全与正式发布打磨，不以本批宣布整体完成。
+
 ## 第四十八批：通用World声明组件、受控规则与有来源计价（从main 56982a0继续）
 
 **主体继续，整体未完成、未达正式发布验收。** 已先核交接、ACTIVE与远端均为干净 `56982a017d35b49534c36577282f8d03498d8b93`，未重做阶段47。依最短真实依赖，将Arena原组件registry与Tier0/Tier1执行下沉rules共享核心，由原通用World原Phase07消费；不新造平行架构。完整入口/数学/限制见[GENERAL_WORLD_COMPONENT_RULES.md](GENERAL_WORLD_COMPONENT_RULES.md)。
