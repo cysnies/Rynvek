@@ -196,6 +196,148 @@ impl PrivateRuleClient {
         .json()
         .map_err(|_| "控制回执非法".into())
     }
+    fn run_uuid(id: &str, v7: bool) -> Result<String, String> {
+        let parsed: rynvek_protocol::WireUuid = id.parse().map_err(|_| "须规范UUID")?;
+        if parsed.to_string() != id
+            || v7 && (id.as_bytes()[14] != b'7' || !matches!(id.as_bytes()[19], b'8' | b'9' | b'a' | b'b'))
+        {
+            return Err("须规范UUIDv7".into());
+        }
+        Ok(parsed.to_string())
+    }
+    async fn run_request(
+        &self,
+        world: &str,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> Result<crate::general_runs::GeneralRun, String> {
+        let value = self
+            .req(method, path, body, 512 * 1024)
+            .await?
+            .json()
+            .map_err(|_| "运行JSON非法")?;
+        let run: crate::general_runs::GeneralRun = serde_json::from_value(value).map_err(|_| "运行回执非法")?;
+        let budget = run.spec.validate().map_err(|_| "运行规格非法")?;
+        Self::run_uuid(&run.id, true)?;
+        if run.owner != self.owner
+            || run.world_id.to_string() != world
+            || !matches!(run.storage_backend.as_str(), "memory" | "postgres")
+            || run.done > run.spec.ticks
+            || run.energy_used_q > budget
+            || run.last_root.len() != 64
+            || !run
+                .last_root
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || !matches!(
+                run.status.as_str(),
+                "queued" | "running" | "paused" | "blocked" | "completed" | "cancelled" | "expired"
+            )
+            || run.status == "completed" && run.done != run.spec.ticks
+            || run.operations.len() > 64
+            || run.attempt > 5
+            || run.deadline_s == 0
+            || run.base_tick.checked_add(run.done as u64).is_none()
+            || run.spec.expected_revision.checked_add(run.done as u64).is_none()
+            || run.done == 0 && (run.energy_used_q != 0 || run.last_root != run.spec.expected_root)
+        {
+            return Err("运行归属/进度/持久等级非法".into());
+        }
+        for (id, op) in &run.operations {
+            Self::run_operation(op)?;
+            if id != &op.operation_id || op.generation >= run.generation {
+                return Err("运行控制收据非法".into());
+            }
+        }
+        Ok(run)
+    }
+    fn run_operation(op: &crate::lab_jobs::OwnerAction) -> Result<(), String> {
+        Self::run_uuid(&op.operation_id, true)?;
+        if !matches!(op.action.as_str(), "pause" | "resume" | "cancel") {
+            return Err("运行控制非法".into());
+        }
+        Ok(())
+    }
+    /// 明确原双fence与规则paid_q预算；不自动获取控制、重发或循环Tick。
+    pub async fn run_start(
+        &self,
+        world: &str,
+        host: u64,
+        control: u64,
+        spec: crate::general_runs::RunSpec,
+    ) -> Result<crate::general_runs::GeneralRun, String> {
+        Self::run_uuid(world, false)?;
+        spec.validate().map_err(|_| "须明确有界规则paid_q预算与同意")?;
+        if host == 0 || control == 0 {
+            return Err("须原双fence".into());
+        }
+        let run = self
+            .run_request(
+                world,
+                "POST",
+                &format!("/api/v1/worlds/{world}/general"),
+                Some(&json!({"action":"start_run","host_fence":host,"control_fence":control,"spec":spec})),
+            )
+            .await?;
+        if run.spec != spec {
+            return Err("启动精确规格不符".into());
+        }
+        Ok(run)
+    }
+    /// 只读状态/失回执对账，不偷偷connect或续租。
+    pub async fn run_status(
+        &self,
+        world: &str,
+        id: &str,
+        submission: bool,
+    ) -> Result<crate::general_runs::GeneralRun, String> {
+        Self::run_uuid(world, false)?;
+        Self::run_uuid(id, true)?;
+        let suffix = if submission {
+            format!("?submission_id={id}")
+        } else {
+            format!("/{id}")
+        };
+        let run = self
+            .run_request(
+                world,
+                "GET",
+                &format!("/api/v1/worlds/{world}/general/runs{suffix}"),
+                None,
+            )
+            .await?;
+        if if submission {
+            run.spec.submission_id != id
+        } else {
+            run.id != id
+        } {
+            return Err("运行/提交键不符".into());
+        }
+        Ok(run)
+    }
+    pub async fn run_control(
+        &self,
+        world: &str,
+        id: &str,
+        op: crate::lab_jobs::OwnerAction,
+    ) -> Result<crate::general_runs::GeneralRun, String> {
+        Self::run_uuid(world, false)?;
+        Self::run_uuid(id, true)?;
+        Self::run_operation(&op)?;
+        let run = self
+            .run_request(
+                world,
+                "POST",
+                &format!("/api/v1/worlds/{world}/general/runs/{id}"),
+                Some(&json!(op)),
+            )
+            .await?;
+        if run.id != id || run.operations.get(&op.operation_id) != Some(&op) {
+            return Err("运行控制回执不符，只读对账勿自动重发".into());
+        }
+        Ok(run)
+    }
     /// 不获取lease、不自动推进Tick；调用者必须显式给原fence/时序/幂等键。
     pub async fn install(
         &self,

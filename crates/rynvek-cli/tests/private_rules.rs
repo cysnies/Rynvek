@@ -313,3 +313,143 @@ async fn actual_cli_publish_discover_verify_install_paid_quarantine_epoch_resume
     );
     s.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn actual_cli_durable_explicit_budget_status_pause_resume_cancel_and_server_paid_completion() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let base = s.base_url();
+    let key = ServerSigningKey::from_seed(0, [161; 32]);
+    let (owner, token) = client::login(
+        &base,
+        &key,
+        LoginTarget::Register {
+            handle: "durable-cli",
+            kind: "human",
+        },
+    )
+    .await
+    .unwrap();
+    let cfg: GeneralWorldConfig =
+        serde_json::from_str(include_str!("../../../examples/worlds/general-rules.world.json")).unwrap();
+    let bytes = cfg.build_package("world.cli.durable", "1.0.0").unwrap();
+    let r = client::request(
+        "POST",
+        &format!("{base}/api/v1/worlds/general"),
+        &[("Authorization", &format!("Bearer {token}"))],
+        Some(&bytes),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.status, 201);
+    let world = r.json().unwrap()["world_id"].as_str().unwrap().to_owned();
+    let call = |args: &[&str]| run(&base, owner, &key, &token, args);
+    let h = ok(call(&["connect", "--world", &world]))["host_fence"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let l = ok(call(&["acquire", "--world", &world, "--host-fence", &h]))["lease"]["fencing_token"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    let obs = ok(call(&["observe", "--world", &world]));
+    let submission = new_uuid_v7().to_string();
+    let spec = dir.path().join("spec.json");
+    let opfile = dir.path().join("op.json");
+    let mut spec_value = json!({"submission_id":submission,"expected_revision":0,"expected_root":obs["commit"]["state_root"],"ticks":128,"wall_seconds":120,"interval_ms":500,"max_energy_q":"1000000000","consent":rynvek_server::general_runs::CONSENT});
+    std::fs::write(&spec, serde_json::to_vec(&spec_value).unwrap()).unwrap();
+    let started = ok(call(&[
+        "run-start",
+        "--world",
+        &world,
+        "--host-fence",
+        &h,
+        "--control-fence",
+        &l,
+        "--spec",
+        spec.to_str().unwrap(),
+    ]));
+    let id = started["id"].as_str().unwrap();
+    assert_eq!(started["storage_backend"], "memory");
+    assert_eq!(
+        ok(call(&["run-lookup", "--world", &world, "--submission-id", &submission]))["id"],
+        id
+    );
+    let mut current = ok(call(&["run-status", "--world", &world, "--run", id]));
+    for action in ["pause", "resume", "pause", "cancel"] {
+        let op = json!({"operation_id":new_uuid_v7().to_string(),"generation":current["generation"],"action":action});
+        std::fs::write(&opfile, serde_json::to_vec(&op).unwrap()).unwrap();
+        current = ok(call(&[
+            "run-control",
+            "--world",
+            &world,
+            "--run",
+            id,
+            "--operation",
+            opfile.to_str().unwrap(),
+        ]));
+        assert_eq!(current["deadline_s"], started["deadline_s"]);
+        assert!(current["energy_used_q"].as_u64().unwrap() >= started["energy_used_q"].as_u64().unwrap());
+        let replay = ok(call(&[
+            "run-control",
+            "--world",
+            &world,
+            "--run",
+            id,
+            "--operation",
+            opfile.to_str().unwrap(),
+        ]));
+        assert_eq!(replay["generation"], current["generation"]);
+        if action == "pause" {
+            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+            assert_eq!(
+                ok(call(&["run-status", "--world", &world, "--run", id]))["done"],
+                current["done"]
+            );
+        }
+    }
+    assert_eq!(current["status"], "cancelled");
+    // 第二个有限意图只用GET等待；没有CLI Tick命令替服务器推进。
+    let connected = ok(call(&["connect", "--world", &world]));
+    let h = connected["host_fence"].as_u64().unwrap().to_string();
+    let l = ok(call(&["acquire", "--world", &world, "--host-fence", &h]))["lease"]["fencing_token"]
+        .as_u64()
+        .unwrap()
+        .to_string();
+    spec_value["submission_id"] = json!(new_uuid_v7().to_string());
+    spec_value["ticks"] = json!(3);
+    spec_value["interval_ms"] = json!(200);
+    spec_value["expected_revision"] = connected["observation"]["commit"]["revision"].clone();
+    spec_value["expected_root"] = connected["observation"]["commit"]["state_root"].clone();
+    std::fs::write(&spec, serde_json::to_vec(&spec_value).unwrap()).unwrap();
+    let next = ok(call(&[
+        "run-start",
+        "--world",
+        &world,
+        "--host-fence",
+        &h,
+        "--control-fence",
+        &l,
+        "--spec",
+        spec.to_str().unwrap(),
+    ]));
+    let id = next["id"].as_str().unwrap();
+    let end = tokio::time::timeout(std::time::Duration::from_secs(12), async {
+        loop {
+            let j = ok(call(&["run-status", "--world", &world, "--run", id]));
+            if j["status"] == "completed" {
+                break j;
+            }
+            assert!(!matches!(j["status"].as_str(), Some("blocked" | "expired")));
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(end["done"], 3);
+    assert!(end["energy_used_q"].as_u64().unwrap() > 0);
+    let obs = ok(call(&["observe", "--world", &world]));
+    assert_eq!(obs["commit"]["state_root"], end["last_root"]);
+    assert_eq!(obs["life"]["universe_energy_q"], obs["life"]["genesis_energy_q"]);
+    s.shutdown().await;
+}
