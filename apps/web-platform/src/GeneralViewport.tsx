@@ -5,7 +5,7 @@ import { createGeneralRenderHost } from "@rynvek/engine";
 import type { GeneralWorldSession } from "./general-remote.js";
 /** 显式开启只读显示。5秒复验、12秒失鲜即清除；没有后台Tick/本地积分或假Canvas降级。 */
 export function GeneralViewport({ session, onInvalidated }: {
-    session: GeneralWorldSession;
+    session: Pick<GeneralWorldSession,"world"|"renderFrame"|"onPrivateInvalidated"|"invalidatePrivate">;
     onInvalidated: () => void;
 }) {
     const [enabled, setEnabled] = useState(false), [status, setStatus] = useState("未开启GPU只读显示"), canvas = useRef<HTMLCanvasElement>(null);

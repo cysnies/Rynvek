@@ -2,10 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useRef, useState } from "react";
 import type { RuleInstallRequest, SignedRuleRelease } from "@rynvek/agent-sdk";
+import {GeneralDriverWorkspace} from "./GeneralDriverWorkspace.js";
+import {GeneralDriverPanel} from "./GeneralDriverPanel.js";
 import {GeneralViewport} from "./GeneralViewport.js";
 import { GeneralRunInterrupted, GeneralWorldSession, type GeneralWorld } from "./general-remote.js";
-/** 服务器观察工作台；不启动本地Worker或借Arena练习身份伪装远端执行。 */
-export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: {
+/** 模式互斥挂载；切换即销毁旧凭据/私有态，不把owner会话交给协作面板。 */
+export function GeneralWorkspace({origin=location.origin,fetcher=fetch}:{origin?:string;fetcher?:typeof fetch}){
+    const [mode,setMode]=useState<"owner"|"driver">("owner");
+    return <><nav aria-label="General工作模式"><button aria-pressed={mode==="owner"} onClick={()=>setMode("owner")}>所有者模式</button><button aria-pressed={mode==="driver"} onClick={()=>setMode("driver")}>规则协作者模式</button></nav>{mode==="owner"?<GeneralOwnerWorkspace origin={origin} fetcher={fetcher}/>:<GeneralDriverWorkspace origin={origin} fetcher={fetcher}/>}</>;
+}
+/** 服务器观察工作台；不运行本地仿真World，显示沿原只读Worker，不借Arena身份伪装。 */
+function GeneralOwnerWorkspace({ origin = location.origin, fetcher = fetch }: {
     origin?: string;
     fetcher?: typeof fetch;
 }) {
@@ -82,8 +89,9 @@ export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: 
  <label>明确接受上述每身体维护报价<input aria-label="General维护报价" value={fee} onChange={e => setFee(e.target.value)}/></label>
  <button disabled={!plan || !fee || client.controlFence === undefined || !observation || (observation.commit.tick + 1) % 4 === 0} onClick={() => void perform(async () => { await client.advance("recover", parsed(), Number(fee)); return "仅一个实付隔离维护Tick已确认；没有自动激活新图"; })}>明确实付维护一个Tick</button>
  </fieldset>}
- {client&&client.world&&<GeneralViewport key={client.world} session={client} onInvalidated={()=>redraw(v=>v+1)}/>}
+ {client&&client.world&&<GeneralDriverPanel key={`drivers:${client.world}`} session={client} busy={busy} perform={perform}/>}
+ {client&&client.world&&<GeneralViewport key={`render:${client.world}`} session={client} onInvalidated={()=>redraw(v=>v+1)}/>}
     {observation && <section><h2>服务器已提交观察（只读）</h2><p>Tick {observation.commit.tick} · revision {observation.commit.revision} · 根 {observation.commit.state_root}</p><p>{observation.rule_recovery ? `隔离维护至Epoch ${observation.rule_recovery.epoch_tick}；本Tick维护实付 ${observation.rule_recovery.maintenance_paid_q}` : "未处于隔离维护；撤销仍可能令下一Tick拒绝"}</p><pre>{JSON.stringify({ bodies: observation.bodies, rule_meter: observation.rule_meter, life: observation.life, components: observation.components }, null, 2)}</pre></section>}
- <p>只读画布沿原FrameScene/Renderer/Worker消费服务器最小投影，不运行本地第二份World。真实浏览器/硬件GPU验收与协作自治仍待后续。</p>
+ <p>只读画布沿原FrameScene/Renderer/Worker消费服务器最小投影，不运行本地第二份World。真实浏览器/硬件GPU验收及耐久自治仍欠；当前协作只授权最小帧与受控规则驱动。</p>
  </main>;
 }

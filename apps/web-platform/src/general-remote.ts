@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 import {validateGeneralFrame,type GeneralRenderFrame} from "@rynvek/engine";
-import { PrivateRuleClient, type GeneralFrame, type RuleInstallRequest, type SignedRuleRelease } from "@rynvek/agent-sdk";
+import { GeneralDriverClient, changeGeneralDriver, listGeneralDrivers, type GeneralDriverGrant, type RuleRequest, PrivateRuleClient, type GeneralFrame, type RuleInstallRequest, type SignedRuleRelease } from "@rynvek/agent-sdk";
 export interface GeneralIdentity {
     principal_id: string;
     kind: "Human";
@@ -107,6 +107,13 @@ export class GeneralWorldSession {
         signal?.throwIfAborted();
         return new GeneralWorldSession(u.origin, token, i, fetcher);
     }
+    /** 共用正式身份/同源凭据传输，返回不暴露owner规则客户端的目的隔离适配器。 */
+    static async openRuleDriver(origin:string, token:string, fetcher:typeof fetch=fetch, signal?:AbortSignal):Promise<GeneralDriverSession> {
+        const auth=await GeneralWorldSession.open(origin,token,fetcher,signal);
+        return new GeneralDriverSession(auth.identity,(p,m,b,s)=>auth.raw(p,m,b,s),()=>auth.destroy());
+    }
+    async listDrivers():Promise<GeneralDriverGrant[]>{return this.exclusive(()=>{if(!this.world)throw new Error("未选本人世界");return listGeneralDrivers((p,m,b,s)=>this.raw(p,m,b,s),this.world);});}
+    async changeDriver(principal:string,expected:string|null,active:boolean):Promise<GeneralDriverGrant>{return this.exclusive(()=>{if(!this.world)throw new Error("未选本人世界");return changeGeneralDriver((p,m,b,s)=>this.raw(p,m,b,s),this.world,principal,expected,active);});}
     destroy(): void { this.abort.abort(); this.token = ""; this.clear(); }
     private clear(): void { this.world = undefined;this.invalidatePrivate(); this.observation = undefined; this.hostFence = undefined; this.controlFence = undefined; }
     private async raw(path: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<Response> {
@@ -214,4 +221,158 @@ export class GeneralWorldSession {
         });
     }
 
+}
+
+/** 单Tick目的协作会话。无owner观察、包访问、安装/维护、后台循环或耐久自治宣称。 */
+export class GeneralDriverSession {
+    readonly identity: GeneralIdentity;
+    world: string | undefined;
+    grantId: string | undefined;
+    frame: GeneralRenderFrame | undefined;
+    hostFence: number | undefined;
+    controlFence: number | undefined;
+    private sdk: GeneralDriverClient | undefined;
+    private epoch = 0;
+    private busy = false;
+    private alive = true;
+    private readonly listeners = new Set<() => void>();
+    private pending = new AbortController();
+    private freshness: ReturnType<typeof setTimeout> | undefined;
+    private confirmedFresh(): void {
+        clearTimeout(this.freshness);
+        this.freshness = setTimeout(() => { if (this.alive)
+            this.invalidatePrivate(); }, 12000);
+    }
+    constructor(identity: GeneralIdentity, private readonly request: RuleRequest, private readonly close: () => void) { this.identity = Object.freeze({ ...identity }); }
+    onPrivateInvalidated(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+    invalidatePrivate(): void {
+        clearTimeout(this.freshness);
+        this.freshness = undefined;
+        this.epoch++;
+        this.pending.abort();
+        this.pending = new AbortController();
+        this.frame = undefined;
+        this.hostFence = undefined;
+        this.controlFence = undefined;
+        for (const f of this.listeners)
+            f();
+    }
+    destroy(): void {
+        if (!this.alive)
+            return;
+        this.alive = false;
+        this.invalidatePrivate();
+        this.pending.abort();
+        this.sdk = undefined;
+        this.world = undefined;
+        this.grantId = undefined;
+        this.close();
+    }
+    private accept(value: unknown): GeneralRenderFrame {
+        if (!this.world)
+            throw new Error("未绑定协作世界");
+        validateGeneralFrame(value as GeneralRenderFrame, this.world.replaceAll("-", ""));
+        // 不让调用方持有并改写传入JSON后影响当前Tick基线。
+        const f = structuredClone(value as GeneralRenderFrame);
+        this.frame = f;
+        this.confirmedFresh();
+        return structuredClone(f);
+    }
+    private async exclusive<T>(work: (sdk: GeneralDriverClient, signal: AbortSignal) => Promise<T>): Promise<T> {
+        if (!this.alive || this.busy || !this.sdk)
+            throw new Error("协作会话繁忙/失效或尚未绑定");
+        this.busy = true;
+        const epoch = this.epoch, signal = this.pending.signal;
+        try {
+            const result = await work(this.sdk, signal);
+            signal.throwIfAborted();
+            if (!this.alive || epoch !== this.epoch)
+                throw new Error("协作会话已失效");
+            return result;
+        }
+        catch (e) {
+            this.invalidatePrivate();
+            throw e;
+        }
+        finally {
+            this.busy = false;
+        }
+    }
+    async join(world: string, grant: string): Promise<void> {
+        if (this.busy || !this.alive)
+            throw new Error("协作会话繁忙或失效");
+        this.invalidatePrivate();
+        this.world = undefined;
+        this.grantId = undefined;
+        this.sdk = undefined;
+        // SDK先核资源标识；只走目的drive，不试探owner元数据/完整观察。
+        const sdk = new GeneralDriverClient(this.identity.principal_id, uuid(world), grant, this.request);
+        this.world = world;
+        this.grantId = grant;
+        this.sdk = sdk;
+        await this.refresh();
+    }
+    async refresh(): Promise<void> {
+        if (this.busy)
+            throw new Error("协作会话繁忙");
+        this.invalidatePrivate();
+        return this.exclusive(async (sdk, signal) => { const v = await sdk.frame(signal); signal.throwIfAborted(); this.accept(v); });
+    }
+    /** 原只读Worker轮询可独立读取，不与明确Tick争夺操作锁；不修改控制或当前推进基线。 */
+    async renderFrame(signal?: AbortSignal): Promise<GeneralRenderFrame> {
+        const sdk = this.sdk, world = this.world, epoch = this.epoch;
+        if (!this.alive || !sdk || !world)
+            throw new Error("协作会话失效");
+        const combined = AbortSignal.any([this.pending.signal, ...(signal ? [signal] : [])]);
+        try {
+            const f = await sdk.frame(combined);
+            combined.throwIfAborted();
+            if (epoch !== this.epoch || !this.alive || this.world !== world)
+                throw new Error("私有观察已失效");
+            validateGeneralFrame(f as GeneralRenderFrame, world.replaceAll("-", ""));
+            this.confirmedFresh();
+            return structuredClone(f as GeneralRenderFrame);
+        }
+        catch (e) {
+            if (epoch === this.epoch)
+                this.invalidatePrivate();
+            throw e;
+        }
+    }
+    async connect(): Promise<void> { return this.exclusive(async (sdk, signal) => { this.hostFence = undefined; this.controlFence = undefined; const c = await sdk.connect(signal); signal.throwIfAborted(); this.accept(c.frame); this.hostFence = integer(c.hostFence); }); }
+    async acquire(): Promise<void> {
+        return this.exclusive(async (sdk, signal) => {
+            if (this.hostFence === undefined)
+                throw new Error("须先明确连接");
+            this.controlFence = undefined;
+            const l = await sdk.acquire(this.hostFence, signal);
+            signal.throwIfAborted();
+            this.controlFence = integer(l);
+        });
+    }
+    async advance(): Promise<void> {
+        return this.exclusive(async (sdk, signal) => {
+            if (!this.world || !this.frame || this.hostFence === undefined || this.controlFence === undefined)
+                throw new Error("须读取、连接并明确取得控制");
+            const tick = this.frame.tick, r = await sdk.tick({ world: this.world, hostFence: this.hostFence, controlFence: this.controlFence, tick, idempotencyKey: nextKey() }, signal);
+            signal.throwIfAborted();
+            if (r.duplicate || r.frame === undefined)
+                throw new Error("本次新请求未返回对应权威帧，不拿当前帧冒充旧回执");
+            validateGeneralFrame(r.frame as GeneralRenderFrame, this.world.replaceAll("-", ""));
+            const f = r.frame as GeneralRenderFrame;
+            if (f.tick !== r.commit.tick || f.revision !== r.commit.revision || f.stateRoot !== r.commit.state_root)
+                throw new Error("提交与帧不一致");
+            this.accept(f);
+        });
+    }
+    async release(): Promise<void> {
+        return this.exclusive(async (sdk, signal) => {
+            if (this.hostFence === undefined || this.controlFence === undefined)
+                throw new Error("尚无控制");
+            await sdk.release(this.hostFence, this.controlFence, signal);
+            signal.throwIfAborted();
+            this.hostFence = undefined;
+            this.controlFence = undefined;
+        });
+    }
 }
