@@ -96,6 +96,8 @@ pub enum EngineCommand {
         map: Box<ArenaMapData>,
     },
     /// 仅表现层选择，不是游戏命令，也不接受前端实体坐标。
+    /// Opaque, fixed-size presentation colors only; no executable material or fog controls.
+    ArenaTheme { world_id:String, request_id:u32, background:u32, factions:[u32;7] },
     ArenaSelection {
         world_id: String,
         units: Vec<u32>,
@@ -158,6 +160,7 @@ pub enum EngineEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         arena_faction: Option<u8>,
     },
+    ArenaThemeApplied { world_id:String, request_id:u32, background:u32, factions:[u32;7] },
     TickCommitted {
         tick: u64,
         /// 64 位十六进制状态根
@@ -294,5 +297,18 @@ mod tests {
         let id = [0xAB; 16];
         assert_eq!(parse_world_id(&to_hex(&id)), Some(id));
         assert_eq!(parse_world_id("zz"), None);
+    }
+
+    #[test]
+    fn arena_theme_uses_camel_case_and_seven_opaque_colors() {
+        let background = 0xFF40_2010u32;
+        let factions = [0xFF80_10E0, 0xFF20_C080, 0xFFFF_7F00, 0xFF00_FF7F, 0xFF7F_00FF, 0xFF00_FFFF, 0xFF01_0203];
+        let json = serde_json::json!({"type":"ARENA_THEME","worldId":"0".repeat(32),"requestId":4,"background":background,"factions":factions}).to_string();
+        let cmd = EngineCommand::from_json(&json).unwrap();
+        assert_eq!(cmd, EngineCommand::ArenaTheme { world_id: "0".repeat(32), request_id: 4, background, factions });
+        let ev = EngineEvent::ArenaThemeApplied { world_id: "0".repeat(32), request_id: 4, background, factions };
+        assert!(ev.to_json().contains(r#""type":"ARENA_THEME_APPLIED""#));
+        assert!(ev.to_json().contains(r#""requestId":4"#));
+        assert!(EngineCommand::from_json(r#"{"type":"ARENA_THEME","worldId":"00","requestId":1,"background":1,"factions":[1,2,3]}"#).is_err());
     }
 }

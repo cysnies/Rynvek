@@ -464,3 +464,70 @@ fn real_gpu_draws_hollow_drag_and_neutral_placement_without_hidden_occupancy_sig
     assert!(owner.take_uncaptured_errors().is_empty());
     assert_eq!(engine.simulation().clock.tick, 0);
 }
+
+#[test]
+fn applied_theme_reaches_frame_scene_and_does_not_reveal_hidden_units() {
+    let arena = world();
+    let mut render = engine();
+    let mut obs = arena.observe(FactionId(0)).unwrap();
+    let count = obs.units.len();
+    let enemy = arena.observe(FactionId(1)).unwrap().units[0].clone();
+    obs.units.push(enemy);
+    obs.visibility.fill(0);
+    render.handle_command(command(map_command(&arena))).unwrap();
+    render.handle_command(frame(obs)).unwrap();
+    let before = render.frame_scene();
+    assert_eq!(before.layer_instances(RenderLayer::Organisms).len(), count);
+    let background = 0xFF40_2010u32;
+    let factions = [0xFF80_10E0, 0xFF20_C080, 0xFFFF_7F00, 0xFF00_FF7F, 0xFF7F_00FF, 0xFF00_FFFF, 0xFF01_0203];
+    assert!(render
+        .handle_command(command(serde_json::json!({
+            "type":"ARENA_THEME","worldId":"f".repeat(32),"requestId":1,"background":background,"factions":factions
+        })))
+        .is_err());
+    assert_eq!(render.frame_scene(), before);
+    render
+        .handle_command(command(serde_json::json!({
+            "type":"ARENA_THEME","worldId":"0".repeat(32),"requestId":9,"background":background,"factions":factions
+        })))
+        .unwrap();
+    let events = render.drain_events();
+    assert!(events.iter().any(|e| matches!(e, EngineEvent::ArenaThemeApplied { request_id: 9, background: 0xFF40_2010, .. })));
+    let scene = render.frame_scene();
+    assert_eq!(scene.layer_instances(RenderLayer::Organisms).len(), count);
+    assert!(scene.layer_instances(RenderLayer::Organisms).iter().all(|i| i.color == factions[0]));
+    assert!(scene.layer_instances(RenderLayer::Structures).iter().any(|i| i.color == factions[0]));
+    assert!(scene.layer_instances(RenderLayer::Terrain).iter().any(|i| i.color == background));
+    if let Some(owner) = common::gpu() {
+        let mut gpu_engine = engine();
+        let mut obs = world().observe(FactionId(0)).unwrap();
+        obs.buildings.clear();
+        obs.units.clear();
+        obs.visibility_width = 2;
+        obs.visibility = vec![0, 0, 0, 0];
+        let tiles: Vec<u8> = (0..64).map(|i| (i % 8 % 5) as u8).collect();
+        gpu_engine
+            .handle_command(command(serde_json::json!({"type":"ARENA_MAP","worldId":"0".repeat(32),"map":{
+                "width":8,"height":8,"tilesHash":rynvek_core::hash::Blake3Hash::of(&tiles).to_hex(),"tiles":tiles
+            }})))
+            .unwrap();
+        gpu_engine.handle_command(frame(obs)).unwrap();
+        gpu_engine
+            .handle_command(command(serde_json::json!({
+                "type":"ARENA_THEME","worldId":"0".repeat(32),"requestId":3,"background":background,"factions":factions
+            })))
+            .unwrap();
+        gpu_engine.attach_gpu(owner).unwrap();
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        gpu_engine.enable_rendering(format).unwrap();
+        gpu_engine.camera = Camera2D::new([4.0, 4.0], 32.0, [256, 256]);
+        let target = OffscreenTarget::new(gpu_engine.gpu_owner().unwrap().device(), [256, 256], format);
+        assert!(gpu_engine.render_frame(&target.color_view));
+        let owner = gpu_engine.gpu_owner().unwrap();
+        let pixels = target.read_color_blocking(owner.device(), owner.queue());
+        let at = |x: usize, y: usize| &pixels[(y * 256 + x) * 4..(y * 256 + x) * 4 + 4];
+        assert_eq!(at(16, 144), [0x10, 0x20, 0x40, 0xFF], "未知格须用主题背景，不泄漏地形");
+        assert!(owner.take_uncaptured_errors().is_empty());
+        assert_eq!(gpu_engine.simulation().clock.tick, 0);
+    }
+}

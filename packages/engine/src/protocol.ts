@@ -66,6 +66,7 @@ export type EngineCommand =
   | { type: "SET_LAYER_MASK"; mask: number }
   | { type: "SET_HEATMAP_CHANNEL"; channel: FieldChannel }
   | { type: "SIMULATE_DEVICE_LOST" }
+  | { type:"ARENA_THEME";worldId:string;requestId:number;background:number;factions:readonly number[] }
   | { type: "ARENA_MAP"; worldId: string; map: {width: number; height: number; tiles: number[]; tilesHash: string} }
   | { type: "ARENA_SELECTION"; worldId: string; units: number[]; building: number | null }
   | { type: "ARENA_OVERLAY"; worldId: string; drag: [[number, number], [number, number]] | null; placement: {kind: BuildingKind; origin: [number, number]} | null }
@@ -90,6 +91,7 @@ export const ENGINE_COMMAND_TYPES = [
   "SET_LAYER_MASK",
   "SET_HEATMAP_CHANNEL",
   "SIMULATE_DEVICE_LOST",
+  "ARENA_THEME",
   "ARENA_MAP",
   "ARENA_SELECTION",
   "ARENA_OVERLAY",
@@ -109,6 +111,7 @@ export type EngineEvent =
       /** 实际启用的只读竞技场阵营；旧版本/本地仿真不回显。 */
       arenaFaction?: number;
     }
+  | { type:"ARENA_THEME_APPLIED";worldId:string;requestId:number;background:number;factions:readonly number[] }
   | { type: "TICK_COMMITTED"; tick: number; stateRoot: string }
   | { type: "FRAME_RENDERED"; tick: number }
   | { type: "PICK_RESULT"; requestId: number; denseIndex: number | null }
@@ -122,11 +125,12 @@ export type EngineEvent =
 export type EngineEventType = EngineEvent["type"];
 export type EngineEventOf<T extends EngineEventType> = Extract<EngineEvent, { type: T }>;
 
-type FieldKind = "optional-u8" | "u32" | "number" | "string" | "nullable-string" | "nullable-u32" | "backend" | "hex64";
+type FieldKind = "optional-u8" | "u32" | "number" | "string" | "nullable-string" | "nullable-u32" | "backend" | "hex64" | "opaque7";
 
 /** 每种事件的字段模式（运行时校验 Worker 消息） */
 const EVENT_SCHEMA: { readonly [K in EngineEventType]: Readonly<Record<string, FieldKind>> } = {
   ENGINE_READY: { backend: "backend", profile: "nullable-string", adapter: "nullable-string", generation: "u32", arenaFaction: "optional-u8" },
+  ARENA_THEME_APPLIED:{worldId:"string",requestId:"u32",background:"u32",factions:"opaque7"},
   TICK_COMMITTED: { tick: "number", stateRoot: "hex64" },
   FRAME_RENDERED: { tick: "number" },
   PICK_RESULT: { requestId: "u32", denseIndex: "nullable-u32" },
@@ -144,6 +148,7 @@ const isU32 = (v: unknown): v is number => typeof v === "number" && Number.isInt
 
 function checkField(kind: FieldKind, v: unknown): boolean {
   switch (kind) {
+    case "opaque7":return Array.isArray(v)&&v.length===7&&v.every(c=>isU32(c)&&(c>>>24)===255);
     case "optional-u8":
       return v === undefined || (isU32(v) && v <= 255);
     case "u32":

@@ -173,6 +173,7 @@ pub struct Engine {
     arena_observation: Option<Box<rynvek_rts::observation::FactionObservation>>,
     arena_map: Option<Box<crate::protocol::ArenaMapData>>,
     arena_selection: crate::observation::Selection,
+    arena_theme: crate::observation::ArenaTheme,
     owner: Option<GpuDeviceOwner>,
     gpu: Option<GpuResources>,
     recovery: DeviceLostRecovery,
@@ -204,6 +205,7 @@ impl Engine {
             arena_observation: None,
             arena_map: None,
             arena_selection: Default::default(),
+            arena_theme: Default::default(),
             recovery: DeviceLostRecovery::new(config.max_recovery_attempts),
             config,
             owner: None,
@@ -803,6 +805,7 @@ impl Engine {
                         self.layer_mask,
                         self.arena_map.as_deref(),
                         &self.arena_selection,
+                        &self.arena_theme,
                     )
                 },
             );
@@ -843,6 +846,8 @@ impl Engine {
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("rynvek.engine.frame"),
         });
+        render.renderer.palette.background = self.arena_theme.background;
+        render.renderer.palette.fog = self.arena_theme.background.with_alpha(0xc0);
         render.renderer.render(
             device,
             queue,
@@ -951,6 +956,14 @@ impl Engine {
                 }
                 self.arena_map = Some(map);
             }
+            EngineCommand::ArenaTheme {world_id,request_id,background,factions} => {
+                self.require_arena_binding(&world_id)?;
+                if std::iter::once(&background).chain(factions.iter()).any(|c|c>>24!=255) {
+                    return Err(EngineError {code:RynvekErrorCode::DimensionMismatch,message:"主题只许八个不透明颜色，不改变可见性规则".into()});
+                }
+                self.arena_theme=crate::observation::ArenaTheme {background:rynvek_render::Rgba8(background.to_le_bytes()),factions:factions.map(|c|rynvek_render::Rgba8(c.to_le_bytes()))};
+                self.events.push_back(EngineEvent::ArenaThemeApplied {world_id,request_id,background,factions});
+            }
             EngineCommand::ArenaSelection {
                 world_id,
                 units,
@@ -1020,6 +1033,7 @@ impl Engine {
                 self.arena_observation = None;
                 self.arena_map = None;
                 self.arena_selection = Default::default();
+                self.arena_theme = Default::default();
             }
         }
         Ok(())

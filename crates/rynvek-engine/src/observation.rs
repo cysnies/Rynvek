@@ -9,6 +9,10 @@ use rynvek_core::{error::RynvekErrorCode, fixed::Q32_32};
 use rynvek_render::{FrameScene, InstanceData, InstanceShape, RenderLayer, RenderLayerMask, Rgba8, WorldPalette};
 use rynvek_rts::{buildings::building_spec, fog::VISIBILITY_CELL_TILES, observation::FactionObservation};
 
+#[derive(Clone,Debug)]
+pub(crate) struct ArenaTheme {pub background:Rgba8,pub factions:[Rgba8;7]}
+impl Default for ArenaTheme {fn default()->Self{Self{background:WorldPalette::NEUTRAL_DARK.background,factions:std::array::from_fn(WorldPalette::faction)}}}
+
 #[derive(Debug, Default)]
 pub(crate) struct Selection {
     pub units: std::collections::BTreeSet<u32>,
@@ -108,7 +112,7 @@ fn visible(obs: &FactionObservation, x: u32, y: u32) -> bool {
 /// 已裁剪的实体再作保守过滤，且不接受前端图层开关取消该过滤。
 /// 不绑定 SimulationEngine 的场缓冲，不把 RTS EntitySerial 当成 dense-index 拾取 ID。
 pub fn scene(obs: &FactionObservation, mask: RenderLayerMask) -> FrameScene {
-    presentation_scene(obs, mask, None, &Selection::default())
+    presentation_scene(obs, mask, None, &Selection::default(), &ArenaTheme::default())
 }
 
 /// 带静态地图/选择的同一场景构建路径，表现状态不能反向修改观察。
@@ -117,6 +121,7 @@ pub(crate) fn presentation_scene(
     mask: RenderLayerMask,
     map: Option<&crate::protocol::ArenaMapData>,
     selection: &Selection,
+    theme: &ArenaTheme,
 ) -> FrameScene {
     let mut allowed = RenderLayerMask::NONE
         .with(RenderLayer::Structures)
@@ -148,7 +153,7 @@ pub(crate) fn presentation_scene(
                     RenderLayer::Terrain,
                     [x + cell / 2.0, y + cell / 2.0],
                     cell,
-                    WorldPalette::NEUTRAL_DARK.background,
+                    theme.background,
                     InstanceShape::Square,
                 ));
                 continue;
@@ -214,7 +219,7 @@ pub(crate) fn presentation_scene(
             RenderLayer::Structures,
             [x as f32 + size as f32 / 2.0, y as f32 + size as f32 / 2.0],
             size as f32,
-            WorldPalette::faction(building.faction.0 as usize),
+            theme.factions[building.faction.0 as usize % 7],
             InstanceShape::Square,
         ));
     }
@@ -253,7 +258,7 @@ pub(crate) fn presentation_scene(
             RenderLayer::Organisms,
             p,
             0.8,
-            WorldPalette::faction(unit.faction.0 as usize),
+            theme.factions[unit.faction.0 as usize % 7],
             InstanceShape::Circle,
         ));
     }
