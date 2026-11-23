@@ -5,6 +5,41 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第四十七批：通用World有来源生命场与可选付费LIF（从main a22fbe5继续）
+
+**主体继续，整体未完成、未达正式发布验收。** 已核对手交、ACTIVE与远端均为干净 `a22fbe586241f11db1dd0f0ae20883943b33872f` 后再实现，未重做阶段46刚体链。选定最短真实端到端：复用原 `EnergyAccount` 与可选付费 LIF，把有来源营养摄取、维护、死亡/命令残骸返还接入通用单 Chunk World；不迁 Arena 生态/Tier1，不双记阵营 Biomass，不把本批宣称为任意组件 World 或项目完成。保持 PUBLIC、认证 gh 与本地持续授权，未改可见性/历史/保护/网络策略。完整来源与剖面边界见[GENERAL_WORLD_LIFE.md](GENERAL_WORLD_LIFE.md)。
+
+- 活体创世空账，营养只来自明确场沉淀与随后「先收款再等额扣场」的摄取；固定体不摄取。维护热耗耗尽库存才死亡；无维护的空仓保持存活。残骸整 raw 返还当前格，亚 raw 或格满余量归热，不记 `carcass_reclaimed`，INV-03 只用摄取 raw 作为当帧 harvest 恒等。
+- 闭世界把场衰变记入 `env_dissipated_q`、退役账户记入 `retired_closed_q`，与活体 `stored/dissipated/exported/transferred` 及当前场能对创世能量封闭；返回场的 `returned_q` 不再另加。反应扩散若在无来源时把营养总量抬高，则整 Tick 拒绝。世界级 Biomass/Flux/Neurogel 必须保持 0。
+- 可选共享基因组驱动 LIF：仅当本 Tick 有脉冲且 `try_charge_spikes` 成功才写入加速度，否则清零，避免无成本沿用上帧意图。速率、回收比、脑规模与加速度比例是实现剖面 `rynvek.general-sourced-life.v1`，不是规范冻结原值；无可塑性，声明规则主体仍待后续。
+- 纯物理快照仍为原四块，生命世界追加 LIFE（启用神经时带原 NEUR），不是旧格式静默回退。命令、摄取、场衰变或回收失败时，原候选 Tick 整事务回滚。CLI/RYWL 可选 `life` 为加法字段；缺沉淀却要求维护的活体在配置期拒绝。
+
+### 实现提交、真实快验与未验
+
+主体与测试提交的 SHA 由文档收尾后的已推最终 HEAD 与同一 Page 记录给出，不在本文制造自引用。
+
+本批新增 10 个不同定向用例（重跑/过滤不累计）：有来源摄取/固定体/饥饿/命令回收/失败回滚/快照与WAL/付费神经/纯物理四块 8，RYWL 拒绝无沉淀维护 1，真实 CLI 子进程生命包构建-运行-文件恢复 1。另重跑并通过既有通用物理 12、世界库其余用例、Engine 通用安装 2、原物理 CLI 1、场库 7、原16阶段/10Hz 与空世界 10000 Tick 无发散。
+
+已核对：无场步 Tick 上等额扣场；场衰变后闭世界仍成立；失败 Tick 不保留摄取或推进时钟；生命快照/WAL 恢复后连续根一致；命令回收按回收比把整 raw 返还当前格；欠费神经不保留加速度；纯物理示例与测试不被生命块破坏。未把「有脉冲时才转向」写成必现，权重是否在首两 Tick 形成可付费脉冲取决于 LIF 状态。未做真实掉电。
+
+定向命令（重复运行不加计数）：
+
+```sh
+cargo test -p rynvek-simulation --locked --test general_life
+cargo test -p rynvek-simulation --locked --test general_physics
+cargo test -p rynvek-simulation --locked --lib
+cargo test -p rynvek-world --locked --lib general::tests
+cargo test -p rynvek-engine --locked --lib engine::tests::general_package
+cargo test -p rynvek-cli --locked --test general_world
+cargo test -p rynvek-field --locked --lib
+```
+
+必要累计敏感筛查无命中、提交身份与既有公开提交一致，不等同完整秘密/隐私审计。未跑全 workspace/Clippy/license/SBOM/soak/CI 轮询，没有外部部署/模型或支付。真实浏览器 WebGPU、硬件 GPU、真实 PG 多机断电/长稳未验；阶段41 llvmpipe 仍仅软件回读。当前若有 Node24 检查也不算 Node22 正式运行时验收；本批未重编 C#，也没有新的 wasm32 产物。完整全门禁留主体齐后集中执行。
+
+### 下一真实主体与发布阻塞
+
+仍待：通用 World 声明组件与受控规则（含 TS AST/规则计价接入）、统一权限 Actor、私有 rpack 签名发现/验签/安装链、多 Chunk/三维物理、Agent 独立赛道、协作 presence 与离线多主。旧 6 个 `PvP_Custom` Actor 夹具仍缺真实分级 lease 前提，不得弱化生产 fence 迁就。参数实体 CPU 配额仍不是生物能量；Pi 仅经 MIT 核对的设计参考，不引外部模型或支付。本批不是全项目完成，也不把单 Chunk 生命场称为任意 World 已交付。
+
 ## 第四十六批：非RTS World→原ECS物理→原场景与真实文件恢复（从main 83427c0继续）
 
 **主体继续，整体未完成、未达正式发布验收。** 已核对实际规范§1.2/§2.1/§6.2与旧静止样例，未重做阶段45参数组件。原16阶段内核现在实际承载无阵营/无主脑的刚体World，不再默认放四个静止坐标与500/200/50资源。保持PUBLIC、认证gh与本地持续授权，未改可见性/历史/保护/网络策略。完整来源、契约与命令见[GENERAL_WORLD_PHYSICS.md](GENERAL_WORLD_PHYSICS.md)。
