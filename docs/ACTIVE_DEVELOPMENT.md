@@ -5,6 +5,56 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第四十六批：非RTS World→原ECS物理→原场景与真实文件恢复（从main 83427c0继续）
+
+**主体继续，整体未完成、未达正式发布验收。** 已核对实际规范§1.2/§2.1/§6.2与旧静止样例，未重做阶段45参数组件。原16阶段内核现在实际承载无阵营/无主脑的刚体World，不再默认放四个静止坐标与500/200/50资源。保持PUBLIC、认证gh与本地持续授权，未改可见性/历史/保护/网络策略。完整来源、契约与命令见[GENERAL_WORLD_PHYSICS.md](GENERAL_WORLD_PHYSICS.md)。
+
+- 原Tier2 `rynvek-spatial::circle` 放置真正定点积分/碰撞核，复用原唯一 `Q32_32` 乘除语义；原 `EntityRegistry` + 分页刚体列承载身份/位置/速度/半径/质量/fixed，不是参数表模拟运动。Phase01命令→Phase09四个辛欧拉子步/质量冲量/壁反射/完整有界接触枚举→重建原CSR→原不变量/十域根，任一失败整个候选Tick不发布。每次接触立即落实速度界，不放任密集接触放大越界中间态。
+- 原唯一RYWL解析/写入器→严格 `rynvek.general-world.v1` 与显式 `rynvek.general-circle-ecs.v1` 创世→原Engine/Worker明确安装→原STEP/START与 `EntityProvider/FrameScene/WorldRenderer` 实际消费身体位置/半径。新 `EngineHost.loadGeneralWorld` 只发明确包字节；只许本地、暂停、Tick0空世界，远程Arena/既有世界拒绝；没有关闭原迷雾或生产fence。
+- 128体、半径0.25–2、质量1–1024、每轴速度±8/加速度±32、四子步/四轮求解是实现剖面，不冒充原规范值；不使用32邻居截断漏碰，不收敛/越界则整Tick拒绝。全权威整数，f32只读投影；非CCD/旋转/多Chunk/三维或完整物理能量定理。创世/本地结构命令是明确外部编辑输入，非自然生长或免费营养；原宏观INV、CPU额度与机械质量不冒充通用生物能量。
+- 原RYC2与RYSS容器2、CMIT/COMP/FILD/RNGS保存原注册表分配器/墓碑、全部刚体、五场参数/当前缓冲/未来sources、时钟与宏观账户；逐实际领域重算根，不只验包络。恢复文件8MiB/解压16MiB/WAL32MiB硬界、世界/创世基线/顺序/保留位/精确提交核验；先原日志sync_data后发布，撕裂与未提交命令尾部不执行；I/O错必须废弃writer恢复。CLI输出/日志独占新建，不覆盖已有资料。
+- 删除后原稠密swap-remove与组件列一致；接触按持久ID顺序。原GPU拾取消息改为 `entitySerial`，不再把稠密槽位当持久身份；Rust/TS当前双端同步，无旧字段fallback。保留原 `protocol_messages.json`，只消费新增v2当前夹具，同时补齐先前主题命令/事件覆盖遗漏。
+
+### 实现提交、真实快验与未验
+
+主体实现：`4d9da19`；物理归位/原恢复器硬界/身份及当前协议收口：`7a4fb1b05d63423f5a352b3656b2a34d75325d4d`。文档收尾后的已推最终HEAD由同一Page与远端核对记录给出，不制造文档自引用SHA。
+
+61个不同定向用例通过（新增22，重跑/过滤不累计）：Tier2物理公开边界与原定点舍入2、物理ECS/事务/源项/完整语义快照/逐提交WAL/撕裂与未提交尾/容量速度/身份12、RYWL非RTS严格配置2、原Engine命令/安装及权限4、Rust协议4、原FrameScene提供者3、当前双端夹具2、真实CLI子进程1、原日志读取/恢复2、原快照读取2、原迷雾不泄露1、原16阶段/10Hz门控1、TS宿主/协议25。
+
+实际CLI子进程从示例JSON打原RYWL→4 Tick真实积分/碰撞→创世快照与每步sync_data文件WAL→文件回读逐提交重仿真，恢复根、身体与原FrameScene完全相同；已有包/日志拒绝覆盖。另有八步恢复后连续根、质量冲量、静态体/壁、晚阶段不变量失败整Tick回滚、原注册表墓碑/单调序号、重打包合法容器但篡改COMP或FILD源项仍拒绝、尾随/解压界、128体与公开核极端i64输入证据。不是仅打印最终内存镜像，也不把文件截断模拟称真实断电。
+
+必要CLI检查、`rynvek-wasm`宿主原生target类型检查、Engine TS build/typecheck与原web类型检查通过；没有本批wasm32产物或真实浏览器执行证据。当前Node24.22.1的类型/单元检查不是Node22正式运行时验收。本批必要累计敏感筛查无命中、身份与既有公开提交一致，不等同完整秘密/隐私审计。
+
+定向命令（重复运行不加计数）：
+
+```sh
+cargo test -p rynvek-spatial --locked --lib circle::tests
+cargo test -p rynvek-simulation --locked --test general_physics
+cargo test -p rynvek-world --locked --lib general::tests
+cargo test -p rynvek-engine --locked --lib engine::tests
+cargo test -p rynvek-engine --locked --lib protocol::tests
+cargo test -p rynvek-engine --locked --lib provider::tests
+cargo test -p rynvek-engine --locked --test protocol_fixture
+cargo test -p rynvek-engine --locked --test arena_render hidden_entities_never_enter_gpu_instances_even_if_fog_layer_disabled -- --exact
+cargo test -p rynvek-cli --locked --test general_world
+cargo test -p rynvek-journal --locked --lib reader::tests
+cargo test -p rynvek-journal --locked --lib recovery::tests
+cargo test -p rynvek-snapshot --locked --lib reader::tests
+cargo test -p rynvek-simulation --locked --lib engine::tests::sixteen_phases_run_each_tick_and_field_steps_at_10hz -- --exact
+cargo check -p rynvek-cli --locked
+cargo check -p rynvek-wasm --locked
+pnpm --filter @rynvek/engine typecheck
+pnpm --filter @rynvek/engine exec vitest run test/host.test.ts test/protocol.test.ts
+pnpm --filter @rynvek/engine build
+pnpm --filter @rynvek/web-platform typecheck
+```
+
+### 剩余主体与发布阻塞
+
+本段是真正无RTS实体World与物理ECS闭环，但仍仅单Chunk圆形刚体剖面，不是任意World、全物理生态或通用多机服务器已交付。通用World的声明组件/受控规则与神经/有来源生命场/统一权限Actor、TS AST与完整私有rpack精确签名依赖发现验签安装、多Chunk物理权威迁移、Agent独立赛道/实际受控智能、协作presence/离线多主仍欠。既有Stage43–45生命/Tier1在Arena，不伪称已迁入通用World。Pi仍仅MIT核对的设计参考，无外部模型/支付授权。
+
+原6个旧PvP_Custom Actor夹具真实租约前置整改仍待集中门禁，不弱化生产fence。主体齐后集中完整workspace测试/Clippy/license/SBOM/安全/运行时/发布打磨；本批未跑这些全门禁/soak/CI轮询。Node22、C#本批重编、真实浏览器WebGPU/硬件GPU、真实PG多机断电长稳未验；llvmpipe仍仅阶段41软件回读。不得因本批或M0–M8标签标整体完成。
+
 ## 第四十五批：原RYPK Tier1组件执行与Studio/Lab真实消费（从main a426d11继续）
 
 **主体继续，整体未完成。** 复用原容器/QuickJS与Phase07，原owner/editor只构建不执行→明确Epoch安装→真实组件变化/粗CPU回执→快照/WAL恢复与原Lab精确源捕获；不是文档占位或新建假World。能力、来源、限制与入口见[TIER1_COMPONENT_PACKAGES.md](TIER1_COMPONENT_PACKAGES.md)。PUBLIC普通续推授权保持，未改可见性/历史/保护/网络策略。
