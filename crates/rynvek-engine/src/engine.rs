@@ -1166,6 +1166,10 @@ mod tests {
             rynvek_simulation::physics::ONE
         );
         assert!(w.life().unwrap().account(w.physics(), 1).unwrap().dissipated_q > 0);
+        let scene = e.frame_scene();
+        let instance = scene.ordered_instances()[0];
+        assert_eq!(instance.pick_id, 1);
+        assert!(instance.position[0] > 10.0);
     }
 
     #[test]

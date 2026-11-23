@@ -204,7 +204,6 @@
         "profile",
         "world_seed",
         "gas_budget",
-        "rule_cost_micro_per_gas",
         "templates",
         "instances",
         "bindings",
