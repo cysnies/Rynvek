@@ -25,7 +25,7 @@ pub enum SimulationError {
     Dispatch(String),
 }
 
-/// 单 Chunk 通用物理世界；神经、规则与跨 Chunk 主体仍待接入。
+/// 单 Chunk 通用物理世界；可选有来源生命场与付费 LIF，仍不是任意组件 World。
 #[derive(Clone, Debug)]
 pub struct SimulationEngine {
     pub clock: MultiRateClock,
@@ -54,6 +54,7 @@ pub struct SimulationEngine {
     pub phase_exec_counts: [u64; 16],
     /// 已执行的 10Hz 连续环境场步数（每 3 个 30Hz Tick 递增 1）
     pub field_steps_completed: u64,
+    pub(crate) life: Option<crate::life::LifeStore>,
 }
 
 impl Default for SimulationEngine {
@@ -87,6 +88,7 @@ impl SimulationEngine {
             backend: CpuReferenceBackend::new(),
             phase_exec_counts: [0; 16],
             field_steps_completed: 0,
+            life: None,
         };
         world.publish_commit(world.authoritative_commit([0; 32]));
         world
@@ -111,6 +113,32 @@ impl SimulationEngine {
         Ok(world)
     }
 
+    /// 仅创世空账可启用生命：营养必须来自明确场沉淀，不注入阵营 Biomass，也不记 Arena 账。
+    pub fn with_sourced_life(
+        mut self,
+        profile: crate::life::LifeProfile,
+        deposits: &[crate::life::NutrientDeposit],
+    ) -> Result<Self, SimulationError> {
+        if self.clock.tick != 0 || self.life.is_some() {
+            return Err(SimulationError::Invariant(RynvekErrorCode::DimensionMismatch));
+        }
+        let mut life = crate::life::LifeStore::new(profile).map_err(SimulationError::Invariant)?;
+        for body in self.physics.bodies.iter() {
+            life.on_spawn(body).map_err(SimulationError::Invariant)?;
+        }
+        life.align(&self.physics).map_err(SimulationError::Invariant)?;
+        crate::life::apply_deposits(&mut self.field, deposits).map_err(SimulationError::Invariant)?;
+        life.genesis_energy_q = crate::life::nutrient_energy_q(&self.field).map_err(SimulationError::Invariant)?;
+        crate::life::assert_closed(&life, &self.field).map_err(SimulationError::Invariant)?;
+        self.life = Some(life);
+        self.publish_commit(self.authoritative_commit([0; 32]));
+        Ok(self)
+    }
+
+    pub fn life(&self) -> Option<&crate::life::LifeStore> {
+        self.life.as_ref()
+    }
+
     /// 推进一个完整 Tick（16 阶段）；成功则更新 `last_manifest`
     pub fn tick(&mut self) -> Result<TickCommitManifest, SimulationError> {
         self.tick_with_commands(&[])
@@ -128,7 +156,11 @@ impl SimulationEngine {
         for phase in CanonicalPhaseId::ALL {
             if phase == CanonicalPhaseId::CommandIngressAndValidate {
                 self.physics
-                    .apply(commands, self.clock.coupling_epoch)
+                    .apply_with_life(
+                        commands,
+                        self.clock.coupling_epoch,
+                        self.life.as_mut().map(|life| (life, &mut self.field)),
+                    )
                     .map_err(SimulationError::Invariant)?;
             }
             self.run_phase(phase)?;
@@ -182,17 +214,46 @@ impl SimulationEngine {
             CanonicalPhaseId::EnvironmentAndFieldSolve => {
                 // 10Hz 多速率门控：每 3 个 30Hz 权威 Tick 求解一次反应-扩散环境场（与 FIELD_UPDATE_INTERVAL_TICKS=3 对齐）
                 if self.clock.is_field_step_due() {
+                    let before = if self.life.is_some() {
+                        Some(crate::life::nutrient_energy_q(&self.field).map_err(SimulationError::Invariant)?)
+                    } else {
+                        None
+                    };
                     self.backend
                         .dispatch_1d(KernelId("field.reaction_diffusion_q8"), 1)
                         .map_err(|e| SimulationError::Dispatch(format!("{e:?}")))?;
                     self.field.step_all().map_err(SimulationError::Field)?;
                     self.field_steps_completed = self.field_steps_completed.saturating_add(1);
+                    if let (Some(life), Some(before)) = (self.life.as_mut(), before) {
+                        let after = crate::life::nutrient_energy_q(&self.field).map_err(SimulationError::Invariant)?;
+                        crate::life::book_environment_dissipation(life, before, after)
+                            .map_err(SimulationError::Invariant)?;
+                    }
                 }
                 Ok(())
             }
-            CanonicalPhaseId::SensoryAndPerceptionGather
-            | CanonicalPhaseId::NeuralDynamicsAndPlasticity
-            | CanonicalPhaseId::ControllerAndRuleEval => {
+            CanonicalPhaseId::SensoryAndPerceptionGather => {
+                if let Some(life) = self.life.as_mut() {
+                    let consumed = crate::life::ingest(&self.physics, life, &mut self.field)
+                        .map_err(SimulationError::Invariant)?;
+                    self.frame_nutrient_consumed = self.frame_nutrient_consumed.saturating_add(consumed);
+                    self.frame_biomass_harvested = self.frame_nutrient_consumed;
+                }
+                Ok(())
+            }
+            CanonicalPhaseId::NeuralDynamicsAndPlasticity => {
+                if let Some(life) = self.life.as_mut() {
+                    crate::life::paid_neural(&mut self.physics, life, &self.field)
+                        .map_err(SimulationError::Invariant)?;
+                } else {
+                    self.backend
+                        .dispatch_1d(KernelId("sim.tick_phase_noop"), 1)
+                        .map_err(|e| SimulationError::Dispatch(format!("{e:?}")))?;
+                }
+                Ok(())
+            }
+            CanonicalPhaseId::ControllerAndRuleEval => {
+                // 生命世界的运动意图已在神经阶段付费写入；声明式规则主体仍待后续阶段。
                 self.backend
                     .dispatch_1d(KernelId("sim.tick_phase_noop"), 1)
                     .map_err(|e| SimulationError::Dispatch(format!("{e:?}")))?;
@@ -206,13 +267,25 @@ impl SimulationEngine {
                 Ok(())
             }
             CanonicalPhaseId::CombatAndEconomySettle => {
-                // 封闭世界零交互：harvest == nutrient + carcass == 0
-                self.frame_biomass_harvested = 0;
-                self.frame_nutrient_consumed = 0;
+                // 本帧摄取计量已在感知阶段写入；不在此处清零， INV-03 用同一 raw 单位核对。
                 self.frame_carcass_reclaimed = 0;
+                self.frame_biomass_harvested = self.frame_nutrient_consumed;
                 Ok(())
             }
-            CanonicalPhaseId::MetabolismAndLifecycle => Ok(()),
+            CanonicalPhaseId::MetabolismAndLifecycle => {
+                if let Some(life) = self.life.as_mut() {
+                    crate::life::maintain_and_reclaim(
+                        &mut self.physics,
+                        life,
+                        &mut self.field,
+                        self.clock.coupling_epoch,
+                    )
+                    .map_err(SimulationError::Invariant)?;
+                    // 残骸直接返还场，不记入采集项，避免把回场再记一次收获。
+                    self.frame_biomass_harvested = self.frame_nutrient_consumed;
+                }
+                Ok(())
+            }
             CanonicalPhaseId::EvolutionAndMutation => {
                 // Epoch 门控：非边界 Tick 跳过实质工作
                 let _ = self.clock.is_evolution_gate_open();
@@ -246,6 +319,12 @@ impl SimulationEngine {
                 let report = self.invariants.check(&snap);
                 if let Some((_, code)) = report.failed.first() {
                     return Err(SimulationError::Invariant(*code));
+                }
+                if let Some(life) = &self.life {
+                    if self.biomass != 0 || self.flux != 0 || self.neurogel != 0 {
+                        return Err(SimulationError::Invariant(RynvekErrorCode::ConservationLawMismatch));
+                    }
+                    crate::life::assert_closed(life, &self.field).map_err(SimulationError::Invariant)?;
                 }
                 Ok(())
             }
@@ -284,6 +363,9 @@ impl SimulationEngine {
         h.update(&self.biomass_capacity.to_le_bytes());
         h.update(&self.flux_capacity.to_le_bytes());
         h.update(&self.neurogel_capacity.to_le_bytes());
+        if let Some(life) = &self.life {
+            h.update(&life.hash_accounts());
+        }
         *h.finalize().as_bytes()
     }
 }

@@ -3288,6 +3288,7 @@ dependencies = [
  "rynvek-ecs",
  "rynvek-field",
  "rynvek-journal",
+ "rynvek-neural",
  "rynvek-snapshot",
  "rynvek-spatial",
  "serde",

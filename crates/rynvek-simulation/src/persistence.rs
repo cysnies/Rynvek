@@ -48,10 +48,17 @@ impl SimulationEngine {
         rng.push(u8::from(self.closed_world));
         let mut config = PHYSICS_PROFILE.as_bytes().to_vec();
         config.extend_from_slice(&self.world_id);
+        if let Some(life) = &self.life {
+            config.extend_from_slice(&life.hash_accounts());
+        }
         let roots = CommitSubRoots {
             entity_root_hash: self.hash_entities(),
             field_root_hash: hash(&self.field.authority_bytes()),
-            neural_root_hash: hash(b"GENERAL_NO_NEURAL_COMPONENTS_V1"),
+            neural_root_hash: self
+                .life
+                .as_ref()
+                .map(|l| l.neural_root())
+                .unwrap_or_else(|| hash(b"GENERAL_NO_NEURAL_COMPONENTS_V1")),
             economy_root_hash: self.hash_economy(),
             rng_root_hash: hash(&rng),
         };
@@ -91,7 +98,7 @@ impl SimulationEngine {
             phase_counts: self.phase_exec_counts,
             field_steps: self.field_steps_completed,
         };
-        let chunks = vec![
+        let mut chunks = vec![
             SnapshotCustomChunk {
                 tag: CMIT_TAG,
                 payload: commit.encode(),
@@ -109,13 +116,20 @@ impl SimulationEngine {
                 payload: serde_json::to_vec(&meta).map_err(|_| ERROR)?,
             },
         ];
+        if let Some(life) = &self.life {
+            chunks.push(SnapshotCustomChunk {
+                tag: *b"LIFE",
+                payload: serde_json::to_vec(&life.snapshot_dto()).map_err(|_| ERROR)?,
+            });
+        }
+        let neur = self.life.as_ref().and_then(|l| l.neur_chunk());
         Ok(SnapshotWriter::write_bytes_with_chunks(
             self.world_id,
             self.clock.tick,
             self.clock.world_revision,
             parent,
             &self.physics.registry,
-            None,
+            neur.as_ref(),
             &chunks,
         )?
         .0)
@@ -135,9 +149,14 @@ impl SimulationEngine {
         }
         if read.header.format_version != rynvek_snapshot::header::CANONICAL_SNAPSHOT_VERSION
             || read.header.flags != rynvek_snapshot::header::SNAPSHOT_FLAG_ZSTD
-            || read.neur.is_some()
-            || read.custom_chunks.len() != 4
+            || !(read.custom_chunks.len() == 4 || read.custom_chunks.len() == 5)
         {
+            return Err(ERROR);
+        }
+        if read.find_chunk(*b"LIFE").is_none() && read.custom_chunks.len() != 4 {
+            return Err(ERROR);
+        }
+        if read.find_chunk(*b"LIFE").is_some() && read.custom_chunks.len() != 5 {
             return Err(ERROR);
         }
         let commit = CommitManifest::decode(read.find_chunk(CMIT_TAG).ok_or(ERROR)?)?;
@@ -163,12 +182,24 @@ impl SimulationEngine {
         }
         let mut world = Self::new(read.header.world_id);
         world.field = rynvek_field::FieldWorld::from_authority_bytes(read.find_chunk(*b"FILD").ok_or(ERROR)?)?;
+        let life_bytes = read.find_chunk(*b"LIFE").map(|b| b.to_vec());
+        let neur = read.neur;
         world.physics.registry = read.registry;
         world.physics.bodies = PagedComponentColumn::new();
         for body in bodies {
             world.physics.bodies.push(body);
         }
         world.physics.validate()?;
+        if let Some(raw) = life_bytes {
+            if raw.len() > 128 * 1024 {
+                return Err(ERROR);
+            }
+            let dto: crate::life::LifeSnapshotDto = serde_json::from_slice(&raw).map_err(|_| ERROR)?;
+            world.life = Some(crate::life::restore(&world.physics, dto, neur.as_ref())?);
+            crate::life::assert_closed(world.life.as_ref().unwrap(), &world.field)?;
+        } else if neur.is_some() {
+            return Err(ERROR);
+        }
         world.clock.tick = commit.tick;
         world.clock.world_revision = commit.world_revision;
         world.clock.coupling_epoch = commit.tick / 4;

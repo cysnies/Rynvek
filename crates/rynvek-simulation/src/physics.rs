@@ -55,6 +55,14 @@ impl PhysicsWorld {
             .and_then(|(d, _, _)| self.bodies.get(d).ok())
     }
     pub(crate) fn apply(&mut self, commands: &[PhysicsCommand], epoch: u64) -> Result<(), RynvekErrorCode> {
+        self.apply_with_life(commands, epoch, None)
+    }
+    pub(crate) fn apply_with_life(
+        &mut self,
+        commands: &[PhysicsCommand],
+        epoch: u64,
+        mut coupled: Option<(&mut crate::life::LifeStore, &mut rynvek_field::FieldWorld)>,
+    ) -> Result<(), RynvekErrorCode> {
         if commands.len() > MAX_COMMANDS {
             return Err(ERROR);
         }
@@ -68,6 +76,9 @@ impl PhysicsWorld {
                     }
                     self.registry.spawn(1)?;
                     self.bodies.push(body);
+                    if let Some((store, _)) = coupled.as_mut() {
+                        store.on_spawn(&body)?;
+                    }
                 }
                 PhysicsCommand::Despawn { serial } => {
                     let (d, handle, _) = self
@@ -75,8 +86,14 @@ impl PhysicsWorld {
                         .iter_alive()
                         .find(|(_, _, id)| id.monotonic_serial() == u64::from(serial))
                         .ok_or(ERROR)?;
+                    if let Some((store, field)) = coupled.as_mut() {
+                        crate::life::reclaim_dense(self, store, field, d)?;
+                    }
                     self.registry.despawn(handle, epoch)?;
                     self.bodies.swap_remove(d)?;
+                    if let Some((store, _)) = coupled.as_mut() {
+                        store.on_despawn(d)?;
+                    }
                 }
                 PhysicsCommand::SetAcceleration {
                     serial,
