@@ -1253,3 +1253,96 @@ mod ranked_time_tests {
         assert!(!memory.renew_ranked_host(world, new.fence).unwrap());
     }
 }
+
+#[cfg(test)]
+mod general_host_time_tests {
+    use super::*;
+    use crate::{
+        app::{AppConfig, AppState},
+        ranked::HostClaim,
+        store::{EditorPermit, Store},
+    };
+    #[tokio::test]
+    async fn general_host_keeps_original_expiry_fence_and_checked_owner_commit() {
+        let memory = MemoryStore::new();
+        let app = AppState::new(
+            AppConfig::default(),
+            Store::Memory(memory.clone()),
+            rynvek_security::ServerSigningKey::from_seed(1, [9; 32]),
+        )
+        .unwrap();
+        app.register_principal(
+            1,
+            "general-clock".into(),
+            rynvek_security::PrincipalKindCode::Human,
+            [1; 32],
+        )
+        .await
+        .unwrap();
+        let id = crate::ids::new_uuid_v7();
+        let row = WorldRow {
+            world_id: id,
+            org_id: 1,
+            owner_principal_id: 1,
+            title: "时钟夹具".into(),
+            world_profile: "General_Circle_v1".into(),
+            game_mode: "General_Controlled".into(),
+            execution_profile: "D0_Strict".into(),
+            visibility: rynvek_security::Visibility::Private,
+            parent_world_id: None,
+            forked_at_revision: None,
+            latest_tick: 0,
+            latest_revision: 0,
+            latest_state_root: [0; 32],
+            lease_holder_node: None,
+            fencing_token: 1,
+        };
+        let genesis = CommitRow {
+            world_id: id,
+            world_revision: 0,
+            tick: 0,
+            parent_revision: None,
+            state_root_blake3: [0; 32],
+            journal_segment_cid: [0; 32],
+            snapshot_cid: None,
+        };
+        memory.insert_world(row, genesis.clone()).unwrap();
+        let claim = |fence, node: &str| HostClaim {
+            world: id,
+            revision: 0,
+            fence,
+            node: node.into(),
+            origin: "http://localhost".into(),
+        };
+        let h = memory.claim_ranked_host(claim(1, "old")).unwrap();
+        assert_eq!(memory.claim_ranked_host(claim(1, "peer")).unwrap().node, "old");
+        assert!(memory.renew_ranked_host(id, h.fence).unwrap());
+        // 只改变内存测试时钟边界，不声称真实30秒、PG或多机故障实证。
+        memory.lock().ranked_hosts.get_mut(&id).unwrap().expires_at_s = crate::ids::unix_now_s() - 1;
+        assert!(!memory.renew_ranked_host(id, h.fence).unwrap());
+        let mut commit = genesis;
+        commit.parent_revision = Some(0);
+        commit.world_revision = 1;
+        commit.tick = 1;
+        let owner = EditorPermit {
+            principal_id: 1,
+            grant_id: None,
+        };
+        assert!(
+            memory
+                .append_commit_checked(commit.clone(), h.fence, vec![owner.clone()])
+                .is_err()
+        );
+        let new = memory.claim_ranked_host(claim(h.fence, "new")).unwrap();
+        assert!(new.fence > h.fence);
+        assert!(
+            memory
+                .append_commit_checked(commit.clone(), h.fence, vec![owner.clone()])
+                .is_err()
+        );
+        memory.tombstone_principal(1).unwrap();
+        assert!(memory.append_commit_checked(commit, new.fence, vec![owner]).is_err());
+        assert_eq!(memory.get_world(id).unwrap().unwrap().latest_revision, 0);
+        assert_eq!(memory.list_commits(id).unwrap().len(), 1);
+    }
+}
