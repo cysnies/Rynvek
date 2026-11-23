@@ -65,6 +65,12 @@ function nextKey(): string { const b = crypto.getRandomValues(new Uint8Array(16)
     b[i] = Number(t & 255n);
     t >>= 8n;
 } b[6] = 0x70 | (b[6]! & 15); b[8] = 0x80 | (b[8]! & 63); const h = Array.from(b, x => x.toString(16).padStart(2, "0")).join(""); return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`; }
+/** 中止只限制后续请求；已发请求可能已提交，不能把取消说成服务器回滚。 */
+export class GeneralRunInterrupted extends Error {
+    constructor(readonly confirmedTicks: number, readonly requestUnconfirmed: boolean, cause: unknown) {
+        super(`有界运行停止：已确认${confirmedTicks}个Tick${requestUnconfirmed ? "；末请求结果未确认，须刷新" : "；未发送后续Tick"}`, {cause});
+    }
+}
 /** 只有服务器已确认观察才能进入UI；不把本地Worker仿真当远端根。 */
 export class GeneralWorldSession {
     private token: string;
@@ -165,23 +171,47 @@ export class GeneralWorldSession {
         throw new Error("控制租约回执不符"); this.controlFence = integer(v.lease.fencing_token); }); }
     async discoverRules(): Promise<SignedRuleRelease[]> { return this.exclusive(() => this.rules.list(this.abort.signal)); }
     async verify(plan: RuleInstallRequest): Promise<string[]> { return this.exclusive(async () => { const v = await this.rules.download(plan.root, this.abort.signal); return v.map(p => p.release.manifest.package_id); }); }
+    private async advanceOne(action: "tick" | "install" | "recover", plan?: RuleInstallRequest, fee?: number, signal?: AbortSignal): Promise<GeneralObservation> {
+        if (!this.world || !this.observation || this.hostFence === undefined || this.controlFence === undefined)
+            throw new Error("须刷新/连接并明确取得Sovereign租约");
+        signal?.throwIfAborted();
+        const epoch = this.viewEpoch;
+        const f: GeneralFrame = { world: this.world, hostFence: this.hostFence, controlFence: this.controlFence, tick: this.observation.commit.tick, idempotencyKey: nextKey() };
+        const pending = signal ? AbortSignal.any([this.abort.signal,signal]) : this.abort.signal;
+        const v = action === "tick" ? await this.rules.tick(f, pending) : action === "install" && plan ? await this.rules.install(f, plan, pending) : action === "recover" && plan && fee !== undefined ? await this.rules.recoverNextTick(f, plan, fee, pending) : (() => { throw new Error("须明确新计划/维护报价"); })();
+        pending.throwIfAborted();
+        if (epoch !== this.viewEpoch || this.world !== f.world || v.commit?.tick !== f.tick + 1 || v.commit?.revision !== f.tick + 1 || v.observation?.commit?.tick !== f.tick + 1 || v.commit?.state_root !== v.observation?.commit?.state_root)
+            throw new Error("提交回执/世界生命周期不符");
+        return this.accept(v.observation);
+    }
     async advance(action: "tick" | "install" | "recover", plan?: RuleInstallRequest, fee?: number): Promise<GeneralObservation> {
+        return this.exclusive(() => this.advanceOne(action,plan,fee));
+    }
+    /** 明确有界的客户端调度，复用同一个Actor单Tick实付；不是独立服务端自治作业。 */
+    async runTicks(count: number, signal: AbortSignal, onCommitted: (confirmed: number, observation: GeneralObservation) => void = () => {}): Promise<number> {
+        // 128仅是本产品单次操作上限，不是CPU/Gas或生命能量配额。
+        if (!Number.isSafeInteger(count) || count < 1 || count > 128) throw new Error("有界运行数量须1..128");
         return this.exclusive(async () => {
-            if (!this.world || !this.observation || this.hostFence === undefined || this.controlFence === undefined)
-                throw new Error("须刷新/连接并明确取得Sovereign租约");
-            const f: GeneralFrame = { world: this.world, hostFence: this.hostFence, controlFence: this.controlFence, tick: this.observation.commit.tick, idempotencyKey: nextKey() };
+            let confirmed=0, pending=false;
+            const stop=new AbortController();
+            const unsubscribe=this.onPrivateInvalidated(()=>stop.abort());
+            const active=AbortSignal.any([signal,stop.signal,this.abort.signal]);
             try {
-                const v = action === "tick" ? await this.rules.tick(f, this.abort.signal) : action === "install" && plan ? await this.rules.install(f, plan, this.abort.signal) : action === "recover" && plan && fee !== undefined ? await this.rules.recoverNextTick(f, plan, fee, this.abort.signal) : (() => { throw new Error("须明确新计划/维护报价"); })();
-                if (v.commit?.tick !== f.tick + 1 || v.commit?.state_root !== v.observation?.commit?.state_root)
-                    throw new Error("提交回执不符");
-                return this.accept(v.observation);
-            }
-            catch (e) {
-                this.hostFence = undefined;
-                this.controlFence = undefined;
-                this.invalidatePrivate();
-                throw e;
-            }
+                if (!this.observation || this.observation.rule_recovery || this.controlFence === undefined || this.hostFence === undefined) throw new Error("须明确控制且无隔离维护");
+                const world=this.world,host=this.hostFence,control=this.controlFence,epoch=this.viewEpoch;
+                while(confirmed<count){
+                    active.throwIfAborted();
+                    if(this.world!==world||this.hostFence!==host||this.controlFence!==control||this.viewEpoch!==epoch)throw new Error("有界运行世界/双fence已切换");
+                    pending=true;
+                    const v=await this.advanceOne("tick",undefined,undefined,active);
+                    pending=false;
+                    confirmed++;
+                    onCommitted(confirmed,v);
+                }
+                return confirmed;
+            } catch(cause) {throw new GeneralRunInterrupted(confirmed,pending,cause);}
+            finally {unsubscribe();}
         });
     }
+
 }

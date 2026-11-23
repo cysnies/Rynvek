@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RuleInstallRequest, SignedRuleRelease } from "@rynvek/agent-sdk";
 import {GeneralViewport} from "./GeneralViewport.js";
-import { GeneralWorldSession, type GeneralWorld } from "./general-remote.js";
+import { GeneralRunInterrupted, GeneralWorldSession, type GeneralWorld } from "./general-remote.js";
 /** 服务器观察工作台；不启动本地Worker或借Arena练习身份伪装远端执行。 */
 export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: {
     origin?: string;
@@ -11,8 +11,16 @@ export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: 
 }) {
     const [token, setToken] = useState(""), [client, setClient] = useState<GeneralWorldSession>(), [worlds, setWorlds] = useState<GeneralWorld[]>([]), [id, setId] = useState(""), [packages, setPackages] = useState<SignedRuleRelease[]>([]), [plan, setPlan] = useState(""), [fee, setFee] = useState(""), [message, setMessage] = useState("尚未验证身份"), [busy, setBusy] = useState(false), [, redraw] = useState(0);
     const live = useRef(0), session = useRef<GeneralWorldSession | undefined>(undefined), lock = useRef(false), opening = useRef<AbortController | undefined>(undefined);
-    function disconnect() { live.current++; opening.current?.abort(); opening.current = undefined; session.current?.destroy(); session.current = undefined; setClient(undefined); setToken(""); setWorlds([]); setPackages([]); setPlan(""); setFee(""); setId(""); setMessage("身份已断开；已提交服务端操作不会撤销，请重新发现"); lock.current = false; setBusy(false); }
+    const running=useRef<AbortController | undefined>(undefined);
+    const [runCount,setRunCount]=useState("16"), [runProgress,setRunProgress]=useState<number | undefined>();
+    function disconnect() { running.current?.abort();running.current=undefined;setRunProgress(undefined);live.current++; opening.current?.abort(); opening.current = undefined; session.current?.destroy(); session.current = undefined; setClient(undefined); setToken(""); setWorlds([]); setPackages([]); setPlan(""); setFee(""); setId(""); setMessage("身份已断开；已提交服务端操作不会撤销，请重新发现"); lock.current = false; setBusy(false); }
     useEffect(()=>client?.onPrivateInvalidated(()=>{setPackages([]);setPlan("");setFee("");redraw(v=>v+1);}),[client]);
+    useEffect(()=>{
+        const stop=()=>{running.current?.abort();if(running.current)session.current?.invalidatePrivate();};
+        const hidden=()=>{if(document.visibilityState!=="visible")stop();};
+        window.addEventListener("offline",stop);document.addEventListener("visibilitychange",hidden);
+        return ()=>{window.removeEventListener("offline",stop);document.removeEventListener("visibilitychange",hidden);running.current?.abort();};
+    },[]);
     useEffect(() => () => { live.current++; opening.current?.abort(); opening.current = undefined; session.current?.destroy(); }, []);
     async function perform(work: () => Promise<string>) { if (lock.current)
         return; lock.current = true; const epoch = live.current; setBusy(true); try {
@@ -34,13 +42,14 @@ export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: 
     function parsed(): RuleInstallRequest { if (plan.length > 65536)
         throw new Error("计划超过64KiB"); return JSON.parse(plan) as RuleInstallRequest; }
     const observation = client?.observation;
-    return <main><h1>General · 私有权威世界工作台</h1><p>单Chunk所有者受限World；不是Arena练习、任意World或已验收GPU画布。每次只明确推进一个真实实付Tick。</p>
+    return <main><h1>General · 私有权威世界工作台</h1><p>单Chunk所有者受限World；不是Arena练习、任意World或已验收GPU画布。单步或明确数量的有界运行均逐Tick由原Actor实付提交；不是离线自治作业。</p>
  <section><h2>正式身份</h2>{!client ? <><label>既有能力令牌<input aria-label="General能力令牌" type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)}/></label><button disabled={busy || !token} onClick={() => void perform(async () => { const epoch = live.current; const a = new AbortController(); opening.current = a; const c = await GeneralWorldSession.open(origin, token, fetcher, a.signal); if (opening.current === a)
         opening.current = undefined; if (epoch !== live.current) {
         c.destroy();
         return "";
     } session.current = c; setClient(c); setToken(""); return `已核正式人类身份 ${c.identity.principal_id}`; })}>验证既有身份</button></> : <p>正式主体 {client.identity.principal_id}；登记公钥 {client.identity.ed25519_pubkey}。凭据仅内存，不进URL/存储/包。</p>}<button onClick={disconnect}>断开并清空</button></section>
  <p role="status">{message}</p>
+ {runProgress!==undefined&&<p>本次已确认 {runProgress} 个Tick。<button onClick={()=>running.current?.abort()}>停止后续Tick</button></p>}
  {client && <fieldset disabled={busy}><legend>私有General操作</legend>
  <button onClick={() => void perform(async () => { const v = await client.listWorlds(); if (session.current === client)
             setWorlds(v); return "已读取首100条世界元数据并过滤本人General；更多世界可用精确ID"; })}>发现本人世界</button>
@@ -54,8 +63,14 @@ export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: 
  <button disabled={!client.world} onClick={() => void perform(async () => { await client.refresh(); return "已刷新权威状态，本地控制fence失效；须重新连接/取得控制"; })}>刷新并清控制</button>
  <button disabled={!client.world} onClick={() => void perform(async () => { await client.connect(); return "宿主已确认；尚未获取Sovereign控制"; })}>明确连接宿主</button>
  <button disabled={client.hostFence === undefined} onClick={() => void perform(async () => { await client.acquire(); return "已取得原Sovereign控制租约"; })}>取得Sovereign</button>
- <p>宿主fence：{client.hostFence ?? "未连接"}；控制fence：{client.controlFence ?? "未获取"}。空闲租约可能到期，无后台续租/自治推进。</p>
+ <p>宿主fence：{client.hostFence ?? "未连接"}；控制fence：{client.controlFence ?? "未获取"}。空闲租约可能到期，无后台续租；不明确开始不会自行推进。</p>
  <button disabled={client.controlFence === undefined || !observation || !!observation.rule_recovery} onClick={() => void perform(async () => { await client.advance("tick"); return "仅一个下一Tick已由原Actor提交确认"; })}>明确推进一个Tick</button>
+ <label>有界运行Tick数量（1..128）<input aria-label="General有界Tick数量" type="number" min="1" max="128" value={runCount} onChange={e=>setRunCount(e.target.value)}/></label>
+ <p>仅依次执行当前规则，每Tick独立付费且已提交不可退回；无外部模型、自动安装/维护/重试/换控制。停止或断网时末请求可能已提交，须刷新确认。</p>
+ <button disabled={client.controlFence===undefined||!observation||!!observation.rule_recovery} onClick={()=>void perform(async()=>{
+     const a=new AbortController();running.current=a;setRunProgress(0);const epoch=live.current;
+     try{const n=await client.runTicks(Number(runCount),a.signal,(n)=>{if(epoch===live.current){setRunProgress(n);redraw(v=>v+1);}});return `有界运行已确认${n}个原Actor实付Tick；非整批事务`;}catch(e){if(e instanceof GeneralRunInterrupted)return e.message;throw e;}finally{if(running.current===a){running.current=undefined;setRunProgress(undefined);}}
+ })}>明确开始有界实付运行</button>
  <h2>私有规则：发现不等于可信安装</h2>
  <button onClick={() => void perform(async () => { const v = await client.discoverRules(); if (session.current === client)
             setPackages(v); return "已发现签名元数据；尚未下载验签或安装，撤销状态由服务端最终提交锁再验"; })}>发现私有规则版本</button>
