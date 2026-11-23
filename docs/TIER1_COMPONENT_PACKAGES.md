@@ -3,6 +3,8 @@
 
 # 原RYPK Tier1组件规则的权威链
 
+阶段50补充：[真实TS AST与可复验Tier0构建](TIER0_TS_AST_BUILD.md)已接入受限Kernel语法及原World链；以下当批“TS AST未做”保留为历史口径，不意味着已交付完整私有rpack依赖签名安装链。
+
 ## 来源与明确范围
 
 依据最终设计 `Rynvek_Project_Documentation_v1.0.md` GAP-06 的Tier1 QuickJS-NG / 500000 Gas，以及原开发规范§8分层规则，复用原QuickJS、原参数模板/实例、Phase07、WorldPatch和恢复链。原RYPK唯一解析器下沉到core，world仍公开同一模块；不是第二种私有脚本包，也未引入旧格式兼容。

@@ -5,6 +5,24 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十批：真实TS AST、可复验Tier0构建与原World实付链（从main d44e92a继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核阶段49交接/ACTIVE/远端均为干净 `d44e92af451b3fde1821f28357235388f03102da`，不重做统一权限入口。依最终规范08的AST/Builder→图→原三遍编译，先补私有规则链必要的真实源码/制品前置，非作者自附TS伪证；精确入口/限制见[TIER0_TS_AST_BUILD.md](TIER0_TS_AST_BUILD.md)。
+
+- `@rynvek/rules/ast` 使用固定TypeScript5.8.3真实AST、纯内存解析、闭合白名单节点；只映射原KernelBuilder/RuleValue全部36出口与Phi/原有界loop，不eval/转译执行/加载作者模块。64KiB、8192节点/深度96；直接Kernel导入+export default、const受控值，非任意TS执行环境。原浏览器主入口不自动引入编译器。
+- Node显式本地构建bin→原Graph；Rust `rule build/inspect` 复用唯一RYPK/RYIR与原类型/访问/循环编译。`rynvek.tier0-build.v1`固定三个条目，读取时图重新编译逐字节对实际IR；不带TS或自报来源等价，额外作者TS/换图/换IR拒绝。原Hub识别此剖面共用复验器，分别报告graph_rir等价和ts_source_equivalence=false，不虚报运行沙箱。
+- 原 `world build --rule-pack module=path` 明确本地创世安装，只能已有绑定且不覆盖Tier1；再走原World规则/宿主/价格/RYWL校验。真实TS源码→两次同字节构建→原RYWL→原HTTP身份/双fence Actor付费规则实际0.5加速度→私有WAL恢复同根。保原Tick事务/ABAC/fog/fence/源能量，CPU额度不冒称逐指令Gas或生物能价。**不是私库签名依赖发现/验签/在线安装链**，不把本地嵌图冒充已安装注册表引用。
+
+`726d0fe` 真实AST与固定解析器、`72886b2` 原RYPK/Hub逐字节复验、`e4da6e1` 显式本地安装/真实HTTP链；最终文档HEAD由交接及原Page记录，不在本文制造自引用。21个累计更改/新增文件必要敏感模式筛查无命中，提交身份同既有公开基线；PUBLIC普通push main核远端，不force/no-verify/admin、改历史/保护/网络策略或删除原资料。
+
+### 快验与剩余主体/发布阻塞
+
+64个不同定向通过，新增35，重跑不累计：规则SDK44（AST30新增、原Builder7/QuickJS7）、原RYPK构建复验2新增、CLI跨工具链2新增（ignore隔离前置，本批显式--include-ignored真实执行）、原CLI World3、原General权限9、Hub4（签名合法换图/自附TS仍拒绝1新增）。必要TS typecheck/build、原生CLI/server锁定编译（PG代码仅类型）、新增Rust/改动函数格式与diff、必要敏感筛查通过。离线全workspace锁重解算缺其他包元数据，只移动既有TS5.8.3锁记录后frozen一致性通过，未网络下载或绕过。
+
+**下一优先完整私有rpack精确依赖/签名发布发现验签显式安装链**：复用原私库/Hub权限、私有CAS、不可变版本和WorldActor提交/恢复，把包ID/版本/CID/锁/签名/撤销绑定实际安装；本地包不带这些权威引用，不假称完成。TS AST当前仅有界Kernel语法剖面，不声称任意TS。General浏览器流/协作主体准入/统一调度、完整生命材料/生长/自然遗传迁入、多Chunk/三维/任意World、Agent独立赛道、presence/离线多主仍欠。旧6个PvP_Custom Actor夹具须补真实lease前提，禁止降低生产fence。
+
+实际Node24.22.1不是Node22；C#本批重编、wasm32、真实browser/硬件GPU、PG并发SQL/多机/断电/24h长稳未验，llvmpipe仍仅阶段41软件回读。本批未跑全workspace/Clippy/license/SBOM/完整安全/soak/CI轮询；跨Node/Rust回归前置尚未编排CI。主体齐后集中完整门禁、安全与正式发布打磨，不以本批结束宣布整体完成。
+
 ## 第四十九批：通用World贯通原权限/双租约fence/私有提交恢复（从main 1581eb2继续）
 
 **主体继续，整体未完成、未达正式发布验收。** 已先核交接、ACTIVE与远端均为干净 `1581eb27928ec7321d4c05243c202629500c3b59`，没有重做阶段48声明/计价主体。优先实现统一权限链的通用领域适配：原认证/Active/ABAC、LeaseManager/CommandGate/APM、原宿主持久租约和TickCommitter/Store提交机制共用，不复制第二套权限、租约或提交架构。详见[GENERAL_WORLD_SERVER_ACTOR.md](GENERAL_WORLD_SERVER_ACTOR.md)。
