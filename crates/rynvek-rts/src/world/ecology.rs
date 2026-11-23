@@ -70,7 +70,7 @@ impl RoleEnergyContract {
             .checked_mul(4)
     }
 }
-/// 统一当前模型：配置哪些玩家角色，就对哪些角色执行有来源供能与实际成本。
+/// 显式玩家角色与独立自然野生profile共用真实来源/费用，不替免费RTS角色虚造账目。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EcologyContract {

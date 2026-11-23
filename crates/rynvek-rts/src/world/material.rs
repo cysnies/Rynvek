@@ -49,7 +49,7 @@ impl ArenaWorld {
         let radius = (base * base * u128::from(mass) / u128::from(cap)).isqrt();
         radius as i64
     }
-    /// 只摄取真实阵营Biomass；原采集者的营养摄取/盈余输出是其上游，不重复扣同一格场。
+    /// 玩家实扣阵营Biomass；自然野生从同一身体预算转入，不重复扣已摄食的同一格场。
     pub(super) fn step_material_growth(&mut self) {
         let ids: Vec<_> = self.units.keys().copied().collect();
         for id in ids {
