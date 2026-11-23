@@ -149,3 +149,66 @@ fn general_life_cli_build_run_recover_keeps_sourced_accounts() {
         value
     );
 }
+
+#[test]
+fn general_rules_cli_build_run_recover_preserves_priced_real_controls() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/worlds/general-rules.world.json"
+    );
+    let package = tmp.path().join("rules.rworld");
+    let package = package.to_str().unwrap();
+    let snapshot = tmp.path().join("genesis.rsnap");
+    let snapshot = snapshot.to_str().unwrap();
+    let journal = tmp.path().join("world.rjournal");
+    let journal = journal.to_str().unwrap();
+    let build = run(&[
+        "world",
+        "build",
+        "--config",
+        config,
+        "--out",
+        package,
+        "--id",
+        "world.general.rules",
+    ]);
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    let result = run(&[
+        "world",
+        "run",
+        "--package",
+        package,
+        "--world-id",
+        "02020202020202020202020202020202",
+        "--ticks",
+        "4",
+        "--snapshot",
+        snapshot,
+        "--journal",
+        journal,
+    ]);
+    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["tick"], 4);
+    assert_eq!(value["life"]["profile"], "rynvek.general-sourced-life.v1");
+    assert!(value["life"]["accounts"][0]["received"].as_u64().unwrap() > 0);
+    assert_eq!(value["life"]["accounts"].as_array().unwrap().len(), 1);
+    assert!(value["components"]["tier0_gas"].as_u64().unwrap() > 0);
+    assert!(value["components"]["paid_q"].as_u64().unwrap() > 0);
+    assert_eq!(
+        value["components"]["components"]["entities"]["steer.one"]["values"]["state.accel_x"],
+        256
+    );
+    assert!(value["bodies"][0]["body"]["position_q32"][0].as_i64().unwrap() > 10 * 4294967296i64);
+    let recovered = run(&["world", "recover", "--snapshot", snapshot, "--journal", journal]);
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&recovered.stdout).unwrap(),
+        value
+    );
+}

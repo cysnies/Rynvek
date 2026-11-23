@@ -22,6 +22,8 @@ pub struct GeneralWorldConfig {
     /// 缺省为纯物理世界；启用时必须给出有来源场沉淀，不能只写初始内能。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub life: Option<GeneralLifeConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub components: Option<rynvek_simulation::rules::GeneralRulesConfig>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,19 +52,29 @@ impl GeneralWorldConfig {
                 return Err("有维护热耗的活体必须给出明确营养沉淀，不能凭空供能".into());
             }
         }
+        if let Some(rules) = &self.components {
+            rules.compile().map_err(|e| format!("声明组件非法：{e:?}"))?;
+            rules
+                .validate_genesis_host(&self.bodies, self.life.as_ref().map(|l| &l.profile))
+                .map_err(|e| format!("声明组件与创世身体/生命剖面不兼容：{e:?}"))?;
+        }
         Ok(())
     }
     pub fn instantiate(&self, world_id: [u8; 16]) -> Result<SimulationEngine, String> {
         self.validate()?;
-        let world =
+        let mut world =
             SimulationEngine::with_bodies(world_id, &self.bodies).map_err(|e| format!("通用 World 创世失败：{e:?}"))?;
         if let Some(life) = &self.life {
-            world
+            world = world
                 .with_sourced_life(life.profile.clone(), &life.nutrient_deposits)
-                .map_err(|e| format!("有来源生命创世失败：{e:?}"))
-        } else {
-            Ok(world)
+                .map_err(|e| format!("有来源生命创世失败：{e:?}"))?;
         }
+        if let Some(rules) = &self.components {
+            world = world
+                .with_component_rules(rules.clone())
+                .map_err(|e| format!("声明组件创世失败：{e:?}"))?;
+        }
+        Ok(world)
     }
     /// 使用唯一的原包写入器，不自建另一种 .rworld 格式。
     pub fn build_package(&self, id: &str, version: &str) -> Result<Vec<u8>, PackageError> {
@@ -123,6 +135,7 @@ mod tests {
             profile: PHYSICS_PROFILE.into(),
             bodies: vec![],
             life: None,
+            components: None,
         };
         let bytes = config.build_package("world.general.empty", "1.0.0").unwrap();
         assert_eq!(GeneralWorldConfig::from_package_bytes(&bytes).unwrap(), config);
@@ -142,9 +155,28 @@ mod tests {
             profile: "arbitrary-world".into(),
             bodies: vec![],
             life: None,
+            components: None,
         };
         assert!(config.build_package("world.general.bad", "1.0.0").is_err());
     }
+    #[test]
+    fn general_components_build_rejects_cross_profile_pricing_and_stale_serial() {
+        let original: GeneralWorldConfig =
+            serde_json::from_str(include_str!("../../../examples/worlds/general-rules.world.json")).unwrap();
+        let bytes = original.build_package("world.general.rules", "0.1.0").unwrap();
+        assert_eq!(GeneralWorldConfig::from_package_bytes(&bytes).unwrap(), original);
+        for kind in 0..3 {
+            let mut bad = original.clone();
+            let rules = bad.components.as_mut().unwrap();
+            match kind {
+                0 => rules.rule_cost_micro_per_gas = None,
+                1 => rules.body_controllers[0].entity_serial = 2,
+                _ => bad.bodies[0].fixed = true,
+            }
+            assert!(bad.build_package("world.general.rules", "0.1.0").is_err());
+        }
+    }
+
     #[test]
     fn sourced_life_rejects_maintenance_without_deposits() {
         use rynvek_simulation::life::{LIFE_PROFILE, LifeProfile};
@@ -161,6 +193,7 @@ mod tests {
             schema: "rynvek.general-world.v1".into(),
             profile: PHYSICS_PROFILE.into(),
             bodies: vec![body],
+            components: None,
             life: Some(GeneralLifeConfig {
                 profile: LifeProfile {
                     profile: LIFE_PROFILE.into(),

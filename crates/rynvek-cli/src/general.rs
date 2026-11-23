@@ -99,7 +99,7 @@ fn summary(world: &SimulationEngine, torn: bool) -> CliResult {
             "accounts": accounts,
         })
     });
-    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"profile":rynvek_simulation::persistence::PHYSICS_PROFILE,"tick":world.clock.tick,"stateRoot":root,"tornWrite":torn,"bodies":bodies,"frameScene":instances,"gpuVerified":false,"life":life})).map_err(fail)?);
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"profile":rynvek_simulation::persistence::PHYSICS_PROFILE,"tick":world.clock.tick,"stateRoot":root,"tornWrite":torn,"bodies":bodies,"frameScene":instances,"gpuVerified":false,"life":life,"components":world.component_rules()})).map_err(fail)?);
     Ok(())
 }
 pub fn execute(command: WorldCommand) -> CliResult {

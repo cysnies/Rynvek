@@ -1107,6 +1107,7 @@ mod tests {
                 fixed: false,
             }],
             life: None,
+            components: None,
         }
         .build_package("world.general.engine", "1.0.0")
         .unwrap()
@@ -1146,6 +1147,27 @@ mod tests {
         );
         assert_eq!(scene.ordered_instances()[0].position, moved.position);
     }
+    #[test]
+    fn general_rules_worker_command_drives_existing_tick_and_scene() {
+        let config: rynvek_world::general::GeneralWorldConfig =
+            serde_json::from_str(include_str!("../../../examples/worlds/general-rules.world.json")).unwrap();
+        let package_bytes = config.build_package("world.general.rules", "0.1.0").unwrap();
+        let mut e = Engine::new(EngineConfig {
+            gpu_mode: GpuMode::Disabled,
+            ..Default::default()
+        });
+        e.handle_command(EngineCommand::GeneralWorld { package_bytes }).unwrap();
+        e.handle_command(EngineCommand::Step { ticks: 2 }).unwrap();
+        let w = e.simulation();
+        assert_eq!(w.clock.tick, 2);
+        assert!(w.component_rules().unwrap().paid_q > 0);
+        assert_eq!(
+            w.physics().body(1).unwrap().acceleration_q32[0],
+            rynvek_simulation::physics::ONE
+        );
+        assert!(w.life().unwrap().account(w.physics(), 1).unwrap().dissipated_q > 0);
+    }
+
     #[test]
     fn general_package_never_mutates_remote_arena_or_active_world() {
         let mut remote = Engine::new(EngineConfig {

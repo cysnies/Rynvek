@@ -1,0 +1,85 @@
+{
+  "schema": "rynvek.general-world.v1",
+  "profile": "rynvek.general-circle-ecs.v1",
+  "bodies": [
+    {
+      "position_q32": [
+        42949672960,
+        274877906944
+      ],
+      "velocity_q32": [
+        0,
+        0
+      ],
+      "acceleration_q32": [
+        0,
+        0
+      ],
+      "radius_q32": 2147483648,
+      "mass_q32": 4294967296,
+      "fixed": false
+    }
+  ],
+  "life": {
+    "profile": {
+      "profile": "rynvek.general-sourced-life.v1",
+      "max_ingest_raw_per_tick": 16,
+      "maintenance_q_per_tick": 0,
+      "recycle_percent": 80
+    },
+    "nutrient_deposits": [
+      {
+        "x": 10,
+        "y": 64,
+        "value": 1024
+      }
+    ]
+  },
+  "components": {
+    "profile": "rynvek.general-components.v1",
+    "world_seed": 48,
+    "gas_budget": 500000,
+    "rule_cost_micro_per_gas": 1,
+    "templates": {
+      "model.steer": {
+        "schema": "rynvek.parameter-template.v1",
+        "components": {
+          "state.accel_x": {
+            "ty": "Q8_8",
+            "default": 0
+          },
+          "state.accel_y": {
+            "ty": "Q8_8",
+            "default": 0
+          },
+          "param.thrust": {
+            "ty": "Q8_8",
+            "default": 256
+          }
+        }
+      }
+    },
+    "instances": {
+      "steer.one": {
+        "template_id": "model.steer",
+        "parameters": {}
+      }
+    },
+    "bindings": {
+      "steer.step": {
+        "module_id": "steer",
+        "template_id": "model.steer"
+      }
+    },
+    "rule_graphs": {
+      "steer": "{\"format\":\"rynvek.rule-graph.v1\",\"name\":\"有来源付费转向\",\"reads\":[{\"component\":\"param.thrust\",\"ty\":\"Q8_8\"}],\"writes\":[{\"component\":\"state.accel_x\",\"ty\":\"Q8_8\"}],\"nodes\":[{\"op\":\"LoadComponent\",\"component\":\"param.thrust\"},{\"op\":\"EmitComponentWrite\",\"component\":\"state.accel_x\",\"args\":[0]}]}"
+    },
+    "tier1_rules": {},
+    "body_controllers": [
+      {
+        "instance_id": "steer.one",
+        "entity_serial": 1
+      }
+    ]
+  }
+}
