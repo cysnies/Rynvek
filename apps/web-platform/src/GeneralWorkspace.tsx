@@ -50,7 +50,7 @@ function GeneralOwnerWorkspace({ origin = location.origin, fetcher = fetch }: {
     function parsed(): RuleInstallRequest { if (plan.length > 65536)
         throw new Error("计划超过64KiB"); return JSON.parse(plan) as RuleInstallRequest; }
     const observation = client?.observation;
-    return <main><h1>General · 私有权威世界工作台</h1><p>单Chunk所有者受限World；不是Arena练习、任意World或已验收GPU画布。单步或明确数量的有界运行均逐Tick由原Actor实付提交；不是离线自治作业。</p>
+    return <main><h1>General · 私有权威世界工作台</h1><p>单Chunk所有者受限World；不是Arena练习、任意World或已验收GPU画布。手动单步/旧客户端有界操作逐Tick确认；独立耐久面板才向服务器提交明确有界后台意图。Memory不承诺跨进程恢复。</p>
  <section><h2>正式身份</h2>{!client ? <><label>既有能力令牌<input aria-label="General能力令牌" type="password" autoComplete="off" value={token} onChange={e => setToken(e.target.value)}/></label><button disabled={busy || !token} onClick={() => void perform(async () => { const epoch = live.current; const a = new AbortController(); opening.current = a; const c = await GeneralWorldSession.open(origin, token, fetcher, a.signal); if (opening.current === a)
         opening.current = undefined; if (epoch !== live.current) {
         c.destroy();

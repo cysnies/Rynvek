@@ -25,7 +25,7 @@ export function GeneralRunPanel({session,busy,perform}:{session:GeneralWorldSess
  <button disabled={busy||!submission} onClick={()=>void perform(()=>apply(()=>session.durableStatus(submission,true)))}>按原提交键只读对账</button>
  <label>已有运行UUIDv7<input aria-label="耐久运行ID" value={runId} onChange={e=>{setRunId(e.target.value);setRun(undefined);}}/></label>
  <button disabled={busy||!runId} onClick={()=>void perform(()=>apply(()=>session.durableStatus(runId)))}>只读刷新运行状态</button>
- {run&&<p role="status">运行 {run.id} · {run.status} · {run.done}/{run.spec.ticks} · 规则paid_q {run.energy_used_q}/{run.spec.max_energy_q} · {run.storage_backend==="memory"?"Memory仅本进程，非跨进程耐久":"PG元数据/私有CAS链"} · 截止Unix秒 {run.deadline_s}；刷新不延长预算。{run.error}</p>}
+ {run&&<p role="status">运行 {run.id} · {run.status} · {run.done}/{run.spec.ticks} · 规则paid_q {run.energy_used_q}/{run.spec.max_energy_q} · {run.storage_backend==="memory"?"Memory仅本进程，非跨进程耐久":"PG元数据/私有CAS链"} · 控制代次 {run.generation} · 截止Unix秒 {run.deadline_s}；刷新不延长预算。{run.error}</p>}
  <label>控制操作UUIDv7<input aria-label="耐久控制键" value={operation} onChange={e=>setOperation(e.target.value)}/></label><button disabled={busy} onClick={()=>{setOperation(key());setPending(undefined);}}>明确准备新控制键</button>
  {(["pause","resume","cancel"] as const).map(a=><button key={a} disabled={busy||!run||run.id!==runId||!operation||!!pending} onClick={()=>void perform(()=>change(a))}>{a==="pause"?"服务器暂停":a==="resume"?"明确恢复原预算":"服务器取消意图"}</button>)}
  {lastStart&&<details><summary>本次明确启动规格（失回执请保留原键对账）</summary><pre>{JSON.stringify(lastStart,null,2)}</pre></details>}
