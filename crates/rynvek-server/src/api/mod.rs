@@ -87,6 +87,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/auth/session", post(auth::session).get(auth::current))
         .route("/api/v1/worlds", get(worlds::list).post(worlds::create))
         .route("/api/v1/worlds/general", post(crate::general_host::create))
+        .route("/api/v1/worlds/{world_id}/general/frame", get(crate::general_host::render_frame))
         .route("/api/v1/worlds/{world_id}/general", get(crate::general_host::observe).post(crate::general_host::control))
         .route("/api/v1/worlds/{world_id}", get(worlds::get))
         .route("/api/v1/worlds/{world_id}/commits", get(worlds::commits))

@@ -795,3 +795,11 @@ pub async fn observe(State(app): State<AppState>, headers: HeaderMap, Path(id): 
     permit(&app, &headers, &id, false).await?;
     Ok(private(observation(&world)))
 }
+
+/// 原Private所有者准入的最小表现投影；不传快照/规则/账户给Worker。
+pub async fn render_frame(State(app):State<AppState>,headers:HeaderMap,Path(id):Path<String>)->ApiResult<Response>{
+    let (_,row)=permit(&app,&headers,&id,false).await?;
+    let (world,_)=restore(&app,&row).await?;
+    permit(&app,&headers,&id,false).await?;
+    Ok(private(serde_json::to_value(rynvek_engine::general::GeneralRenderFrame::capture(&world)).expect("定型渲染投影")))
+}

@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
+import {validateGeneralFrame,type GeneralRenderFrame} from "@rynvek/engine";
 import { PrivateRuleClient, type GeneralFrame, type RuleInstallRequest, type SignedRuleRelease } from "@rynvek/agent-sdk";
 export interface GeneralIdentity {
     principal_id: string;
@@ -67,6 +68,11 @@ function nextKey(): string { const b = crypto.getRandomValues(new Uint8Array(16)
 /** 只有服务器已确认观察才能进入UI；不把本地Worker仿真当远端根。 */
 export class GeneralWorldSession {
     private token: string;
+    private readonly privateListeners=new Set<()=>void>();
+    private viewEpoch=0;
+    onPrivateInvalidated(listener:()=>void):()=>void{this.privateListeners.add(listener);return ()=>this.privateListeners.delete(listener);}
+    invalidatePrivate():void{this.viewEpoch++;this.observation=undefined;this.hostFence=undefined;this.controlFence=undefined;for(const f of this.privateListeners)f();}
+    async renderFrame(signal?:AbortSignal):Promise<GeneralRenderFrame>{const world=this.world,epoch=this.viewEpoch;if(!world)throw new Error("未选择世界");const f=await responseJson(await this.raw(`/api/v1/worlds/${world}/general/frame`,"GET",undefined,signal));if(this.world!==world||epoch!==this.viewEpoch)throw new Error("世界/身份已切换");validateGeneralFrame(f,world.replaceAll("-",""));return f;}
     private readonly abort = new AbortController();
     private busy = false;
     readonly rules: PrivateRuleClient;
@@ -96,7 +102,7 @@ export class GeneralWorldSession {
         return new GeneralWorldSession(u.origin, token, i, fetcher);
     }
     destroy(): void { this.abort.abort(); this.token = ""; this.clear(); }
-    private clear(): void { this.world = undefined; this.observation = undefined; this.hostFence = undefined; this.controlFence = undefined; }
+    private clear(): void { this.world = undefined;this.invalidatePrivate(); this.observation = undefined; this.hostFence = undefined; this.controlFence = undefined; }
     private async raw(path: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<Response> {
         if (!this.token || !path.startsWith("/api/v1/") || path.includes("..") || path.includes("\\"))
             throw new Error("会话失效或路径非法");
@@ -118,6 +124,7 @@ export class GeneralWorldSession {
         }
         return result;
     }
+    catch(e){this.invalidatePrivate();throw e;}
     finally {
         this.busy = false;
     } }
@@ -150,7 +157,7 @@ export class GeneralWorldSession {
         throw e;
     } }); }
     async refresh(): Promise<GeneralObservation> { return this.exclusive(async () => { if (!this.world)
-        throw new Error("未选世界"); this.hostFence = undefined; this.controlFence = undefined; this.observation = undefined; return this.accept(await this.rules.observe(this.world, this.abort.signal)); }); }
+        throw new Error("未选世界"); this.hostFence = undefined; this.controlFence = undefined; this.invalidatePrivate(); return this.accept(await this.rules.observe(this.world, this.abort.signal)); }); }
     async connect(): Promise<void> { return this.exclusive(async () => { if (!this.world)
         throw new Error("未选世界"); this.hostFence = undefined; this.controlFence = undefined; const v = await this.rules.connect(this.world, this.abort.signal); this.accept(v.observation); this.hostFence = integer(v.host_fence); }); }
     async acquire(): Promise<void> { return this.exclusive(async () => { if (!this.world || this.hostFence === undefined)
@@ -172,7 +179,7 @@ export class GeneralWorldSession {
             catch (e) {
                 this.hostFence = undefined;
                 this.controlFence = undefined;
-                this.observation = undefined;
+                this.invalidatePrivate();
                 throw e;
             }
         });

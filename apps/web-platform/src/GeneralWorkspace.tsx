@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useRef, useState } from "react";
 import type { RuleInstallRequest, SignedRuleRelease } from "@rynvek/agent-sdk";
+import {GeneralViewport} from "./GeneralViewport.js";
 import { GeneralWorldSession, type GeneralWorld } from "./general-remote.js";
 /** 服务器观察工作台；不启动本地Worker或借Arena练习身份伪装远端执行。 */
 export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: {
@@ -11,6 +12,7 @@ export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: 
     const [token, setToken] = useState(""), [client, setClient] = useState<GeneralWorldSession>(), [worlds, setWorlds] = useState<GeneralWorld[]>([]), [id, setId] = useState(""), [packages, setPackages] = useState<SignedRuleRelease[]>([]), [plan, setPlan] = useState(""), [fee, setFee] = useState(""), [message, setMessage] = useState("尚未验证身份"), [busy, setBusy] = useState(false), [, redraw] = useState(0);
     const live = useRef(0), session = useRef<GeneralWorldSession | undefined>(undefined), lock = useRef(false), opening = useRef<AbortController | undefined>(undefined);
     function disconnect() { live.current++; opening.current?.abort(); opening.current = undefined; session.current?.destroy(); session.current = undefined; setClient(undefined); setToken(""); setWorlds([]); setPackages([]); setPlan(""); setFee(""); setId(""); setMessage("身份已断开；已提交服务端操作不会撤销，请重新发现"); lock.current = false; setBusy(false); }
+    useEffect(()=>client?.onPrivateInvalidated(()=>{setPackages([]);setPlan("");setFee("");redraw(v=>v+1);}),[client]);
     useEffect(() => () => { live.current++; opening.current?.abort(); opening.current = undefined; session.current?.destroy(); }, []);
     async function perform(work: () => Promise<string>) { if (lock.current)
         return; lock.current = true; const epoch = live.current; setBusy(true); try {
@@ -65,7 +67,8 @@ export function GeneralWorkspace({ origin = location.origin, fetcher = fetch }: 
  <label>明确接受上述每身体维护报价<input aria-label="General维护报价" value={fee} onChange={e => setFee(e.target.value)}/></label>
  <button disabled={!plan || !fee || client.controlFence === undefined || !observation || (observation.commit.tick + 1) % 4 === 0} onClick={() => void perform(async () => { await client.advance("recover", parsed(), Number(fee)); return "仅一个实付隔离维护Tick已确认；没有自动激活新图"; })}>明确实付维护一个Tick</button>
  </fieldset>}
- {observation && <section><h2>服务器已提交观察（只读）</h2><p>Tick {observation.commit.tick} · revision {observation.commit.revision} · 根 {observation.commit.state_root}</p><p>{observation.rule_recovery ? `隔离维护至Epoch ${observation.rule_recovery.epoch_tick}；本Tick维护实付 ${observation.rule_recovery.maintenance_paid_q}` : "未处于隔离维护；撤销仍可能令下一Tick拒绝"}</p><pre>{JSON.stringify({ bodies: observation.bodies, rule_meter: observation.rule_meter, life: observation.life, components: observation.components }, null, 2)}</pre></section>}
- <p>当前是HTTP权威操作/观察，未把服务端观察接入原Renderer/Worker远程General画布；不会本地载同包制造第二个世界。GPU桥接、真实浏览器验收与协作自治仍待后续。</p>
+ {client&&client.world&&<GeneralViewport key={client.world} session={client} onInvalidated={()=>redraw(v=>v+1)}/>}
+    {observation && <section><h2>服务器已提交观察（只读）</h2><p>Tick {observation.commit.tick} · revision {observation.commit.revision} · 根 {observation.commit.state_root}</p><p>{observation.rule_recovery ? `隔离维护至Epoch ${observation.rule_recovery.epoch_tick}；本Tick维护实付 ${observation.rule_recovery.maintenance_paid_q}` : "未处于隔离维护；撤销仍可能令下一Tick拒绝"}</p><pre>{JSON.stringify({ bodies: observation.bodies, rule_meter: observation.rule_meter, life: observation.life, components: observation.components }, null, 2)}</pre></section>}
+ <p>只读画布沿原FrameScene/Renderer/Worker消费服务器最小投影，不运行本地第二份World。真实浏览器/硬件GPU验收与协作自治仍待后续。</p>
  </main>;
 }

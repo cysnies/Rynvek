@@ -48,6 +48,7 @@ await resumed.advance("tick");
 assert.equal(resumed.observation.commit.tick, 9);
 assert.equal(resumed.observation.rule_recovery, null);
 assert(resumed.observation.rule_meter.paid_q > 0);
+const projection=await resumed.renderFrame();assert.equal(projection.tick,9);assert.equal(projection.stateRoot,resumed.observation.commit.state_root);assert.deepEqual(Object.keys(projection).sort(),["bodies","format","revision","stateRoot","tick","worldId"]);
 const result = { world_id: id, root: resumed.observation.commit.state_root, tick: 9 };
 resumed.destroy();
 console.log(JSON.stringify(result));

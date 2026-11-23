@@ -505,3 +505,57 @@ async fn current_identity_is_original_authenticated_active_self_only_and_private
     assert_eq!(client::get(&url, Some(&u.token)).await.unwrap().status, 403);
     s.shutdown().await;
 }
+
+#[tokio::test]
+async fn minimal_private_render_frame_is_authoritative_read_only_and_never_contains_source_or_snapshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = start(Store::memory(), dir.path()).await;
+    let u = register(&s.base_url(), "general-render-owner", "human", 115).await;
+    let other = register(&s.base_url(), "general-render-other", "human", 116).await;
+    let id = create(&s, &u, &rules()).await;
+    let url = format!("{}/api/v1/worlds/{id}/general/frame", s.base_url());
+    assert_eq!(client::get(&url, None).await.unwrap().status, 401);
+    assert_eq!(client::get(&url, Some(&other.token)).await.unwrap().status, 404);
+    let response = client::get(&url, Some(&u.token)).await.unwrap();
+    assert_eq!(response.status, 200);
+    assert_eq!(response.header("cache-control"), Some("private, no-store"));
+    assert!(
+        s.state.store().ranked_host(id).await.unwrap().is_none(),
+        "只读帧不得抢占宿主"
+    );
+    let initial: rynvek_engine::general::GeneralRenderFrame = serde_json::from_slice(&response.body).unwrap();
+    assert!(initial.validate());
+    let h = connect(&s, &u, id).await;
+    let l = acquire(&s, &u, id, h, "Sovereign").await;
+    assert_eq!(step(&s, &u, id, &input(&u, h, l, 0, vec![])).await.status, 200);
+    let f: rynvek_engine::general::GeneralRenderFrame =
+        serde_json::from_slice(&client::get(&url, Some(&u.token)).await.unwrap().body).unwrap();
+    let observation = view(&s, &u, id).await;
+    assert_eq!(f.tick, 1);
+    assert_eq!(f.state_root, observation["commit"]["state_root"]);
+    assert_ne!(f.bodies, initial.bodies);
+    let raw = serde_json::to_value(&f).unwrap();
+    assert_eq!(raw.as_object().unwrap().len(), 6);
+    assert_eq!(raw["bodies"][0].as_object().unwrap().len(), 3);
+    assert!(raw.get("components").is_none());
+    assert!(raw.get("life").is_none());
+    assert!(raw.get("snapshot").is_none());
+    let mut engine = rynvek_engine::Engine::new(rynvek_engine::EngineConfig {
+        world_id: id.0,
+        general_remote: true,
+        ..Default::default()
+    });
+    engine
+        .handle_command(
+            rynvek_engine::EngineCommand::from_json(&json!({"type":"GENERAL_FRAME","frame":f}).to_string()).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        engine.frame_scene().instance_count(),
+        observation["bodies"].as_array().unwrap().len()
+    );
+    assert_eq!(engine.simulation().clock.tick, 0);
+    s.state.store().tombstone_principal(u.principal_id).await.unwrap();
+    assert_ne!(client::get(&url, Some(&u.token)).await.unwrap().status, 200);
+    s.shutdown().await;
+}
