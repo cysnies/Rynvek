@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
+import {blake3Digest,fromHex,toHex} from "@rynvek/assets";
 // HTTP只是传输；所有权、边界、编译和修订由原权威Actor再次验证。
-import {checkParameterState,type ParameterState} from "./parameter-registry.js";
+import {checkParameterState,type ParameterState,type Tier1Draft,type Tier1Install} from "./parameter-registry.js";
 import {AuthoringDocument,type AuthoringBaseline} from "./authoring.js";
 import {HybridLogicalClock} from "./hlc.js";
 import {UndoManager,type LocalEdit} from "./undo.js";
@@ -38,6 +39,12 @@ export class StudioClient {
     if(!Number.isSafeInteger(after)||after<0)throw new Error("同步游标非法");
     const r=await this.request(`${encodeURIComponent(world)}/authoring/changes?after_revision=${after}`,signal) as StudioChanges;
     if(r.world_id!==world||r.from_revision!==after||!Number.isSafeInteger(r.to_revision)||r.to_revision<after||!Number.isSafeInteger(r.tick)||!/^[a-f0-9]{64}$/.test(r.state_root)||!Array.isArray(r.patches)||r.patches.length>64||r.patches.some(p=>!Number.isSafeInteger(p.revision)||p.revision<=after||p.revision>r.to_revision)||typeof r.has_more!=="boolean"||r.has_more&&r.to_revision===after)throw new Error("同步页身份/游标非法");return r;
+  }
+  async buildTier1(world:string,draft:Tier1Draft,signal:AbortSignal):Promise<{install:Tier1Install;artifact_blake3:string}> {
+    const v=await this.request(`${encodeURIComponent(world)}/authoring/build-tier1`,signal,draft) as {install:Tier1Install;artifact_blake3:string;profile:string;executed:boolean};
+    if(v.profile!=="rynvek.tier1-components/1"||v.executed!==false||!v.install||v.install.template_id!==draft.template_id||typeof v.install.package_hex!=="string"||v.install.package_hex.length>24576||! /^(?:[0-9a-f]{2})+$/.test(v.install.package_hex)||! /^[0-9a-f]{64}$/.test(v.artifact_blake3))throw new Error("Tier1构建回执非法");
+    if(toHex(blake3Digest(fromHex(v.install.package_hex)))!==v.artifact_blake3)throw new Error("Tier1制品摘要不符");
+    return v;
   }
   async compile(world:string,source:string,signal:AbortSignal):Promise<number[]>{
     const v=await this.request(`${encodeURIComponent(world)}/authoring/compile-rule`,signal,{rule_graph_json:source}) as {compiled_rir_blake3:number[]};

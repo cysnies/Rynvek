@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
+import {blake3Digest,toHex} from "@rynvek/assets";
 import {expect,it} from "vitest";
 import {RemoteStudioSession,StudioClient,type AuthoringView,type WorldPatch} from "../src/index.js";
-const basis:AuthoringView={world_id:"w",revision:9,tick:4,state_root:"ab".repeat(32),rule_fault:null,ecology_contract:null,parameter_state:{next_serial:0,entities:{},fault:null},collaboration:{principal_id:"1",role:"owner",grant_id:null},baseline:{width:1,height:1,terrain:[0],genomes:{seed:"e30="},templates:["genome/seed"]}};
+const basis:AuthoringView={world_id:"w",revision:9,tick:4,state_root:"ab".repeat(32),rule_fault:null,ecology_contract:null,parameter_state:{next_serial:0,tier1_gas_charged:0,entities:{},fault:null},collaboration:{principal_id:"1",role:"owner",grant_id:null},baseline:{width:1,height:1,terrain:[0],genomes:{seed:"e30="},templates:["genome/seed"]}};
 it("共享模板删除/恢复/重做沿同一CRDT寄存器和真实修订回执，不把补丁数当世界版本",async()=>{
  const sent:WorldPatch[]=[];
  const fetcher:typeof fetch=async(_url,init)=>{const p=JSON.parse(String(init?.body)) as WorldPatch;sent.push(p);expect(init?.cache).toBe("no-store");return Response.json({status:"applied",world_id:"w",world_revision:p.base_authoring_revision+2,effective_tick:8,state_root:"cd".repeat(32)})};
@@ -48,4 +49,13 @@ it("基线规则墓碑不复活、重复写一次逆操作，删除与更新乱�
  const other={...up,patch_id:new Array(16).fill(3),hlc:{...up.hlc,author_node_id:2},operations:[{UpdateRuleModule:{module_id:"control",...rule,rule_graph_json:"other"}}]};
  s.document.integrate(other);expect(s.document.inverseOf(up.patch_id).skipped).toEqual([{register:{kind:"rule",moduleId:"control"},reason:"superseded"}]);
  const b=new RemoteStudioSession(client,view,2).document;b.integrate(other);b.integrate(up);b.integrate(del);expect(b.canonicalState()).toBe(s.document.canonicalState());expect(b.ruleModule("control")?.rule_graph_json).toBe("other");
+});
+it("Tier1先构建不安装，显式Epoch提交后原参数撤销重做精确保留包",async()=>{
+ const {TIER1_EXAMPLE,tier1RegistryOp}=await import("../src/index.js");const install={template_id:TIER1_EXAMPLE.template_id,package_hex:"ab".repeat(100)},sent:any[]=[];
+ const c=new StudioClient("http://srv","owner",async(url,init)=>{sent.push([String(url),init]);if(String(url).endsWith("build-tier1"))return Response.json({install,artifact_blake3:toHex(blake3Digest(new Uint8Array(100).fill(0xab))),profile:"rynvek.tier1-components/1",executed:false});const p=JSON.parse(String(init?.body));return Response.json({status:"applied",world_id:"w",world_revision:p.base_authoring_revision+1,effective_tick:8,state_root:"ef".repeat(32)});}),signal=new AbortController().signal,s=new RemoteStudioSession(c,basis,1);
+ const r=await c.buildTier1("w",TIER1_EXAMPLE,signal);expect(sent).toHaveLength(1);expect(s.document.param("rules.tier1.counter")).toBeUndefined();await s.edit([tier1RegistryOp("counter",r.install)],signal);expect(JSON.parse(s.document.param("rules.tier1.counter")!)).toEqual(install);await s.undoEdit(signal);expect(s.document.param("rules.tier1.counter")).toBeUndefined();await s.redoEdit(signal);expect(JSON.parse(s.document.param("rules.tier1.counter")!)).toEqual(install);expect(sent.slice(1).every(c=>JSON.parse(String(c[1].body)).safety_class==="EpochBoundarySafe")).toBe(true);
+});
+
+it("Tier1构建回执拒绝错误profile、执行标记与篡改摘要",async()=>{
+ const {TIER1_EXAMPLE}=await import("../src/index.js");const valid={install:{template_id:"model.counter",package_hex:"ab".repeat(100)},artifact_blake3:toHex(blake3Digest(new Uint8Array(100).fill(0xab))),profile:"rynvek.tier1-components/1",executed:false};for(const change of [{profile:"unknown"},{executed:true},{artifact_blake3:"00".repeat(32)}]){const c=new StudioClient("http://srv","owner",async()=>Response.json({...valid,...change}));await expect(c.buildTier1("w",TIER1_EXAMPLE,new AbortController().signal)).rejects.toThrow();}
 });

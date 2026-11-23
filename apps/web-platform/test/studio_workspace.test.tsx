@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: 2026 The Rynvek Contributors
 // SPDX-License-Identifier: AGPL-3.0-only
+import {blake3Digest,toHex} from "@rynvek/assets";
 // @vitest-environment jsdom
 // 仅传输夹具；生产Studio不生成世界/权威回执。
 import {afterEach,expect,it,vi} from "vitest";
 import {cleanup,fireEvent,render,screen,waitFor,act} from "@testing-library/react";
 import {StudioApp} from "../src/StudioApp.js";
 afterEach(()=>{cleanup();vi.unstubAllGlobals()});
-const basis={world_id:"w",revision:7,tick:4,state_root:"ab".repeat(32),rule_fault:null,ecology_contract:null,parameter_state:{next_serial:0,entities:{},fault:null},collaboration:{principal_id:"1",role:"owner",grant_id:null},baseline:{width:2,height:2,terrain:[0,0,0,0],params:{},genomes:{},rules:{},templates:[]}};
+const basis={world_id:"w",revision:7,tick:4,state_root:"ab".repeat(32),rule_fault:null,ecology_contract:null,parameter_state:{next_serial:0,tier1_gas_charged:0,entities:{},fault:null},collaboration:{principal_id:"1",role:"owner",grant_id:null},baseline:{width:2,height:2,terrain:[0,0,0,0],params:{},genomes:{},rules:{},templates:[]}};
 async function connect(){render(<StudioApp/>);fireEvent.change(screen.getByLabelText("Studio服务地址"),{target:{value:"http://srv"}});fireEvent.change(screen.getByLabelText("世界ID"),{target:{value:"w"}});fireEvent.change(screen.getByLabelText("Studio令牌"),{target:{value:"private"}});fireEvent.click(screen.getByText("连接权威世界"));await screen.findByText(/revision 7/)}
 it("真实HTTP会话挂载停靠编辑，回执前不展示乐观地形/修订，断开清除私有结果",async()=>{
  let resolve!:(r:Response)=>void;const fetcher=vi.fn(async(_url:unknown,init?:RequestInit)=>init?.method==="POST"?new Promise<Response>(r=>{resolve=r}):Response.json(basis));vi.stubGlobal("fetch",fetcher);
@@ -52,7 +53,7 @@ it("一般参数模板真实编辑入口提交原Epoch补丁且只显示服务�
  if(init?.method==="POST"){const patch=JSON.parse(String(init.body));sent.push(patch);return Response.json({status:"applied",world_id:"w",world_revision:11,effective_tick:8,state_root:"cd".repeat(32)});}
  return Response.json(current);
  }));await connect();fireEvent.click(screen.getByText("RuleGraph动作规则"));expect(screen.getByLabelText("一般参数实体registry")).toBeTruthy();fireEvent.click(screen.getByText("创建或编辑registry项"));await screen.findByText(/revision 11/);expect(sent[0].operations[0].SetWorldParam.key_path).toBe("rules.templates.model.counter");expect(sent[0].safety_class).toBe("EpochBoundarySafe");expect(screen.getByLabelText("权威参数实体状态").textContent).not.toContain('"state.total"');
- current={...basis,revision:11,tick:9,state_root:"cd".repeat(32),parameter_state:{next_serial:1,entities:{"counter.one":{serial:1,values:{"state.total":1337}}},fault:null}} as typeof basis;
+ current={...basis,revision:11,tick:9,state_root:"cd".repeat(32),parameter_state:{next_serial:1,tier1_gas_charged:0,entities:{"counter.one":{serial:1,values:{"state.total":1337}}},fault:null}} as typeof basis;
  fireEvent.click(screen.getByText("读取权威参数实体状态"));await waitFor(()=>expect(screen.getByLabelText("权威参数实体状态").textContent).toContain("1337"));fireEvent.change(screen.getByLabelText("registry JSON"),{target:{value:'{"private-user-value":3}'}});fireEvent.click(screen.getByText("断开身份"));expect((screen.getByLabelText("registry JSON") as HTMLTextAreaElement).value).not.toContain("private-user-value");expect(screen.getByLabelText("权威参数实体状态").textContent).not.toContain("1337");
 });
 it('所有者明确源码授权与原版本撤销走真实管理API，不自动邀请',async()=>{
@@ -63,4 +64,7 @@ it('所有者明确源码授权与原版本撤销走真实管理API，不自动�
 it('编辑者同步撤权后清私有视图/身份，不显示管理权或保留假可写状态',async()=>{
  vi.stubGlobal('fetch',vi.fn(async(url:unknown)=>String(url).includes('/changes?')?Response.json({message:'准入已撤销'},{status:404}):Response.json({...basis,collaboration:{principal_id:'2',role:'studio-editor',grant_id:'g1'}})));
  await connect();expect(screen.queryByText('刷新真实创作准入')).toBeNull();fireEvent.click(screen.getByText('同步原权威日志'));await screen.findByRole('alert');expect(screen.getByText('尚无权威基线')).toBeTruthy();expect(screen.queryByText('同步原权威日志')).toBeNull();expect((screen.getByLabelText('Studio令牌') as HTMLInputElement).value).toBe('');
+});
+it("Tier1构建与显式提交分离，断开清私有草稿与已提交包",async()=>{
+ const sent:any[]=[];const install={template_id:"model.counter",package_hex:"ab".repeat(100)};vi.stubGlobal("fetch",vi.fn(async(url:unknown,init?:RequestInit)=>{if(String(url).endsWith("build-tier1")){sent.push("build");return Response.json({install,artifact_blake3:toHex(blake3Digest(new Uint8Array(100).fill(0xab))),profile:"rynvek.tier1-components/1",executed:false});}if(init?.method!=="POST")return Response.json(basis);const p=JSON.parse(String(init.body));sent.push(p);return Response.json({status:"applied",world_id:"w",world_revision:11,effective_tick:8,state_root:"ef".repeat(32)});}));await connect();fireEvent.click(screen.getByText("RuleGraph动作规则"));fireEvent.click(screen.getByText("构建受控RYPK（不执行）"));await screen.findByText(/待提交制品/);expect(sent).toEqual(["build"]);expect(screen.getByLabelText("已提交Tier1制品").textContent).not.toContain(install.package_hex);fireEvent.click(screen.getByText("显式提交Tier1制品"));await screen.findByText(/revision 11/);expect(sent[1].safety_class).toBe("EpochBoundarySafe");expect(screen.getByLabelText("已提交Tier1制品").textContent).toContain(install.package_hex);fireEvent.change(screen.getByLabelText("Tier1构建JSON"),{target:{value:'{"private-source":"do-not-retain"}'}});fireEvent.click(screen.getByText("断开身份"));expect((screen.getByLabelText("Tier1构建JSON") as HTMLTextAreaElement).value).not.toContain("do-not-retain");expect(screen.getByLabelText("已提交Tier1制品").textContent).not.toContain(install.package_hex);
 });
