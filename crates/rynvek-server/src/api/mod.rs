@@ -14,6 +14,7 @@ pub mod multiplayer;
 pub mod observers;
 pub mod studio_collaboration;
 pub mod private_agents;
+pub mod private_rules;
 pub mod private_audio;
 pub mod private_visual;
 pub mod user;
@@ -51,6 +52,10 @@ pub const ROUTES: [(&str, &str, &str); 20] = [
 /// 构建路由
 pub fn router(state: AppState) -> Router {
     Router::new()
+        .route("/api/v1/private-hub/rules",get(private_rules::list))
+        .route("/api/v1/private-hub/rules/{id}/{version}",get(private_rules::get).put(private_rules::publish).delete(private_rules::revoke).layer(axum::extract::DefaultBodyLimit::max(1536*1024)))
+        .route("/api/v1/private-hub/rules/{id}/{version}/artifact",get(private_rules::artifact))
+        .route("/api/v1/private-hub/rules/{id}/{version}/resolved",get(private_rules::resolved))
         .route("/api/v1/private-hub/audio", get(private_audio::list))
         .route("/api/v1/private-hub/audio/{id}/{version}", get(private_audio::get).put(private_audio::publish).delete(private_audio::revoke))
         .route("/api/v1/private-hub/audio/{id}/{version}/artifact", get(private_audio::artifact))
