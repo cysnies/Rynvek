@@ -67,3 +67,7 @@
 ## 阶段52接续（保留上文历史边界）
 
 已接通CLI/TS可信私有规则用户链，及撤销后非Epoch的显式有源隔离维护逐Tick→Epoch才安装续跑；原Store撤销/fence提交锁零修改。隔离不执行旧/新图、不免费Tick/补能/自动降级，维护成本单列而非伪造gas；仅全Tier0正价有源存活控制身体剖面。详见[PRIVATE_RULE_CLIENTS.md](PRIVATE_RULE_CLIENTS.md)。原“尚无客户端/非Epoch续跑”属于阶段51历史，C#流程/General浏览器协作自治/真实PG及完整正式发布门禁仍欠，不称任意rpack/World完成。
+
+## 阶段53：真实Web操作观察入口
+
+已有 `/general` 基于原SDK/权限Actor的创建发现、明确控制、签名包安装与维护状态，见[GENERAL_WORLD_WEB.md](GENERAL_WORLD_WEB.md)。上文阶段49“未接通Web”保留为历史；本批仍没有远程General Renderer/Worker桥接、WebSocket/协作或浏览器硬件验收，不以本地假World替代。

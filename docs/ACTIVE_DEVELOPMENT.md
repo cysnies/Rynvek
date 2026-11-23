@@ -5,6 +5,19 @@
 
 更新时间：2026-11-24，中国标准时间 UTC+8。旧M0–M8标签不是全项目完成证明；当前仍在主体功能阶段。
 
+## 第五十三批：General真实Web身份/世界/私有规则与明确实付控制（从main e495479继续）
+
+**主体继续，整体未完成、未达正式发布质量。** 已核阶段52交接/ACTIVE/真实规范/干净远端 `e4954793989102a71f02bc47e417c4b5c8d61342`；不重复AST/私库/Actor/隔离链。完整流程与父代理浏览器验项见[GENERAL_WORLD_WEB.md](GENERAL_WORLD_WEB.md)。
+
+- `/general`真实React工作台与Arena入口；原正式能力令牌→原认证Active本人主体/登记钥读回→RYWL明确创建、原worlds发现/精确ID选择→只读权威观察→明确连接宿主/取得原Sovereign→一个真实实付Tick。读取不偷lease、不启练习身份/本地World；无假成功或自动重试。
+- 复用原PrivateRuleClient：版本发现、显式完整精确计划、可信下载验签、明确Epoch安装、接受逐身体维护报价后逐Tick隔离换装；只显示原Actor提交回执及原恢复状态。不改变阶段52维护语义、不弱化原ABAC/双fence/fog/Tick事务/有源计价/最终提交锁撤销，Store/Simulation零改动。
+- 新GET auth/session沿原authenticate/subject/Active，不返回token；私有缓存no-store/Vary，原worlds发现同补。UI同origin、客户端HTTPS/本机开发地址，认证fetch禁止重定向/附带cookies，15秒/响应硬界、仅内存、退出中止、晚回执失效；拒绝观察整数截断。
+- **没有远程General图形画布**：未适配原Renderer/Worker，不把本地载同包或Arena投影伪装远端。规范7.1 Worker独占GPU保留；下一主体优先真实远程General只读观察桥接，然后协作准入/自治调度；浏览器直接签名登录/注册、规则发布/映射编辑器、分页也仍欠。
+
+58个不同定向通过，新增10，重跑不累计：Web DOM/路由12（8新）、SDK25、General10（1新）、私有规则11（1新）；真实AST/SDK/Web用例均显式执行。生产编译GeneralWorldSession经真实Node→Rust HTTP完成大u64本人/创建发现/双fence/安装4实付5/撤销拒绝/6维护→新会话隔离→7维护8安装9实付、新App私有CAS恢复同根。DOM与HTTP分别验证，**不称真实浏览器端到端**。Web typecheck/tsc/直接Vite打包通过，Vite仅复用既有wasm，未重编wasm32。
+
+本执行器无浏览器工具；父代理仅可在已获准可达部署做文档清单实测，既往受管loopback拦截不重试/绕过。无新外部模型/支付授权，未调用真实provider或发送私有内容。Node24.22.1不是Node22；C#本批重编/wasm32/真实browser硬件GPU/实际PG多机断电24h长稳仍未验。其余真实主体与完整发布阻塞仍见下节/新文档；未跑全workspace/完整安全/soak/CI轮询，不以本批结束宣布整体完成。以下旧批为历史。
+
 ## 第五十二批：CLI/TS私有规则用户链与撤销后实付隔离到Epoch续跑（从main b9fad2b继续）
 
 **主体继续，整体未完成、未达正式发布质量。** 已核交接/ACTIVE/远端从干净 `b9fad2bace0bac283cb3c98d2e3eb40c30426676` 续；不重复AST/私库/Actor。完整入口与成本语义见[PRIVATE_RULE_CLIENTS.md](PRIVATE_RULE_CLIENTS.md)。
