@@ -85,6 +85,25 @@ impl CrashRecoveryStateMachine {
     pub fn run_with_replayer(
         &mut self,
         input: &RecoveryInput,
+        replayer: impl FnMut(&JournalRecord) -> Result<Option<[u8; 32]>, RynvekErrorCode>,
+    ) -> Result<RecoveryOutput, RynvekErrorCode> {
+        self.run_impl(input, None, replayer)
+    }
+
+    /// 沿用同一四步恢复器，但在读取 WAL 前落实调用者的硬字节上限。
+    pub fn run_with_bounded_replayer(
+        &mut self,
+        input: &RecoveryInput,
+        max_journal_bytes: usize,
+        replayer: impl FnMut(&JournalRecord) -> Result<Option<[u8; 32]>, RynvekErrorCode>,
+    ) -> Result<RecoveryOutput, RynvekErrorCode> {
+        self.run_impl(input, Some(max_journal_bytes), replayer)
+    }
+
+    fn run_impl(
+        &mut self,
+        input: &RecoveryInput,
+        max_journal_bytes: Option<usize>,
         mut replayer: impl FnMut(&JournalRecord) -> Result<Option<[u8; 32]>, RynvekErrorCode>,
     ) -> Result<RecoveryOutput, RynvekErrorCode> {
         // 步骤 1：定位并核验快照包络
@@ -109,7 +128,10 @@ impl CrashRecoveryStateMachine {
 
         // 步骤 3：重放直至撕裂写
         self.state = CrashRecoveryState::ReplayFramesUntilTornWrite;
-        let read = JournalReader::read_path(&input.journal_path)?;
+        let read = match max_journal_bytes {
+            Some(max) => JournalReader::read_path_bounded(&input.journal_path, max)?,
+            None => JournalReader::read_path(&input.journal_path)?,
+        };
 
         // 步骤 4：校验父哈希链、执行重放回调并验证最终状态根
         self.state = CrashRecoveryState::RebuildIndicesAndVerifyStateRoot;

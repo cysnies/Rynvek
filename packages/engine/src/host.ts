@@ -74,7 +74,7 @@ export interface EngineHostOptions {
   terminateOnShutdown?: boolean;
 }
 
-/** 拾取结果：被拾取实体的稠密索引，未命中为 null */
+/** 拾取结果：被拾取实体的持久单调序号（不是稠密槽位），未命中为 null */
 export type PickHit = number | null;
 
 interface PendingPick {
@@ -218,7 +218,7 @@ export class EngineHost {
     this.send({ type: "RESIZE", width: Math.max(1, Math.floor(width)), height: Math.max(1, Math.floor(height)), devicePixelRatio });
   }
 
-  /** 画布设备像素坐标拾取；解析为稠密索引或 null（未命中） */
+  /** 画布设备像素坐标拾取；解析为持久单调序号或 null（未命中） */
   pick(x: number, y: number): Promise<PickHit> {
     try {
       this.#ensureOpen();

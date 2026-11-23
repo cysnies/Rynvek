@@ -3292,6 +3292,7 @@ dependencies = [
  "rynvek-spatial",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -3312,6 +3313,7 @@ name = "rynvek-spatial"
 version = "0.1.0"
 dependencies = [
  "rynvek-core",
+ "serde",
 ]
 
 [[package]]

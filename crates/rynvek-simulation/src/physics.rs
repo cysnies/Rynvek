@@ -5,52 +5,13 @@
 //! 128 体、四个 120Hz 子步、四轮无摩擦弹性接触是本实现剖面，不冒充原规范。
 use rynvek_core::RynvekErrorCode;
 use rynvek_ecs::{EntityRegistry, PagedComponentColumn};
+use rynvek_spatial::circle;
+pub use rynvek_spatial::circle::{Body, ONE};
 use serde::{Deserialize, Serialize};
 
-pub const ONE: i64 = 1 << 32;
 pub const MAX_BODIES: usize = 128;
 pub const MAX_COMMANDS: usize = 64;
-const SIDE: i64 = 256 * ONE;
 const ERROR: RynvekErrorCode = RynvekErrorCode::DimensionMismatch;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Body {
-    pub position_q32: [i64; 2],
-    pub velocity_q32: [i64; 2],
-    pub acceleration_q32: [i64; 2],
-    pub radius_q32: i64,
-    /// 质量不是 CPU 配额，也不表示生物代谢资源。
-    pub mass_q32: i64,
-    pub fixed: bool,
-}
-impl Body {
-    pub fn validate(&self) -> Result<(), RynvekErrorCode> {
-        if !(ONE / 4..=2 * ONE).contains(&self.radius_q32)
-            || !(ONE..=1024 * ONE).contains(&self.mass_q32)
-            || self
-                .position_q32
-                .iter()
-                .any(|&v| v < self.radius_q32 || v > SIDE - self.radius_q32)
-            || self.velocity_q32.iter().any(|&v| !(-8 * ONE..=8 * ONE).contains(&v))
-            || self
-                .acceleration_q32
-                .iter()
-                .any(|&v| !(-32 * ONE..=32 * ONE).contains(&v))
-            || (self.fixed && (self.velocity_q32 != [0; 2] || self.acceleration_q32 != [0; 2]))
-        {
-            return Err(ERROR);
-        }
-        Ok(())
-    }
-    fn inverse_mass(&self) -> i64 {
-        if self.fixed {
-            0
-        } else {
-            ((i128::from(ONE) * i128::from(ONE)) / i128::from(self.mass_q32)) as i64
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", deny_unknown_fields)]
@@ -156,13 +117,7 @@ impl PhysicsWorld {
         order.sort_by_key(|(id, _)| *id);
         for _ in 0..4 {
             for b in self.bodies.iter_mut() {
-                if !b.fixed {
-                    for axis in 0..2 {
-                        b.velocity_q32[axis] += b.acceleration_q32[axis] / 120;
-                        b.position_q32[axis] += b.velocity_q32[axis] / 120;
-                    }
-                }
-                walls(b);
+                circle::integrate_substep(b)?;
             }
             // 有界完整枚举，不使用 CSR 的 32 邻居截断，避免密集接触漏碰。
             for _ in 0..4 {
@@ -172,9 +127,9 @@ impl PhysicsWorld {
                         let ib = order[b].1;
                         let mut ba = *self.bodies.get(ia)?;
                         let mut bb = *self.bodies.get(ib)?;
-                        contact(&mut ba, &mut bb)?;
-                        walls(&mut ba);
-                        walls(&mut bb);
+                        circle::resolve_contact(&mut ba, &mut bb)?;
+                        circle::reflect_walls(&mut ba)?;
+                        circle::reflect_walls(&mut bb)?;
                         *self.bodies.get_mut(ia)? = ba;
                         *self.bodies.get_mut(ib)? = bb;
                     }
@@ -185,7 +140,7 @@ impl PhysicsWorld {
                 for b in a + 1..order.len() {
                     let ba = self.bodies.get(order[a].1)?;
                     let bb = self.bodies.get(order[b].1)?;
-                    let (_, dist) = geometry(ba, bb);
+                    let dist = circle::separation(ba, bb)?;
                     if dist + 64 < ba.radius_q32 + bb.radius_q32 {
                         return Err(ERROR);
                     }
@@ -213,70 +168,4 @@ impl PhysicsWorld {
         }
         *h.finalize().as_bytes()
     }
-}
-fn mul(a: i64, b: i64) -> i64 {
-    (i128::from(a) * i128::from(b) / i128::from(ONE)) as i64
-}
-fn div(a: i64, b: i64) -> i64 {
-    (i128::from(a) * i128::from(ONE) / i128::from(b)) as i64
-}
-fn geometry(a: &Body, b: &Body) -> ([i64; 2], i64) {
-    let d = [
-        b.position_q32[0] - a.position_q32[0],
-        b.position_q32[1] - a.position_q32[1],
-    ];
-    let sq = i128::from(d[0]) * i128::from(d[0]) + i128::from(d[1]) * i128::from(d[1]);
-    (d, (sq as u128).isqrt() as i64)
-}
-fn walls(b: &mut Body) {
-    if b.fixed {
-        return;
-    }
-    for axis in 0..2 {
-        let lo = b.radius_q32;
-        let hi = SIDE - lo;
-        if b.position_q32[axis] < lo {
-            b.position_q32[axis] = lo;
-            b.velocity_q32[axis] = b.velocity_q32[axis].abs();
-        }
-        if b.position_q32[axis] > hi {
-            b.position_q32[axis] = hi;
-            b.velocity_q32[axis] = -b.velocity_q32[axis].abs();
-        }
-    }
-}
-fn contact(a: &mut Body, b: &mut Body) -> Result<(), RynvekErrorCode> {
-    let (d, dist) = geometry(a, b);
-    let penetration = a.radius_q32 + b.radius_q32 - dist;
-    if penetration < 0 {
-        return Ok(());
-    }
-    let ia = a.inverse_mass();
-    let ib = b.inverse_mass();
-    let sum = ia + ib;
-    if sum == 0 {
-        return if penetration <= 64 { Ok(()) } else { Err(ERROR) };
-    }
-    let n = if dist == 0 {
-        [ONE, 0]
-    } else {
-        [div(d[0], dist), div(d[1], dist)]
-    };
-    let relative = mul(b.velocity_q32[0] - a.velocity_q32[0], n[0]) + mul(b.velocity_q32[1] - a.velocity_q32[1], n[1]);
-    if relative < 0 {
-        let impulse = div(-2 * relative, sum);
-        for (axis, normal) in n.into_iter().enumerate() {
-            a.velocity_q32[axis] -= mul(mul(impulse, ia), normal);
-            b.velocity_q32[axis] += mul(mul(impulse, ib), normal);
-        }
-    }
-    if penetration > 0 {
-        let move_a = mul(penetration + 4, div(ia, sum));
-        let move_b = penetration + 4 - move_a;
-        for (axis, normal) in n.into_iter().enumerate() {
-            a.position_q32[axis] -= mul(move_a, normal);
-            b.position_q32[axis] += mul(move_b, normal);
-        }
-    }
-    Ok(())
 }

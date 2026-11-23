@@ -55,6 +55,12 @@ impl SnapshotReader {
     }
 
     pub fn read_bytes(bytes: &[u8]) -> Result<SnapshotReadResult, RynvekErrorCode> {
+        Self::read_bytes_bounded(bytes, MAX_SNAPSHOT_DECOMPRESSED_BYTES)
+    }
+
+    /// 复用原容器解析与校验，允许明确剖面进一步收紧解压上限。
+    pub fn read_bytes_bounded(bytes: &[u8], max_decompressed: usize) -> Result<SnapshotReadResult, RynvekErrorCode> {
+        let max_decompressed = max_decompressed.min(MAX_SNAPSHOT_DECOMPRESSED_BYTES);
         if bytes.len() < SNAPSHOT_HEADER_LEN + 32 {
             return Err(RynvekErrorCode::InvalidFileMagicOrVersion);
         }
@@ -75,15 +81,15 @@ impl SnapshotReader {
             let mut out = Vec::new();
             decoder
                 .by_ref()
-                .take((MAX_SNAPSHOT_DECOMPRESSED_BYTES + 1) as u64)
+                .take(max_decompressed.saturating_add(1) as u64)
                 .read_to_end(&mut out)
                 .map_err(|_| RynvekErrorCode::Blake3ChecksumMismatch)?;
-            if out.len() > MAX_SNAPSHOT_DECOMPRESSED_BYTES {
+            if out.len() > max_decompressed {
                 return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             out
         } else {
-            if compressed.len() > MAX_SNAPSHOT_DECOMPRESSED_BYTES {
+            if compressed.len() > max_decompressed {
                 return Err(RynvekErrorCode::Blake3ChecksumMismatch);
             }
             compressed.to_vec()

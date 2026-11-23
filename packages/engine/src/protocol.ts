@@ -6,7 +6,7 @@
  *
  * 与 Rust `rynvek-engine::protocol` 逐字段一一对应（ERRATA E-016）：`type` 为 SCREAMING_SNAKE_CASE，
  * 字段为 camelCase。`ENGINE_INIT` 额外携带不可 JSON 化的 `canvas: OffscreenCanvas`（随 transfer 列表移交）。
- * 跨语言一致性由共享夹具 `tests/engine/protocol_messages.json` 双端断言。
+ * 跨语言一致性由共享夹具 `tests/engine/protocol_messages_v2.json` 双端断言。
  */
 
 import type { BuildingKind, FactionObservation } from "@rynvek/client";

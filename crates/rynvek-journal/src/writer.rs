@@ -40,10 +40,33 @@ impl JournalWriter {
         base_revision: u64,
         snapshot_tick: u64,
     ) -> Result<Self, RynvekErrorCode> {
-        let path = path.as_ref().to_path_buf();
+        Self::create_impl(path.as_ref(), world_id, base_tick, base_revision, snapshot_tick, false)
+    }
+
+    /// 独占创建，拒绝覆盖既有日志（本地工具默认使用此入口）。
+    pub fn create_new(
+        path: impl AsRef<Path>,
+        world_id: [u8; 16],
+        base_tick: u64,
+        base_revision: u64,
+        snapshot_tick: u64,
+    ) -> Result<Self, RynvekErrorCode> {
+        Self::create_impl(path.as_ref(), world_id, base_tick, base_revision, snapshot_tick, true)
+    }
+
+    fn create_impl(
+        path: &Path,
+        world_id: [u8; 16],
+        base_tick: u64,
+        base_revision: u64,
+        snapshot_tick: u64,
+        exclusive: bool,
+    ) -> Result<Self, RynvekErrorCode> {
+        let path = path.to_path_buf();
         let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create(!exclusive)
+            .truncate(!exclusive)
+            .create_new(exclusive)
             .write(true)
             .read(true)
             .open(&path)

@@ -22,5 +22,8 @@ rynvek-compute-cpu.workspace = true
 rynvek-field.workspace = true
 rynvek-spatial.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

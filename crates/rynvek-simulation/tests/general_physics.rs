@@ -153,8 +153,8 @@ fn general_snapshot_preserves_field_sources_and_every_future_root() {
 }
 #[test]
 fn general_original_wal_replays_commands_lifecycle_and_each_commit() {
-    let base = std::env::temp_dir().join(format!("rynvek-general-wal-{}", std::process::id()));
-    std::fs::create_dir_all(&base).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let base = directory.path();
     let snap = base.join("genesis.rsnap");
     let wal = base.join("world.rjournal");
     let mut w = SimulationEngine::new([4; 16]);
@@ -178,5 +178,96 @@ fn general_original_wal_replays_commands_lifecycle_and_each_commit() {
     let (r, out) = SimulationEngine::recover(&snap, &wal).unwrap();
     assert!(out.torn_write_detected);
     assert_eq!(r.clock.tick, 2);
-    std::fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn general_entity_and_velocity_hard_limits_fail_without_partial_tick() {
+    let bodies: Vec<_> = (0..128)
+        .map(|i| {
+            let mut b = body(4 + (i % 16) * 4, 0);
+            b.position_q32[1] = (4 + (i / 16) * 4) * ONE;
+            b
+        })
+        .collect();
+    let mut w = SimulationEngine::with_bodies([6; 16], &bodies).unwrap();
+    w.tick().unwrap();
+    let before = w.encode_snapshot().unwrap();
+    assert!(w.tick_with_commands(&[C::Spawn { body: body(100, 0) }]).is_err());
+    assert_eq!(w.encode_snapshot().unwrap(), before);
+    let mut oversized = bodies;
+    oversized.push(body(100, 0));
+    assert!(SimulationEngine::with_bodies([6; 16], &oversized).is_err());
+    let mut bad = body(10, 8);
+    bad.acceleration_q32 = [32 * ONE, 0];
+    let mut w = SimulationEngine::with_bodies([6; 16], &[bad]).unwrap();
+    let before = w.encode_snapshot().unwrap();
+    assert!(w.tick().is_err());
+    assert_eq!(w.encode_snapshot().unwrap(), before);
+}
+#[test]
+fn general_snapshot_recomputes_component_and_source_roots_not_only_envelope() {
+    use rynvek_snapshot::{CMIT_TAG, SnapshotReader, SnapshotWriter};
+    let w = SimulationEngine::with_bodies([7; 16], &[body(10, 1)]).unwrap();
+    let original = w.encode_snapshot().unwrap();
+    assert!(SnapshotReader::read_bytes_bounded(&original, 1).is_err());
+    let mut trailing = original.clone();
+    trailing.push(0);
+    assert!(SimulationEngine::decode_snapshot(&trailing).is_err());
+    for tag in [*b"COMP", *b"FILD"] {
+        let mut read = SnapshotReader::read_bytes(&original).unwrap();
+        let commit = rynvek_journal::CommitManifest::decode(read.find_chunk(CMIT_TAG).unwrap()).unwrap();
+        let chunk = read.custom_chunks.iter_mut().find(|c| c.tag == tag).unwrap();
+        if tag == *b"COMP" {
+            let mut values: Vec<Body> = serde_json::from_slice(&chunk.payload).unwrap();
+            values[0].mass_q32 += ONE;
+            chunk.payload = serde_json::to_vec(&values).unwrap();
+        } else {
+            let last = chunk.payload.len() - 1;
+            chunk.payload[last] ^= 1;
+        }
+        // 重新写入完全有效的压缩容器，仍须因实际权威子根不匹配而拒绝。
+        let forged = SnapshotWriter::write_bytes_with_chunks(
+            w.world_id,
+            0,
+            0,
+            commit.parent_commit_hash,
+            &read.registry,
+            None,
+            &read.custom_chunks,
+        )
+        .unwrap()
+        .0;
+        assert!(SimulationEngine::decode_snapshot(&forged).is_err());
+    }
+}
+#[test]
+fn general_uncommitted_wal_tail_is_not_applied_and_wrong_world_header_rejected() {
+    use rynvek_journal::{JournalCommandRecord, JournalReader, JournalRecord, JournalWriter};
+    let directory = tempfile::tempdir().unwrap();
+    let base = directory.path();
+    let snap = base.join("genesis.rsnap");
+    let wal = base.join("world.rjournal");
+    let mut w = SimulationEngine::new([8; 16]);
+    std::fs::write(&snap, w.encode_snapshot().unwrap()).unwrap();
+    let mut writer = JournalWriter::create_new(&wal, w.world_id, 0, 0, 0).unwrap();
+    w.tick_recorded(&[C::Spawn { body: body(10, 1) }], &mut writer).unwrap();
+    writer
+        .append_record(&JournalRecord::CommandAccepted(JournalCommandRecord {
+            tick: 2,
+            world_revision: 2,
+            faction_id: 0,
+            command_bytes: serde_json::to_vec(&[C::Despawn { serial: 1 }]).unwrap(),
+        }))
+        .unwrap();
+    drop(writer);
+    let (r, out) = SimulationEngine::recover(&snap, &wal).unwrap();
+    assert_eq!(r.parent_commit_hash, w.parent_commit_hash);
+    assert_eq!(out.replayed_commits.len(), 1);
+    assert!(r.physics().body(1).is_some());
+    assert!(JournalReader::read_path_bounded(&wal, 63).is_err());
+    assert!(JournalWriter::create_new(&wal, w.world_id, 0, 0, 0).is_err());
+    let mut bytes = std::fs::read(&wal).unwrap();
+    bytes[16] ^= 1;
+    std::fs::write(&wal, bytes).unwrap();
+    assert!(SimulationEngine::recover(&snap, &wal).is_err());
 }

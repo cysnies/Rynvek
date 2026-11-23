@@ -20,3 +20,5 @@ pub mod radix;
 pub use bvh::{Aabb2d, BvhPrimitive, DynamicBvh};
 pub use csr_grid::{GRID_CELLS_PER_AXIS, MAX_NEIGHBORS_PER_ENTITY, SpatialCsrIndex, TOTAL_GRID_CELLS};
 pub use morton::{cell_coords_from_local_q32, encode_morton2_u7, morton_to_cell};
+
+pub mod circle;

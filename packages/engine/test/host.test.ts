@@ -199,3 +199,18 @@ describe("拾取请求关联", () => {
     expect(worker.messages().some((m) => m.type === "PICK_REQUEST")).toBe(false);
   });
 });
+
+describe("通用 World 明确安装", () => {
+  it("只发送明确提供的原包字节，调用后修改输入不改变消息", () => {
+    const { host, worker } = attached();
+    const bytes = new Uint8Array([82, 89, 87, 76]);
+    host.loadGeneralWorld(bytes); bytes[0] = 0;
+    expect(worker.posted.at(-1)?.message).toEqual({ type: "GENERAL_WORLD", packageBytes: [82, 89, 87, 76] });
+  });
+  it("空包和超限包在宿主就拒绝，不发送占位命令", () => {
+    const { host, worker } = attached();
+    expect(() => host.loadGeneralWorld(new Uint8Array())).toThrow(/通用 World/);
+    expect(() => host.loadGeneralWorld(new Uint8Array(128 * 1024 + 1))).toThrow(/通用 World/);
+    expect(worker.posted).toHaveLength(1);
+  });
+});

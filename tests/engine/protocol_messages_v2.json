@@ -1,0 +1,250 @@
+{
+  "$comment": "React \u4e3b\u7ebf\u7a0b \u21c4 Dedicated Engine Worker \u534f\u8bae\u7684\u8de8\u8bed\u8a00\u5939\u5177\uff1arynvek-engine\uff08serde\uff09\u4e0e @rynvek/engine\uff08protocol.ts\uff09\u5404\u81ea\u65ad\u8a00\u9010\u5b57\u6bb5\u5f80\u8fd4\u4e00\u81f4\u3002ENGINE_INIT \u7684 canvas \u4e3a OffscreenCanvas\uff0c\u4e0d\u53ef JSON \u5316\uff0c\u5939\u5177\u4e2d\u7701\u7565\u3002",
+  "commands": [
+    {
+      "type": "ENGINE_INIT",
+      "width": 1280,
+      "height": 720,
+      "devicePixelRatio": 2.0,
+      "worldId": "00112233445566778899aabbccddeeff",
+      "gpuMode": "auto",
+      "arenaFaction": 0
+    },
+    {
+      "type": "RESIZE",
+      "width": 640,
+      "height": 360,
+      "devicePixelRatio": 1.5
+    },
+    {
+      "type": "GENERAL_WORLD",
+      "packageBytes": [
+        82,
+        89,
+        87,
+        76
+      ]
+    },
+    {
+      "type": "STEP",
+      "ticks": 3
+    },
+    {
+      "type": "START",
+      "tickRate": 30
+    },
+    {
+      "type": "PAUSE"
+    },
+    {
+      "type": "SET_CAMERA",
+      "centerX": 128.0,
+      "centerY": 64.5,
+      "pxPerCell": 8.0
+    },
+    {
+      "type": "PICK_REQUEST",
+      "requestId": 7,
+      "x": 100,
+      "y": 200
+    },
+    {
+      "type": "SET_LAYER_MASK",
+      "mask": 255
+    },
+    {
+      "type": "SET_HEATMAP_CHANNEL",
+      "channel": "signal_a"
+    },
+    {
+      "type": "SIMULATE_DEVICE_LOST"
+    },
+    {
+      "type": "ARENA_THEME",
+      "worldId": "00000000000000000000000000000000",
+      "requestId": 1,
+      "background": 4278190080,
+      "factions": [
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295
+      ]
+    },
+    {
+      "type": "ARENA_MAP",
+      "worldId": "00000000000000000000000000000000",
+      "map": {
+        "width": 1,
+        "height": 1,
+        "tiles": [
+          2
+        ],
+        "tilesHash": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "type": "ARENA_SELECTION",
+      "worldId": "00000000000000000000000000000000",
+      "units": [
+        5
+      ],
+      "building": null
+    },
+    {
+      "type": "ARENA_OVERLAY",
+      "worldId": "00000000000000000000000000000000",
+      "drag": [
+        [
+          7.0,
+          6.0
+        ],
+        [
+          2.0,
+          3.0
+        ]
+      ],
+      "placement": {
+        "kind": "bld.signal_beacon",
+        "origin": [
+          4,
+          4
+        ]
+      }
+    },
+    {
+      "type": "ARENA_OBSERVATION",
+      "worldId": "00112233445566778899aabbccddeeff",
+      "observation": {
+        "neural": {
+          "sample_tick": 42,
+          "spike_window_substeps": 64,
+          "spiking_neurons": 0,
+          "continuous_neurons": 0,
+          "spikes_in_window": 0,
+          "continuous_abs_mean_q8": 0
+        },
+        "tick": 42,
+        "faction": 0,
+        "ledger": {
+          "balance": {
+            "biomass": 0,
+            "flux": 0,
+            "neurogel": 0
+          },
+          "capacity": {
+            "biomass": 0,
+            "flux": 0,
+            "neurogel": 0
+          },
+          "biomass_harvested_total": 0
+        },
+        "supply": [
+          0,
+          0
+        ],
+        "techs": [],
+        "genomes": [],
+        "units": [],
+        "buildings": [],
+        "ghosts": [],
+        "visibility": [
+          1,
+          0,
+          2,
+          0
+        ],
+        "visibility_width": 2,
+        "score_milli": 0,
+        "pve_wave": null,
+        "outcome": null
+      }
+    },
+    {
+      "type": "SHUTDOWN"
+    }
+  ],
+  "events": [
+    {
+      "type": "ENGINE_READY",
+      "backend": "webgpu",
+      "profile": "TierC",
+      "adapter": "llvmpipe (Gl)",
+      "generation": 0,
+      "arenaFaction": 0
+    },
+    {
+      "type": "ENGINE_READY",
+      "backend": "cpu-reference",
+      "profile": null,
+      "adapter": null,
+      "generation": 0
+    },
+    {
+      "type": "TICK_COMMITTED",
+      "tick": 42,
+      "stateRoot": "aa00000000000000000000000000000000000000000000000000000000000001"
+    },
+    {
+      "type": "FRAME_RENDERED",
+      "tick": 42
+    },
+    {
+      "type": "PICK_RESULT",
+      "requestId": 7,
+      "entitySerial": 3
+    },
+    {
+      "type": "PICK_RESULT",
+      "requestId": 8,
+      "entitySerial": null
+    },
+    {
+      "type": "DEVICE_LOST",
+      "tick": 43,
+      "reason": "Destroyed"
+    },
+    {
+      "type": "RECOVERY_PROGRESS",
+      "step": 1,
+      "phase": "Quarantined"
+    },
+    {
+      "type": "RECOVERED",
+      "generation": 1,
+      "resumeTick": 44
+    },
+    {
+      "type": "BACKEND_DEGRADED",
+      "reason": "\u91cd\u83b7\u8bbe\u5907\u8fde\u7eed\u5931\u8d25"
+    },
+    {
+      "type": "GPU_DIVERGENCE",
+      "tick": 45,
+      "channel": "nutrient"
+    },
+    {
+      "type": "ENGINE_ERROR",
+      "code": 24577,
+      "message": "\u65e0\u9002\u914d\u5668"
+    },
+    {
+      "type": "ARENA_THEME_APPLIED",
+      "worldId": "00000000000000000000000000000000",
+      "requestId": 1,
+      "background": 4278190080,
+      "factions": [
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295,
+        4294967295
+      ]
+    }
+  ]
+}

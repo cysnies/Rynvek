@@ -157,7 +157,7 @@ impl SimulationEngine {
         Ok(manifest)
     }
 
-    fn run_phase(&mut self, phase: CanonicalPhaseId) -> Result<(), SimulationError> {
+    pub(crate) fn run_phase(&mut self, phase: CanonicalPhaseId) -> Result<(), SimulationError> {
         match phase {
             CanonicalPhaseId::ClockAndEpochAdvance => {
                 self.clock.advance();

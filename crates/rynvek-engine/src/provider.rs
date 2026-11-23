@@ -197,6 +197,35 @@ mod tests {
     }
 
     #[test]
+    fn general_scene_uses_real_radius_and_serial_after_dense_swap_remove() {
+        use rynvek_simulation::physics::{Body, ONE, PhysicsCommand};
+        let make = |x, radius| Body {
+            position_q32: [x * ONE, 64 * ONE],
+            velocity_q32: [ONE, 0],
+            acceleration_q32: [0; 2],
+            radius_q32: radius,
+            mass_q32: ONE,
+            fixed: false,
+        };
+        let mut world = SimulationEngine::with_bodies([8; 16], &[make(10, ONE / 2), make(20, ONE)]).unwrap();
+        world
+            .tick_with_commands(&[PhysicsCommand::Despawn { serial: 1 }])
+            .unwrap();
+        let scene = collect_scene(
+            &world,
+            1,
+            NeuralLod::L2,
+            RenderLayerMask::ALL,
+            &[&EntityProvider::default()],
+        );
+        assert_eq!(scene.instance_count(), 1);
+        let instance = scene.ordered_instances()[0];
+        assert_eq!(instance.pick_id, 2);
+        assert_eq!(instance.size, 2.0);
+        assert!(instance.position[0] > 20.0);
+    }
+
+    #[test]
     fn unified_world_runtime_populates_arena_entities_and_steps() {
         let mut rt = WorldRuntime::new_arena(MatchConfig::duel(42));
         let mut scene = FrameScene::new(0, RenderLayerMask::ALL);

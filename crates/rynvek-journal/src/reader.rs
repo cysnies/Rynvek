@@ -37,6 +37,19 @@ impl JournalReader {
         Self::read_bytes(&bytes)
     }
 
+    /// 显式调用者上限；读满上限加一即拒绝，不把整个超大 WAL 装入内存。
+    pub fn read_path_bounded(path: impl AsRef<Path>, max_bytes: usize) -> Result<JournalReadResult, RynvekErrorCode> {
+        let file = File::open(path.as_ref()).map_err(|_| RynvekErrorCode::InvalidFileMagicOrVersion)?;
+        let mut bytes = Vec::new();
+        file.take(max_bytes.saturating_add(1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|_| RynvekErrorCode::JournalTornWriteTruncated)?;
+        if bytes.len() > max_bytes {
+            return Err(RynvekErrorCode::DimensionMismatch);
+        }
+        Self::read_bytes(&bytes)
+    }
+
     pub fn read_bytes(bytes: &[u8]) -> Result<JournalReadResult, RynvekErrorCode> {
         if bytes.len() < JOURNAL_HEADER_LEN {
             return Err(RynvekErrorCode::JournalTornWriteTruncated);

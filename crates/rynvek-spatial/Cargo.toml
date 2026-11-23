@@ -1,6 +1,6 @@
 [package]
 name = "rynvek-spatial"
-description = "Rynvek Tier 2 空间索引：UniformGrid 4-Pass 基数排序 CSR 邻居表"
+description = "Rynvek Tier 2 空间索引：UniformGrid 4-Pass 基数排序 CSR 邻居表、Q32.32 辛欧拉圆形接触核"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,6 +11,7 @@ publish.workspace = true
 
 [dependencies]
 rynvek-core.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true

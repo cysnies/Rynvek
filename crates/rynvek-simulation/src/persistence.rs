@@ -124,8 +124,20 @@ impl SimulationEngine {
         if bytes.len() > 8 * 1024 * 1024 {
             return Err(ERROR);
         }
-        let read = SnapshotReader::read_bytes(bytes)?;
-        if read.neur.is_some() || read.custom_chunks.len() != 4 {
+        let read = SnapshotReader::read_bytes_bounded(bytes, 16 * 1024 * 1024)?;
+        if read
+            .header
+            .payload_bytes
+            .checked_add(rynvek_snapshot::SNAPSHOT_HEADER_LEN as u64 + 32)
+            != Some(bytes.len() as u64)
+        {
+            return Err(ERROR);
+        }
+        if read.header.format_version != rynvek_snapshot::header::CANONICAL_SNAPSHOT_VERSION
+            || read.header.flags != rynvek_snapshot::header::SNAPSHOT_FLAG_ZSTD
+            || read.neur.is_some()
+            || read.custom_chunks.len() != 4
+        {
             return Err(ERROR);
         }
         let commit = CommitManifest::decode(read.find_chunk(CMIT_TAG).ok_or(ERROR)?)?;
@@ -172,6 +184,9 @@ impl SimulationEngine {
         world.diagnostics_nonzero_count = meta.diagnostics;
         world.phase_exec_counts = meta.phase_counts;
         world.field_steps_completed = meta.field_steps;
+        world
+            .run_phase(crate::phase::CanonicalPhaseId::InvariantAndNumericCheck)
+            .map_err(sim_error)?;
         let actual = world.authoritative_commit(commit.parent_commit_hash);
         if actual != commit || actual.state_root_hash != read.state_root {
             return Err(ERROR);
@@ -214,6 +229,22 @@ impl SimulationEngine {
             .read_to_end(&mut bytes)
             .map_err(|_| ERROR)?;
         let mut world = Self::decode_snapshot(&bytes)?;
+        let mut header = [0u8; rynvek_journal::JOURNAL_HEADER_LEN];
+        std::fs::File::open(journal)
+            .map_err(|_| ERROR)?
+            .read_exact(&mut header)
+            .map_err(|_| ERROR)?;
+        let h = rynvek_journal::JournalFileHeader::decode(&header)?;
+        if h.world_id != world.world_id
+            || h.base_tick != world.clock.tick
+            || h.base_revision != world.clock.world_revision
+            || h.snapshot_tick != world.clock.tick
+            || h.flags != 0
+            || header[10..12] != [0; 2]
+            || header[56..64] != [0; 8]
+        {
+            return Err(ERROR);
+        }
         let input = RecoveryInput {
             snapshot_path: Some(snapshot.to_owned()),
             journal_path: journal.to_owned(),
@@ -223,40 +254,41 @@ impl SimulationEngine {
         };
         let mut pending: Vec<PhysicsCommand> = Vec::new();
         let mut pending_tick = None;
-        let out = CrashRecoveryStateMachine::new().run_with_replayer(&input, |record| match record {
-            JournalRecord::CommandAccepted(c) => {
-                if c.faction_id != 0
-                    || c.tick != world.clock.tick + 1
-                    || c.world_revision != world.clock.world_revision + 1
-                    || c.command_bytes.len() > MAX_COMMANDS * 512
-                    || pending_tick.is_some()
-                {
-                    return Err(ERROR);
+        let out = CrashRecoveryStateMachine::new().run_with_bounded_replayer(&input, 32 * 1024 * 1024, |record| {
+            let next_tick = world.clock.tick.checked_add(1).ok_or(ERROR)?;
+            let next_revision = world.clock.world_revision.checked_add(1).ok_or(ERROR)?;
+            match record {
+                JournalRecord::CommandAccepted(c) => {
+                    if c.faction_id != 0
+                        || c.tick != next_tick
+                        || c.world_revision != next_revision
+                        || c.command_bytes.len() > MAX_COMMANDS * 512
+                        || pending_tick.is_some()
+                    {
+                        return Err(ERROR);
+                    }
+                    pending = serde_json::from_slice(&c.command_bytes).map_err(|_| ERROR)?;
+                    if pending.len() > MAX_COMMANDS {
+                        return Err(ERROR);
+                    }
+                    pending_tick = Some(c.tick);
+                    Ok(None)
                 }
-                pending = serde_json::from_slice(&c.command_bytes).map_err(|_| ERROR)?;
-                if pending.len() > MAX_COMMANDS {
-                    return Err(ERROR);
+                JournalRecord::TickCommit(c) => {
+                    if c.world_id != world.world_id || c.tick != next_tick || c.world_revision != next_revision {
+                        return Err(ERROR);
+                    }
+                    let parent = world.parent_commit_hash;
+                    world.tick_with_commands(&pending).map_err(sim_error)?;
+                    if world.authoritative_commit(parent) != *c {
+                        return Err(ERROR);
+                    }
+                    pending.clear();
+                    pending_tick = None;
+                    Ok(Some(world.parent_commit_hash))
                 }
-                pending_tick = Some(c.tick);
-                Ok(None)
+                _ => Err(ERROR),
             }
-            JournalRecord::TickCommit(c) => {
-                if c.world_id != world.world_id
-                    || c.tick != world.clock.tick + 1
-                    || c.world_revision != world.clock.world_revision + 1
-                {
-                    return Err(ERROR);
-                }
-                let parent = world.parent_commit_hash;
-                world.tick_with_commands(&pending).map_err(sim_error)?;
-                if world.authoritative_commit(parent) != *c {
-                    return Err(ERROR);
-                }
-                pending.clear();
-                pending_tick = None;
-                Ok(Some(world.parent_commit_hash))
-            }
-            _ => Err(ERROR),
         })?;
         // 尾部仅接受而未提交的命令不应用，保留原恢复器的撕裂写标志。
         Ok((world, out))

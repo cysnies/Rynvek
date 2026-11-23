@@ -185,7 +185,7 @@ pub enum EngineEvent {
     },
     PickResult {
         request_id: u32,
-        /// 被拾取实体的稠密索引；未命中为 `None`
+        /// 被拾取实体的持久单调序号（不是稠密槽位）；未命中为 `None`
         entity_serial: Option<u32>,
     },
     DeviceLost {

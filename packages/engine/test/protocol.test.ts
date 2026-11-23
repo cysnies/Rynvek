@@ -15,7 +15,7 @@ import {
 } from "../src/index.js";
 
 const fixture = JSON.parse(
-  readFileSync(new URL("../../../tests/engine/protocol_messages.json", import.meta.url), "utf8"),
+  readFileSync(new URL("../../../tests/engine/protocol_messages_v2.json", import.meta.url), "utf8"),
 ) as { commands: { type: string }[]; events: unknown[] };
 
 describe("跨语言协议夹具（与 rynvek-engine serde 对称）", () => {
