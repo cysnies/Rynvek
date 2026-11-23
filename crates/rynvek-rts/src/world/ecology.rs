@@ -27,6 +27,10 @@ pub struct RoleEnergyContract {
     pub secretion_cost_micro_per_field_raw: u32,
     /// 非脉冲模型每个隐藏神经元每子步的显式实验价格，0明确关闭。
     pub continuous_cost_micro_per_neuron_step: u32,
+    pub rule_cost_micro_per_gas: u32,
+    pub material_capacity_milli: u32,
+    pub material_growth_milli_per_tick: u32,
+    pub material_synthesis_micro_per_milli: u32,
     pub birth_synthesis_milli: u32,
     pub activity_reserve_milli: u32,
     pub natural_reproduction: bool,
@@ -39,6 +43,14 @@ impl RoleEnergyContract {
         }
         if self.replication_mutation_rate_permille > 1000 {
             return Err("复制突变率必须在0..=1000‰");
+        }
+        if self.natural_reproduction && self.material_capacity_milli == 1 {
+            return Err("自然复制至少需要2 milli材料容量以保留亲子完整材料量子");
+        }
+        if self.material_capacity_milli == 0
+            && (self.material_growth_milli_per_tick != 0 || self.material_synthesis_micro_per_milli != 0)
+        {
+            return Err("关闭材料容量时须显式关闭材料摄取与合成价");
         }
         self.reserve_q().ok_or("代谢预留超出精确表示范围")?;
         Ok(())
@@ -90,6 +102,7 @@ pub struct ActivityHeat {
     pub secretion_q: u64,
     pub synthesis_q: u64,
     pub continuous_q: u64,
+    pub rule_q: u64,
 }
 impl ActivityHeat {
     pub fn total_q(&self) -> u128 {
@@ -98,6 +111,7 @@ impl ActivityHeat {
             + u128::from(self.secretion_q)
             + u128::from(self.synthesis_q)
             + u128::from(self.continuous_q)
+            + u128::from(self.rule_q)
     }
     fn record(&mut self, kind: ActivityKind, q: u64) {
         let value = match kind {
@@ -120,6 +134,7 @@ pub(super) enum ActivityKind {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BodyEnergy {
+    pub material: super::material::MaterialAccount,
     pub activity: ActivityHeat,
     pub account: EnergyAccount,
     pub pending_spikes: u32,
@@ -130,6 +145,7 @@ pub struct BodyEnergy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemainsEnergy {
+    pub material: super::material::MaterialAccount,
     pub activity: ActivityHeat,
     pub cell: (u32, u32),
     pub account: EnergyAccount,
@@ -149,6 +165,7 @@ pub struct MitosisBirth {
     pub parent_genome: Blake3Hash,
     pub child_genome: Blake3Hash,
     pub allocated_q: u64,
+    pub allocated_material_u: u64,
     pub birth_contract: RoleEnergyContract,
 }
 
@@ -180,10 +197,17 @@ impl ArenaWorld {
         self.role_energy(u.kind, u.faction).is_some()
     }
     pub(super) fn can_perform_activity(&self, id: EntitySerial) -> bool {
-        self.units.get(&id).is_some_and(|u| u.defense.hp_milli > 0)
-            && !self.ecology.as_ref().and_then(|e| e.bodies.get(&id)).is_some_and(|b| {
-                self.has_neural_energy_budget(id) && b.account.received_q > 0 && b.account.stored_q == 0
-            })
+        self.units.get(&id).is_some_and(|u| {
+            u.defense.hp_milli > 0
+                && self.role_energy(u.kind, u.faction).is_none_or(|r| {
+                    r.material_capacity_milli == 0
+                        || self.ecology.as_ref().expect("有角色账").bodies[&id].material.stored_u > 0
+                })
+        }) && !self
+            .ecology
+            .as_ref()
+            .and_then(|e| e.bodies.get(&id))
+            .is_some_and(|b| self.has_neural_energy_budget(id) && b.account.received_q > 0 && b.account.stored_q == 0)
     }
     pub(super) fn activity_price_q(&self, id: EntitySerial, kind: ActivityKind) -> u64 {
         let u = &self.units[&id];
@@ -328,12 +352,20 @@ impl ArenaWorld {
         let ids: Vec<_> = self.units.keys().copied().collect();
         for id in ids {
             let u = &self.units[&id];
-            if u.kind == UnitKind::Forager || u.defense.hp_milli <= 0 {
+            if u.defense.hp_milli <= 0 {
                 continue;
             }
             let Some(role) = self.role_energy(u.kind, u.faction) else {
                 continue;
             };
+            // 启用结构模型的初始采集者需要一次真实源池施工供能，不能零结构零能量永远卡死。
+            // 一旦已收过能量就不再自动补给；自然子代已有亲本转账，继续靠真实局部摄食。
+            if u.kind == UnitKind::Forager
+                && (role.material_capacity_milli == 0
+                    || self.ecology.as_ref().expect("有角色账").bodies[&id].account.received_q > 0)
+            {
+                continue;
+            }
             let faction = u.faction;
             let reserve = self
                 .maintenance_q(id, role)
@@ -390,7 +422,7 @@ impl ArenaWorld {
                 self.config.mode == super::MatchMode::PveSurvival
                     && e.bodies.keys().eq(self.units.keys())
                     && e.bodies.iter().all(|(id, b)| {
-                        b.account.is_conserved() && b.activity.total_q() <= u128::from(b.account.dissipated_q)
+                        b.material.is_conserved() && b.account.is_conserved() && b.activity.total_q() <= u128::from(b.account.dissipated_q)
                             && b.account.returned_q == 0
                             // 稳定权威边界必须已退役耗尽的激活个体，不能存成活体等待新食物复活。
                             && (!self.has_neural_energy_budget(*id)
@@ -417,6 +449,7 @@ impl ArenaWorld {
                     && e.remains.iter().all(|(id, r)| {
                         !self.units.contains_key(id)
                             && id.0 < self.next_serial
+                            && r.material.is_conserved()
                             && r.account.is_conserved()
                             && r.activity.total_q() <= u128::from(r.account.dissipated_q)
                             && r.cell.0 < self.map.width
@@ -544,6 +577,10 @@ mod role_energy_tests {
             natural_reproduction: false,
             attack_cost_micro_per_shot: 0,
             repair_cost_micro_per_milli: 0,
+            rule_cost_micro_per_gas: 0,
+            material_capacity_milli: 0,
+            material_growth_milli_per_tick: 0,
+            material_synthesis_micro_per_milli: 0,
             continuous_cost_micro_per_neuron_step: 0,
             secretion_cost_micro_per_field_raw: 0,
             birth_synthesis_milli: 0,

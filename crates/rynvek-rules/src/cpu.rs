@@ -68,6 +68,8 @@ pub struct RuleTickOutput {
     /// `5 × 实体数` 的 Q8.8 场沉积
     pub field_deposits: Vec<i64>,
     pub gas_used: u64,
+    /// 每个实体实际执行的Gas，供宿主原子计价；不是静态估计。
+    pub entity_gas: Vec<u64>,
 }
 
 fn dim_error(msg: &str) -> RuleError {
@@ -123,7 +125,9 @@ pub fn execute_rule_tick(
     let mut gas = 0u64;
     let mut values = vec![0i64; instrs.len()];
 
+    let mut entity_gas = Vec::with_capacity(count);
     for e in 0..count {
+        let before = gas;
         run_entity(
             &instrs,
             program,
@@ -135,11 +139,13 @@ pub fn execute_rule_tick(
             &mut gas,
             gas_budget,
         )?;
+        entity_gas.push(gas - before);
     }
     Ok(RuleTickOutput {
         components: out_components,
         field_deposits: deposits,
         gas_used: gas,
+        entity_gas,
     })
 }
 

@@ -19,6 +19,10 @@ fn fixture(kind: UnitKind, remaining_q: u64) -> (ArenaWorld, EntitySerial, Entit
         replication_mutation_rate_permille: 0,
         attack_cost_micro_per_shot: 0,
         repair_cost_micro_per_milli: 0,
+        rule_cost_micro_per_gas: 0,
+        material_capacity_milli: 0,
+        material_growth_milli_per_tick: 0,
+        material_synthesis_micro_per_milli: 0,
         continuous_cost_micro_per_neuron_step: 0,
         secretion_cost_micro_per_field_raw: 0,
         birth_synthesis_milli: 0,
@@ -343,4 +347,265 @@ fn life_cost_emit_consumes_real_brain_readout_and_world_field() {
         w.ecology.as_ref().unwrap().bodies[&s].activity.secretion_q,
         emitted as u64 * 8
     );
+}
+
+fn material_fixture() -> (ArenaWorld, EntitySerial) {
+    let (mut w, s, _) = fixture(UnitKind::Striker, 1_000_000);
+    let others: Vec<_> = w.units.keys().copied().filter(|id| *id != s).collect();
+    for id in others {
+        w.retire_dead_unit(id);
+    }
+    let r = w
+        .config
+        .ecology
+        .as_mut()
+        .unwrap()
+        .roles
+        .get_mut(&UnitKind::Striker)
+        .unwrap();
+    r.material_capacity_milli = 8;
+    r.material_growth_milli_per_tick = 5;
+    r.material_synthesis_micro_per_milli = 3;
+    r.birth_energy_milli = 1;
+    (w, s)
+}
+#[test]
+fn material_growth_uses_real_source_and_synthesis_energy_and_collision_size() {
+    let (mut w, s) = material_fixture();
+    let source = w.faction(OWNER).unwrap().ledger.balance.biomass;
+    let account = w.ecology.as_ref().unwrap().bodies[&s].account.clone();
+    let radius = w.unit_radius(s);
+    assert_eq!(radius, rynvek_core::Q32_32::ZERO);
+    let position = w.units[&s].position;
+    w.units.get_mut(&s).unwrap().actions[0] = 256;
+    w.step_movement();
+    assert_eq!(w.units[&s].position, position, "零材料不能免费移动");
+    w.step_material_growth();
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&s].material.stored_u, 5 * 256);
+    assert!(w.unit_radius(s) > radius);
+    w.step_material_growth();
+    assert_eq!(source - w.faction(OWNER).unwrap().ledger.balance.biomass, 8);
+    let b = &w.ecology.as_ref().unwrap().bodies[&s];
+    assert_eq!(
+        (b.material.received_u, b.material.stored_u, b.material.external_u),
+        (2048, 2048, 2048)
+    );
+    assert!(b.material.is_conserved());
+    assert_eq!(b.account.stored_q, account.stored_q - 96);
+    assert_eq!(b.activity.synthesis_q, 96);
+    assert_eq!(
+        w.unit_radius_milli(s),
+        crate::units::unit_spec(UnitKind::Striker).radius_milli
+    );
+    assert_eq!(w.observe(OWNER).unwrap().units[0].radius_milli, w.unit_radius_milli(s));
+    let before = w.canonical_state();
+    w.step_material_growth();
+    assert_eq!(w.canonical_state(), before, "满体量不再取源或收费");
+    // 欠能量、缺材料来源、死源均不能先取后退或凭空长大。
+    for mode in 0..3 {
+        let (mut w, s) = material_fixture();
+        if mode == 0 {
+            let a = &mut w.ecology.as_mut().unwrap().bodies.get_mut(&s).unwrap().account;
+            a.dissipate_q(a.stored_q - 11);
+        }
+        if mode == 1 {
+            w.faction_mut(OWNER).unwrap().ledger.balance.biomass = 0;
+        }
+        if mode == 2 {
+            w.units.get_mut(&s).unwrap().defense.hp_milli = 0;
+        }
+        let before = w.canonical_state();
+        w.step_material_growth();
+        assert_eq!(w.canonical_state(), before);
+    }
+}
+#[test]
+fn material_mitosis_preserves_real_structure_and_death_returns_no_duplicated_mass() {
+    let (mut w, s) = material_fixture();
+    w.insert_building(OWNER, BuildingKind::SpawningVat, (70, 70), true);
+    w.config
+        .ecology
+        .as_mut()
+        .unwrap()
+        .roles
+        .get_mut(&UnitKind::Striker)
+        .unwrap()
+        .natural_reproduction = true;
+    let mut occupied = w.units.values().map(|u| u.tile()).collect();
+    let before = w.canonical_state();
+    w.try_mitosis(s, 0, &mut occupied);
+    assert_eq!(w.canonical_state(), before, "未长成拒绝分裂");
+    w.step_material_growth();
+    w.step_material_growth();
+    w.try_mitosis(s, 0, &mut occupied);
+    let child = *w.ecology.as_ref().unwrap().births.keys().next().unwrap();
+    let e = w.ecology.as_ref().unwrap();
+    assert_eq!(e.births[&child].allocated_material_u, 1024);
+    assert_eq!(
+        (e.bodies[&s].material.stored_u, e.bodies[&child].material.stored_u),
+        (1024, 1024)
+    );
+    assert!(w.validate_ecology());
+    let before = w.canonical_state();
+    w.try_mitosis(s, 0, &mut occupied);
+    assert_eq!(w.canonical_state(), before, "半体量不可免费复制");
+    for id in [s, child] {
+        w.retire_dead_unit(id);
+    }
+    for r in w.ecology.as_ref().unwrap().remains.values() {
+        let (x, y) = r.cell;
+        w.fields.set(FieldId::Nutrient, x, y, i16::MAX);
+    }
+    let before = w.canonical_state();
+    w.step_material_returns();
+    assert_eq!(w.canonical_state(), before, "满场保留遗骸全部材料");
+    for r in w.ecology.as_ref().unwrap().remains.values() {
+        let (x, y) = r.cell;
+        w.fields.set(FieldId::Nutrient, x, y, 0);
+    }
+    w.step_material_returns();
+    let e = w.ecology.as_ref().unwrap();
+    let material: Vec<_> = [s, child].map(|id| &e.remains[&id].material).into();
+    assert_eq!(material.iter().map(|m| m.returned_u).sum::<u64>(), 2000);
+    assert_eq!(material.iter().map(|m| m.stored_u).sum::<u64>(), 48);
+    assert!(material.iter().all(|m| m.is_conserved()));
+    assert!(w.validate_ecology());
+    let runtime = ArenaRuntime::new([43; 16], w);
+    let cp = runtime.checkpoint().unwrap();
+    let restored = ArenaRuntime::restore([43; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
+    assert_eq!(runtime.world().canonical_state(), restored.world().canonical_state());
+    let (mut odd, s) = material_fixture();
+    odd.insert_building(OWNER, BuildingKind::SpawningVat, (70, 70), true);
+    let r = odd
+        .config
+        .ecology
+        .as_mut()
+        .unwrap()
+        .roles
+        .get_mut(&UnitKind::Striker)
+        .unwrap();
+    r.material_capacity_milli = 3;
+    r.material_growth_milli_per_tick = 3;
+    r.natural_reproduction = true;
+    odd.step_material_growth();
+    let mut occupied = odd.units.values().map(|u| u.tile()).collect();
+    odd.try_mitosis(s, 0, &mut occupied);
+    let child = *odd.ecology.as_ref().unwrap().births.keys().next().unwrap();
+    assert_eq!(odd.ecology.as_ref().unwrap().bodies[&s].material.stored_u, 512);
+    assert_eq!(odd.ecology.as_ref().unwrap().bodies[&child].material.stored_u, 256);
+    odd.step_material_growth();
+    assert_eq!(odd.ecology.as_ref().unwrap().bodies[&s].material.stored_u, 768);
+    assert_eq!(odd.ecology.as_ref().unwrap().bodies[&child].material.stored_u, 768);
+    assert!(odd.validate_ecology());
+}
+#[test]
+fn material_real_tick_and_torn_wal_recover_exact_source_mass_and_heat() {
+    let (mut w, s) = material_fixture();
+    w.units.get_mut(&s).unwrap().actions = [0, 0, -256, 0, 0, 0];
+    let dir = tempfile::TempDir::new().unwrap();
+    let snap = dir.path().join("material.rsnap");
+    let log = dir.path().join("material.wal");
+    let id = [43; 16];
+    let output = w.save_snapshot(&snap, id, 1, [0; 32]).unwrap();
+    let mut parent = output.state_root;
+    let mut writer = JournalWriter::create(&log, id, w.tick, 1, w.tick).unwrap();
+    w.step_with_journal(&mut writer, id, 2, &mut parent).unwrap();
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&s].material.stored_u, 1280);
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&s].activity.synthesis_q, 60);
+    writer.append_torn_bytes(&[0xff]).unwrap();
+    let (restored, out) = ArenaWorld::recover_from_snapshot_and_journal(&snap, &log, id).unwrap();
+    assert!(out.torn_write_detected);
+    assert_eq!(restored.canonical_state(), w.canonical_state());
+}
+
+#[test]
+fn rule_actual_entity_gas_is_paid_atomically_with_all_action_writes() {
+    use super::authoring::{AuthoredRule, compile_action_rule};
+    let (mut w, s) = material_fixture();
+    w.step_material_growth();
+    w.config
+        .ecology
+        .as_mut()
+        .unwrap()
+        .roles
+        .get_mut(&UnitKind::Striker)
+        .unwrap()
+        .rule_cost_micro_per_gas = 2;
+    let source=serde_json::json!({"format":"rynvek.rule-graph.v1","name":"实付动作","writes":[{"component":"unit.actions.move_x","ty":"Q8_8"}],"nodes":[{"op":"ConstQ8_8","imm":"128"},{"op":"EmitComponentWrite","component":"unit.actions.move_x","args":[0]}]}).to_string();
+    let module = compile_action_rule(&source).unwrap();
+    let input = rynvek_rules::RuleWorldState {
+        tick: w.tick,
+        world_seed: w.config.world_seed,
+        entity_serials: vec![u64::from(s.0)],
+        components: vec![vec![0]],
+        ..Default::default()
+    };
+    let output =
+        rynvek_rules::execute_rule_tick(&rynvek_rules::emit_cpu_simd_bytecode(&module), &input, u64::MAX).unwrap();
+    assert_eq!(output.entity_gas, vec![output.gas_used]);
+    let price = output.gas_used * 8;
+    w.authoring.rules.insert(
+        "owner.paid".into(),
+        AuthoredRule {
+            rule_graph_json: source,
+            compiled_rir_blake3: *blake3::hash(&rynvek_rules::encode_rir(&module)).as_bytes(),
+            rir: rynvek_rules::encode_rir(&module),
+        },
+    );
+    let original = w.ecology.as_ref().unwrap().bodies[&s].account.clone();
+    w.authoring
+        .rules
+        .insert("owner.second".into(), w.authoring.rules["owner.paid"].clone());
+    let actions = w.units[&s].actions;
+    w.step_authored_rules_budgeted(output.gas_used * 2 - 1);
+    assert!(w.authoring.rule_fault.is_some(), "所有模块共享预算，不逐模块重置");
+    assert_eq!(w.units[&s].actions, actions);
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&s].account, original);
+    w.authoring.rules.remove("owner.second");
+    w.step_authored_rules();
+    assert_eq!(w.units[&s].actions[0], 128);
+    assert_eq!(
+        w.ecology.as_ref().unwrap().bodies[&s].account.stored_q,
+        original.stored_q - price
+    );
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&s].activity.rule_q, price);
+    let b = &mut w.ecology.as_mut().unwrap().bodies.get_mut(&s).unwrap().account;
+    b.dissipate_q(b.stored_q - (price - 1));
+    w.units.get_mut(&s).unwrap().actions[0] = -90;
+    let original = w.ecology.as_ref().unwrap().bodies[&s].clone();
+    w.step_authored_rules();
+    assert_eq!(w.units[&s].actions[0], -90);
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&s], original);
+    assert_eq!(w.authoring.rule_fault.as_ref().unwrap().0, "owner.paid");
+    let runtime = ArenaRuntime::new([43; 16], w);
+    let cp = runtime.checkpoint().unwrap();
+    let restored = ArenaRuntime::restore([43; 16], cp.revision, cp.state_root, &cp.bytes).unwrap();
+    assert_eq!(restored.world().canonical_state(), runtime.world().canonical_state());
+}
+
+#[test]
+fn material_forager_construction_bootstrap_is_real_source_and_never_refunds_starvation() {
+    let (mut w, _) = material_fixture();
+    let role = w.config.ecology.as_ref().unwrap().roles[&UnitKind::Striker];
+    w.config.ecology.as_mut().unwrap().roles.insert(UnitKind::Forager, role);
+    let id = w.spawn_unit(
+        OWNER,
+        UnitKind::Forager,
+        Genome::seed(UnitKind::Forager),
+        Vec2::tile_center(45, 45),
+    );
+    let source = w.faction(OWNER).unwrap().ledger.balance.biomass;
+    w.step_role_supply();
+    assert_eq!(source - w.faction(OWNER).unwrap().ledger.balance.biomass, 11);
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&id].account.received_q, 44_000);
+    w.step_material_growth();
+    assert!(w.unit_radius_milli(id) > 0);
+    let a = &mut w.ecology.as_mut().unwrap().bodies.get_mut(&id).unwrap().account;
+    a.dissipate_q(a.stored_q);
+    let source = w.faction(OWNER).unwrap().ledger.balance.biomass;
+    w.step_role_supply();
+    assert_eq!(source, w.faction(OWNER).unwrap().ledger.balance.biomass);
+    assert_eq!(w.ecology.as_ref().unwrap().bodies[&id].account.stored_q, 0);
+    w.retire_activity_exhausted();
+    assert!(!w.units.contains_key(&id));
 }

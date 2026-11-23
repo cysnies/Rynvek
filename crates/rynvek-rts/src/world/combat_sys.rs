@@ -180,7 +180,7 @@ impl ArenaWorld {
                 if u.defense.hp_milli <= 0 {
                     return;
                 }
-                let (point, extra) = (u.position, u.radius());
+                let (point, extra) = (u.position, self.unit_radius(u.id));
                 let reach = range.saturating_add(extra);
                 let d2 = s.position.distance_sq(point);
                 if d2 > reach.mul(reach) {
@@ -454,6 +454,7 @@ impl ArenaWorld {
                     cell: (x.min(self.map.width - 1), y.min(self.map.height - 1)),
                     account,
                     activity: body.activity,
+                    material: body.material,
                 },
             );
         }

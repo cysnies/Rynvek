@@ -19,8 +19,10 @@ impl ArenaWorld {
     /// 出生历史与双向转账必须一一闭合；私有快照不能丢谱系却仍保留亲本转出。
     pub(super) fn validate_mitosis_accounts(&self, ecology: &EcologyState) -> bool {
         let mut synthesis = std::collections::BTreeMap::<EntitySerial, u128>::new();
+        let mut materials = std::collections::BTreeMap::<EntitySerial, u128>::new();
         let mut allocations = std::collections::BTreeMap::<EntitySerial, u128>::new();
         for (child, birth) in &ecology.births {
+            *materials.entry(birth.parent).or_default() += u128::from(birth.allocated_material_u);
             *allocations.entry(birth.parent).or_default() += u128::from(birth.allocated_q);
             *synthesis.entry(birth.parent).or_default() += u128::from(birth.birth_contract.synthesis_q());
             let account = ecology
@@ -49,6 +51,8 @@ impl ArenaWorld {
                 || !birth.birth_contract.natural_reproduction
                 || birth.birth_contract.validate().is_err()
                 || birth.allocated_q != birth.birth_contract.birth_q()
+                || birth.allocated_material_u % 256 != 0
+                || birth.allocated_material_u < u64::from(birth.birth_contract.material_capacity_milli / 2) * 256
                 || birth.faction.is_wild()
                 || self.faction(birth.faction).is_none()
                 || birth.slug.is_empty()
@@ -71,6 +75,19 @@ impl ArenaWorld {
             .map(|(id, b)| (id, &b.activity))
             .chain(ecology.remains.iter().map(|(id, r)| (id, &r.activity)))
             .all(|(id, h)| u128::from(h.synthesis_q) >= synthesis.get(id).copied().unwrap_or(0))
+        {
+            return false;
+        }
+        if !ecology
+            .bodies
+            .iter()
+            .map(|(id, b)| (id, &b.material))
+            .chain(ecology.remains.iter().map(|(id, r)| (id, &r.material)))
+            .all(|(id, m)| {
+                m.is_conserved()
+                    && u128::from(m.transferred_u) == materials.get(id).copied().unwrap_or(0)
+                    && m.received_u - m.external_u == ecology.births.get(id).map_or(0, |b| b.allocated_material_u)
+            })
         {
             return false;
         }
@@ -100,6 +117,15 @@ impl ArenaWorld {
             || unit.defense.hp_milli < 2
             || self.ecology.as_ref().expect("已检查").bodies[&parent].account.stored_q < required_q
         {
+            return;
+        }
+        let material = &self.ecology.as_ref().expect("已检查").bodies[&parent].material;
+        if material.stored_u < u64::from(contract.material_capacity_milli) * 256 {
+            return;
+        }
+        // 来源最小粒度为完整milli；奇数余料留亲本，避免子代半milli永远无法长满。
+        let allocated_material_u = (material.stored_u / 256 / 2) * 256;
+        if contract.material_capacity_milli > 0 && allocated_material_u == 0 {
             return;
         }
         let (used, cap) = self.supply(unit.faction);
@@ -163,6 +189,12 @@ impl ArenaWorld {
         unit.defense.shield_milli = shield;
         let ecology = self.ecology.as_mut().expect("已检查");
         ecology.bodies.get_mut(&child).expect("共享出生建账").account = account;
+        let m = &mut ecology.bodies.get_mut(&parent).expect("亲本").material;
+        m.stored_u -= allocated_material_u;
+        m.transferred_u = m.transferred_u.checked_add(allocated_material_u).expect("不超过收入");
+        let m = &mut ecology.bodies.get_mut(&child).expect("共享出生建账").material;
+        m.received_u = allocated_material_u;
+        m.stored_u = allocated_material_u;
         ecology.births.insert(
             child,
             MitosisBirth {
@@ -176,6 +208,7 @@ impl ArenaWorld {
                 parent_genome,
                 child_genome,
                 allocated_q,
+                allocated_material_u,
                 birth_contract: contract,
             },
         );

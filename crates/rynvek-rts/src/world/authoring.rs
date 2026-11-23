@@ -133,11 +133,19 @@ impl AuthoringState {
 }
 impl ArenaWorld {
     pub(super) fn step_authored_rules(&mut self) {
-        self.step_parameter_rules();
+        self.step_authored_rules_budgeted(DEFAULT_TICK_GAS_BUDGET);
+    }
+    pub(super) fn step_authored_rules_budgeted(&mut self, gas_budget: u64) {
+        let mut remaining = gas_budget;
+        self.step_parameter_rules(&mut remaining);
+        if self.parameter_state.fault.is_some() {
+            return; // 失败的参数候选已用过预算，不允许后续动作规则重新使用该份额度。
+        }
         if self.authoring.rules.is_empty() {
             return;
         }
         let ids: Vec<_> = self.units.keys().copied().collect();
+        let mut prices = vec![0u64; ids.len()];
         let mut actions: Vec<_> = ids.iter().map(|id| self.units[id].actions).collect();
         for (id, rule) in &self.authoring.rules {
             let result = (|| {
@@ -162,8 +170,31 @@ impl ArenaWorld {
                         .collect(),
                     ..Default::default()
                 };
-                let out = execute_rule_tick(&emit_cpu_simd_bytecode(&module), &state, DEFAULT_TICK_GAS_BUDGET)
-                    .map_err(|e| e.code)?;
+                let out = execute_rule_tick(&emit_cpu_simd_bytecode(&module), &state, remaining).map_err(|e| e.code)?;
+                remaining = remaining
+                    .checked_sub(out.gas_used)
+                    .ok_or(RynvekErrorCode::SandboxGasBudgetExhausted)?;
+                for (e, serial) in ids.iter().enumerate() {
+                    let u = &self.units[serial];
+                    let price = self
+                        .role_energy(u.kind, u.faction)
+                        .map_or(0, |r| u64::from(r.rule_cost_micro_per_gas) * 4);
+                    let q = out.entity_gas[e]
+                        .checked_mul(price)
+                        .ok_or(RynvekErrorCode::SandboxGasBudgetExhausted)?;
+                    prices[e] = prices[e]
+                        .checked_add(q)
+                        .ok_or(RynvekErrorCode::SandboxGasBudgetExhausted)?;
+                    if prices[e] > 0
+                        && (!self.can_perform_activity(*serial)
+                            || self.ecology.as_ref().expect("收费角色有账").bodies[serial]
+                                .account
+                                .stored_q
+                                < prices[e])
+                    {
+                        return Err(RynvekErrorCode::SandboxGasBudgetExhausted);
+                    }
+                }
                 for (slot, c) in module.components.iter().enumerate().filter(|(_, c)| c.write) {
                     let a = ACTION_COMPONENTS.iter().position(|n| *n == c.name).unwrap();
                     for (e, v) in out.components[slot].iter().enumerate() {
@@ -175,6 +206,20 @@ impl ArenaWorld {
             if let Err(code) = result {
                 self.authoring.rule_fault = Some((id.clone(), code as u16));
                 return;
+            }
+        }
+        // 整个动作规则集合与所有身体费用一起提交；任何欠费保留原脑动作/原账户。
+        for (id, q) in ids.iter().zip(prices) {
+            if q > 0 {
+                let b = self
+                    .ecology
+                    .as_mut()
+                    .expect("收费角色有账")
+                    .bodies
+                    .get_mut(id)
+                    .expect("活体");
+                assert!(b.account.try_dissipate_q(q));
+                b.activity.rule_q = b.activity.rule_q.checked_add(q).expect("子账不超过总热耗");
             }
         }
         for (id, a) in ids.into_iter().zip(actions) {

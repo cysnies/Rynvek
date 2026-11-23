@@ -241,13 +241,12 @@ pub fn apply_registry_param(
     Err(RynvekErrorCode::PluginCapabilityDenied)
 }
 impl ArenaWorld {
-    pub(super) fn step_parameter_rules(&mut self) {
+    pub(super) fn step_parameter_rules(&mut self, remaining: &mut u64) {
         if self.authoring.rule_bindings.is_empty() {
             self.parameter_state.fault = None;
             return;
         }
         let mut staged = self.parameter_state.clone();
-        let mut remaining = DEFAULT_TICK_GAS_BUDGET;
         for (id, b) in &self.authoring.rule_bindings {
             let result = (|| {
                 let module = rynvek_rules::decode_rir(&self.authoring.rules[&b.module_id].rir).map_err(|e| e.code)?;
@@ -290,9 +289,9 @@ impl ArenaWorld {
                     ..Default::default()
                 };
                 let out =
-                    rynvek_rules::execute_rule_tick(&rynvek_rules::emit_cpu_simd_bytecode(&module), &input, remaining)
+                    rynvek_rules::execute_rule_tick(&rynvek_rules::emit_cpu_simd_bytecode(&module), &input, *remaining)
                         .map_err(|e| e.code)?;
-                remaining = remaining.checked_sub(out.gas_used).ok_or(INVALID)?;
+                *remaining = remaining.checked_sub(out.gas_used).ok_or(INVALID)?;
                 for (slot, c) in module.components.iter().enumerate().filter(|(_, c)| c.write) {
                     for (e, id) in ids.iter().enumerate() {
                         let v = out.components[slot][e];

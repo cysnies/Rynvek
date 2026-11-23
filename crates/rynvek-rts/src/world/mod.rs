@@ -1248,6 +1248,7 @@ impl ArenaWorld {
         self.step_authored_rules();
         self.step_movement();
         self.step_harvest();
+        self.step_material_growth();
         self.step_metabolism();
         self.step_combat();
         self.step_signal_emission();
@@ -1255,6 +1256,7 @@ impl ArenaWorld {
         self.retire_activity_exhausted();
         self.step_deaths();
         self.step_ecology_returns();
+        self.step_material_returns();
         self.tick += 1;
         if self.tick % FOG_UPDATE_INTERVAL_TICKS == 0 {
             self.update_fog();
@@ -1328,7 +1330,7 @@ impl ArenaWorld {
         let config_root = {
             let mut h = Hasher::new();
             // 当前格式绑定整个配置，删除历史模式共用标签与二次身份来源。
-            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_12");
+            h.update(b"RYNVEK_ARENA_CONFIG_CURRENT_13");
             h.update(&serde_json::to_vec(&self.config).expect("配置仅含确定性枚举和整数"));
             h.update(&serde_json::to_vec(&self.authoring).expect("有序创作规则"));
             h.update(&self.map.width.to_le_bytes());
@@ -1621,3 +1623,5 @@ impl ArenaWorld {
 
 #[cfg(test)]
 mod life_cost_tests;
+
+pub mod material;

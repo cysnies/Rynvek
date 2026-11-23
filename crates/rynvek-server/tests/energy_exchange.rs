@@ -36,6 +36,10 @@ async fn automatic_local_uptake_uses_real_actor_permissions_private_state_and_wa
             natural_reproduction: true,
             attack_cost_micro_per_shot: 0,
             repair_cost_micro_per_milli: 0,
+            rule_cost_micro_per_gas: 0,
+            material_capacity_milli: 0,
+            material_growth_milli_per_tick: 0,
+            material_synthesis_micro_per_milli: 0,
             continuous_cost_micro_per_neuron_step: 0,
             secretion_cost_micro_per_field_raw: 0,
             birth_synthesis_milli: 0,
@@ -60,6 +64,10 @@ async fn explicit_basal_survival_contract_really_kills_fed_foragers_in_actor_and
             natural_reproduction: true,
             attack_cost_micro_per_shot: 0,
             repair_cost_micro_per_milli: 0,
+            rule_cost_micro_per_gas: 0,
+            material_capacity_milli: 0,
+            material_growth_milli_per_tick: 0,
+            material_synthesis_micro_per_milli: 0,
             continuous_cost_micro_per_neuron_step: 0,
             secretion_cost_micro_per_field_raw: 0,
             birth_synthesis_milli: 0,
@@ -389,6 +397,10 @@ fn automatic_first_feeding_survives_serialized_tick_wal() {
             natural_reproduction: true,
             attack_cost_micro_per_shot: 0,
             repair_cost_micro_per_milli: 0,
+            rule_cost_micro_per_gas: 0,
+            material_capacity_milli: 0,
+            material_growth_milli_per_tick: 0,
+            material_synthesis_micro_per_milli: 0,
             continuous_cost_micro_per_neuron_step: 0,
             secretion_cost_micro_per_field_raw: 0,
             birth_synthesis_milli: 0,
@@ -454,7 +466,7 @@ async fn survival_contract_cannot_sneak_into_legacy_or_invalid_worlds() {
     let base = server.base_url();
     let owner = register(&base, "survival-validation", "human", 105).await;
     let url = format!("{base}/api/v1/worlds");
-    let params = json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}});
+    let params = json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":0,"material_growth_milli_per_tick":0,"material_synthesis_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}});
     for ecology in [serde_json::Value::Null, json!("energy_exchange_v1")] {
         let res = client::send_json(
             "POST",
@@ -467,11 +479,11 @@ async fn survival_contract_cannot_sneak_into_legacy_or_invalid_worlds() {
         assert_eq!(res.status, 400);
     }
     for bad in [
-        json!({"roles":{"unit.forager":{"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
-        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":0,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
-        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":u32::MAX,"reserve_ticks":u32::MAX,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
-        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
-        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":0,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
+        json!({"roles":{"unit.forager":{"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":0,"material_growth_milli_per_tick":0,"material_synthesis_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
+        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":0,"reserve_ticks":4,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":0,"material_growth_milli_per_tick":0,"material_synthesis_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
+        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":u32::MAX,"reserve_ticks":u32::MAX,"birth_energy_milli":1000,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":0,"material_growth_milli_per_tick":0,"material_synthesis_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
+        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":0,"material_growth_milli_per_tick":0,"material_synthesis_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
+        json!({"roles":{"unit.forager":{"basal_cost_micro_per_tick":1000,"reserve_ticks":4,"birth_energy_milli":0,"movement_cost_micro_per_tile":0,"synapse_maintenance_micro_per_tick":0,"natural_reproduction":true,"attack_cost_micro_per_shot":0,"repair_cost_micro_per_milli":0,"rule_cost_micro_per_gas":0,"material_capacity_milli":0,"material_growth_milli_per_tick":0,"material_synthesis_micro_per_milli":0,"continuous_cost_micro_per_neuron_step":0,"secretion_cost_micro_per_field_raw":0,"birth_synthesis_milli":0,"activity_reserve_milli":0,"replication_mutation_rate_permille":50}}}),
     ] {
         let res = client::send_json(
             "POST",

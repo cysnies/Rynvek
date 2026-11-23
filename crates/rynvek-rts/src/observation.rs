@@ -20,6 +20,7 @@ use crate::world::{ArenaWorld, MatchOutcome};
 /// 单位视图
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UnitView {
+    pub radius_milli: i64,
     pub id: EntitySerial,
     pub faction: FactionId,
     pub kind: UnitKind,
@@ -178,6 +179,7 @@ impl ArenaWorld {
             .map(|u| {
                 let own = u.faction == viewer;
                 UnitView {
+                    radius_milli: self.unit_radius_milli(u.id),
                     id: u.id,
                     faction: u.faction,
                     kind: u.kind,

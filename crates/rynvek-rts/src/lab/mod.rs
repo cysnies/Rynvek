@@ -312,6 +312,12 @@ pub struct EnergyRow {
     pub secretion_q: u128,
     pub synthesis_q: u128,
     pub continuous_q: u128,
+    pub rule_q: u128,
+    pub material_received_u: u128,
+    pub material_external_u: u128,
+    pub material_stored_u: u128,
+    pub material_transferred_u: u128,
+    pub material_returned_u: u128,
 }
 
 /// 一个实验的全部结果
@@ -591,6 +597,18 @@ fn sample_energy(world: &ArenaWorld, run: u32, root: [u8; 32]) -> EnergyRow {
         row.remains = e.remains.len() as u32;
         row.natural_births = e.births.len() as u32;
         row.max_generation = e.births.values().map(|b| b.generation).max().unwrap_or(0);
+        for m in e
+            .bodies
+            .values()
+            .map(|b| &b.material)
+            .chain(e.remains.values().map(|r| &r.material))
+        {
+            row.material_received_u += u128::from(m.received_u);
+            row.material_external_u += u128::from(m.external_u);
+            row.material_stored_u += u128::from(m.stored_u);
+            row.material_transferred_u += u128::from(m.transferred_u);
+            row.material_returned_u += u128::from(m.returned_u);
+        }
         for h in e
             .bodies
             .values()
@@ -602,6 +620,7 @@ fn sample_energy(world: &ArenaWorld, run: u32, root: [u8; 32]) -> EnergyRow {
             row.secretion_q += u128::from(h.secretion_q);
             row.synthesis_q += u128::from(h.synthesis_q);
             row.continuous_q += u128::from(h.continuous_q);
+            row.rule_q += u128::from(h.rule_q);
         }
         for a in e
             .bodies

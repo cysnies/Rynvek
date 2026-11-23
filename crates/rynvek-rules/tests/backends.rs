@@ -199,6 +199,8 @@ fn cpu_backend_matches_independent_fixed_point_oracle() {
     assert_eq!(out.field_deposits, deposits);
     // 循环无提前退出，静态 Gas 估算与实测精确相等
     assert_eq!(out.gas_used, m.gas_estimate * w.entity_serials.len() as u64);
+    assert_eq!(out.entity_gas, vec![m.gas_estimate; w.entity_serials.len()]);
+    assert_eq!(out.entity_gas.iter().sum::<u64>(), out.gas_used);
     // 确定性：同输入同输出
     assert_eq!(execute_rule_tick(&program, &w, u64::MAX).unwrap(), out);
 }

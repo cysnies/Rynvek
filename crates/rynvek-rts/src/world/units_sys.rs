@@ -421,7 +421,7 @@ impl ArenaWorld {
                 id: u.id.0,
                 position: u.position,
                 velocity: u.velocity,
-                radius: u.radius(),
+                radius: self.unit_radius(u.id),
             };
             buckets
                 .entry(((u.position.x.0 >> 32) / BUCKET, (u.position.y.0 >> 32) / BUCKET))
@@ -436,7 +436,7 @@ impl ArenaWorld {
                 id: u.id.0,
                 position: u.position,
                 velocity: u.velocity,
-                radius: u.radius(),
+                radius: self.unit_radius(u.id),
             };
             let (bx, by) = ((u.position.x.0 >> 32) / BUCKET, (u.position.y.0 >> 32) / BUCKET);
             let mut neigh = Vec::new();
@@ -461,6 +461,10 @@ impl ArenaWorld {
         }
         // 3) 积分 + 墙体滑移
         for (id, v) in new_vel {
+            if !self.can_perform_activity(id) {
+                self.units.get_mut(&id).expect("活体").velocity = Vec2::ZERO;
+                continue;
+            }
             let u = &self.units[&id];
             let p = u.position;
             let try_pos = |q: Vec2| -> bool {
