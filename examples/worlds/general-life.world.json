@@ -1,0 +1,38 @@
+{
+  "schema": "rynvek.general-world.v1",
+  "profile": "rynvek.general-circle-ecs.v1",
+  "bodies": [
+    {
+      "position_q32": [
+        42949672960,
+        274877906944
+      ],
+      "velocity_q32": [
+        0,
+        0
+      ],
+      "acceleration_q32": [
+        0,
+        0
+      ],
+      "radius_q32": 2147483648,
+      "mass_q32": 4294967296,
+      "fixed": false
+    }
+  ],
+  "life": {
+    "profile": {
+      "profile": "rynvek.general-sourced-life.v1",
+      "max_ingest_raw_per_tick": 8,
+      "maintenance_q_per_tick": 15625,
+      "recycle_percent": 80
+    },
+    "nutrient_deposits": [
+      {
+        "x": 10,
+        "y": 64,
+        "value": 48
+      }
+    ]
+  }
+}

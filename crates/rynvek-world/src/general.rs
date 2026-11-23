@@ -5,6 +5,7 @@
 use rynvek_core::package::{PackageError, PackageInput, PackageInputEntry, PackageKind, read_package, write_package};
 use rynvek_simulation::{
     engine::SimulationEngine,
+    life::{LifeProfile, NutrientDeposit},
     persistence::PHYSICS_PROFILE,
     physics::{Body, MAX_BODIES},
 };
@@ -18,6 +19,16 @@ pub struct GeneralWorldConfig {
     pub schema: String,
     pub profile: String,
     pub bodies: Vec<Body>,
+    /// 缺省为纯物理世界；启用时必须给出有来源场沉淀，不能只写初始内能。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub life: Option<GeneralLifeConfig>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GeneralLifeConfig {
+    pub profile: LifeProfile,
+    #[serde(default)]
+    pub nutrient_deposits: Vec<NutrientDeposit>,
 }
 impl GeneralWorldConfig {
     pub fn validate(&self) -> Result<(), String> {
@@ -28,11 +39,30 @@ impl GeneralWorldConfig {
         for body in &self.bodies {
             body.validate().map_err(|e| format!("刚体超出物理剖面：{e:?}"))?;
         }
+        if let Some(life) = &self.life {
+            life.profile.validate().map_err(|e| format!("生命剖面非法：{e:?}"))?;
+            rynvek_simulation::life::validate_deposits(&life.nutrient_deposits)
+                .map_err(|e| format!("场沉淀非法：{e:?}"))?;
+            if life.nutrient_deposits.is_empty()
+                && life.profile.maintenance_q_per_tick > 0
+                && self.bodies.iter().any(|b| !b.fixed)
+            {
+                return Err("有维护热耗的活体必须给出明确营养沉淀，不能凭空供能".into());
+            }
+        }
         Ok(())
     }
     pub fn instantiate(&self, world_id: [u8; 16]) -> Result<SimulationEngine, String> {
         self.validate()?;
-        SimulationEngine::with_bodies(world_id, &self.bodies).map_err(|e| format!("通用 World 创世失败：{e:?}"))
+        let world =
+            SimulationEngine::with_bodies(world_id, &self.bodies).map_err(|e| format!("通用 World 创世失败：{e:?}"))?;
+        if let Some(life) = &self.life {
+            world
+                .with_sourced_life(life.profile.clone(), &life.nutrient_deposits)
+                .map_err(|e| format!("有来源生命创世失败：{e:?}"))
+        } else {
+            Ok(world)
+        }
     }
     /// 使用唯一的原包写入器，不自建另一种 .rworld 格式。
     pub fn build_package(&self, id: &str, version: &str) -> Result<Vec<u8>, PackageError> {
@@ -92,6 +122,7 @@ mod tests {
             schema: "rynvek.general-world.v1".into(),
             profile: PHYSICS_PROFILE.into(),
             bodies: vec![],
+            life: None,
         };
         let bytes = config.build_package("world.general.empty", "1.0.0").unwrap();
         assert_eq!(GeneralWorldConfig::from_package_bytes(&bytes).unwrap(), config);
@@ -110,7 +141,37 @@ mod tests {
             schema: "rynvek.general-world.v1".into(),
             profile: "arbitrary-world".into(),
             bodies: vec![],
+            life: None,
         };
         assert!(config.build_package("world.general.bad", "1.0.0").is_err());
+    }
+    #[test]
+    fn sourced_life_rejects_maintenance_without_deposits() {
+        use rynvek_simulation::life::{LIFE_PROFILE, LifeProfile};
+        use rynvek_simulation::physics::{Body, ONE};
+        let body = Body {
+            position_q32: [10 * ONE, 64 * ONE],
+            velocity_q32: [0, 0],
+            acceleration_q32: [0, 0],
+            radius_q32: ONE / 2,
+            mass_q32: ONE,
+            fixed: false,
+        };
+        let config = GeneralWorldConfig {
+            schema: "rynvek.general-world.v1".into(),
+            profile: PHYSICS_PROFILE.into(),
+            bodies: vec![body],
+            life: Some(GeneralLifeConfig {
+                profile: LifeProfile {
+                    profile: LIFE_PROFILE.into(),
+                    max_ingest_raw_per_tick: 8,
+                    maintenance_q_per_tick: 1,
+                    recycle_percent: 80,
+                    neural: None,
+                },
+                nutrient_deposits: vec![],
+            }),
+        };
+        assert!(config.validate().is_err());
     }
 }

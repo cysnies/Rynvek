@@ -1106,6 +1106,7 @@ mod tests {
                 mass_q32: ONE,
                 fixed: false,
             }],
+            life: None,
         }
         .build_package("world.general.engine", "1.0.0")
         .unwrap()

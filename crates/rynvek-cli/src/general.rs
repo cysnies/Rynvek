@@ -81,7 +81,25 @@ fn summary(world: &SimulationEngine, torn: bool) -> CliResult {
         .iter()
         .map(|i| serde_json::json!({"position":i.position,"pickId":i.pick_id}))
         .collect();
-    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"profile":rynvek_simulation::persistence::PHYSICS_PROFILE,"tick":world.clock.tick,"stateRoot":root,"tornWrite":torn,"bodies":bodies,"frameScene":instances,"gpuVerified":false})).map_err(fail)?);
+    let life = world.life().map(|store| {
+        let accounts: Vec<_> = store
+            .accounts()
+            .map(|a| {
+                serde_json::json!({
+                    "received": a.received_q,
+                    "stored": a.stored_q,
+                    "dissipated": a.dissipated_q,
+                    "returned": a.returned_q,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "profile": store.profile().profile,
+            "genesisEnergy": store.genesis_energy_q(),
+            "accounts": accounts,
+        })
+    });
+    println!("{}",serde_json::to_string_pretty(&serde_json::json!({"profile":rynvek_simulation::persistence::PHYSICS_PROFILE,"tick":world.clock.tick,"stateRoot":root,"tornWrite":torn,"bodies":bodies,"frameScene":instances,"gpuVerified":false,"life":life})).map_err(fail)?);
     Ok(())
 }
 pub fn execute(command: WorldCommand) -> CliResult {
