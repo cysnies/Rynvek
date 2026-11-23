@@ -133,3 +133,5 @@ export * from "./private-agent.js";
 export * from "./agent-run.js";
 
 export * from "./private-audio.js";
+
+export * from "./private-visual.js";

@@ -216,6 +216,7 @@ impl PostgresStore {
         .map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0008_private_audio.sql")).await.map_err(db_err)?;
         c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0009_studio_editors.sql")).await.map_err(db_err)?;
+        c.batch_execute(include_str!("../../../rynvek-storage/migrations/postgres/0010_private_visual.sql")).await.map_err(db_err)?;
         Ok(!exists)
     }
 
@@ -1081,3 +1082,6 @@ mod agent_runs;
 
 #[path = "postgres_audio.rs"]
 mod audio_versions;
+
+#[path = "postgres_visual.rs"]
+mod visual;

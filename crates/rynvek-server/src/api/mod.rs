@@ -15,6 +15,7 @@ pub mod observers;
 pub mod studio_collaboration;
 pub mod private_agents;
 pub mod private_audio;
+pub mod private_visual;
 pub mod user;
 pub mod worlds;
 
@@ -54,6 +55,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/private-hub/audio/{id}/{version}", get(private_audio::get).put(private_audio::publish).delete(private_audio::revoke))
         .route("/api/v1/private-hub/audio/{id}/{version}/artifact", get(private_audio::artifact))
         .route("/api/v1/private-hub/audio/{id}/{version}/resolved", get(private_audio::resolved))
+        .route("/api/v1/private-hub/visual", get(private_visual::list))
+        .route("/api/v1/private-hub/visual/{id}/{version}", get(private_visual::get).put(private_visual::publish).delete(private_visual::revoke))
+        .route("/api/v1/private-hub/visual/{id}/{version}/artifact", get(private_visual::artifact))
+        .route("/api/v1/private-hub/visual/{id}/{version}/resolved", get(private_visual::resolved))
         .route("/api/v1/private-hub/agents", get(private_agents::list))
         .route(
             "/api/v1/private-hub/agents/{id}/{version}",

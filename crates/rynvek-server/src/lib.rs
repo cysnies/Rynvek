@@ -43,3 +43,5 @@ pub use error::{ApiError, ApiResult};
 pub use server::{RunningServer, ServerConfig, start};
 
 pub mod transactions;
+
+pub mod visual_package;

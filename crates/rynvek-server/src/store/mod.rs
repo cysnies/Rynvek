@@ -398,6 +398,18 @@ impl Store {
     pub async fn revoke_private_audio(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {
         dispatch!(self.revoke_private_audio(owner, id, version))
     }
+    pub async fn put_private_visual(&self, row: PrivateArtifactRow) -> StoreResult<()> {
+        dispatch!(self.put_private_visual(row))
+    }
+    pub async fn private_visual(&self, owner: u64, id: String, version: String) -> StoreResult<Option<PrivateArtifactRow>> {
+        dispatch!(self.private_visual(owner, id, version))
+    }
+    pub async fn private_visuals(&self, owner: u64) -> StoreResult<Vec<PrivateArtifactRow>> {
+        dispatch!(self.private_visuals(owner))
+    }
+    pub async fn revoke_private_visual(&self, owner: u64, id: String, version: String) -> StoreResult<bool> {
+        dispatch!(self.revoke_private_visual(owner, id, version))
+    }
 
     pub async fn settle_ranked(&self, row: MatchRow, fence: u64, parts: Vec<ParticipantRow>) -> StoreResult<()> {
         dispatch!(self.settle_ranked(row, fence, parts))
