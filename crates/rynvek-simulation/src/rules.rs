@@ -138,10 +138,21 @@ pub struct GeneralRulesState {
     pub tier0_gas: u64,
     pub tier1_quota: u64,
     pub paid_q: u64,
+    /// 模块到私有签名闭包证据CID；空集合沿用旧快照/配置根字节。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub installed_releases: BTreeMap<String, [u8; 32]>,
 }
 impl GeneralRulesState {
     pub(crate) fn validate(&self, world: &SimulationEngine) -> Result<(), RynvekErrorCode> {
         let compiled = self.config.compile()?;
+        if self.installed_releases.len() > 32
+            || self
+                .installed_releases
+                .keys()
+                .any(|m| !self.config.rule_graphs.contains_key(m) || self.config.tier1_rules.contains_key(m))
+        {
+            return Err(ERROR);
+        }
         self.config.validate_host(world, false)?;
         self.components.validate_registry(&self.config.registry(&compiled))?;
         if self.components.fault.is_some()
@@ -160,7 +171,13 @@ impl GeneralRulesState {
         Ok(())
     }
     pub(crate) fn config_hash(&self) -> [u8; 32] {
-        *blake3::hash(&serde_json::to_vec(&self.config).expect("定型组件配置可编码")).as_bytes()
+        let bytes = if self.installed_releases.is_empty() {
+            serde_json::to_vec(&self.config)
+        } else {
+            serde_json::to_vec(&("rynvek-installed-rules/1", &self.config, &self.installed_releases))
+        }
+        .expect("定型组件配置可编码");
+        *blake3::hash(&bytes).as_bytes()
     }
     pub(crate) fn state_hash(&self) -> [u8; 32] {
         *blake3::hash(
@@ -187,9 +204,50 @@ impl SimulationEngine {
             tier0_gas: 0,
             tier1_quota: 0,
             paid_q: 0,
+            installed_releases: BTreeMap::new(),
         });
         self.publish_commit(self.authoritative_commit([0; 32]));
         Ok(self)
+    }
+    /// 仅构造下一Coupling Epoch的隔离候选；调用方须紧接原Tick并原子耐久发布，不能单独保存。
+    /// 不变更生命、来源账、价格、控制器、组件实例/动态参数，不覆盖Tier1。
+    pub fn candidate_with_rule_install(
+        &self,
+        evidence: [u8; 32],
+        graphs: &BTreeMap<String, String>,
+    ) -> Result<Self, RynvekErrorCode> {
+        if self.clock.tick.checked_add(1).is_none_or(|t| t % 4 != 0) || graphs.is_empty() || graphs.len() > 16 {
+            return Err(ERROR);
+        }
+        let mut candidate = self.clone();
+        let mut rules = self.rules.clone().ok_or(ERROR)?;
+        let old_bundles: std::collections::BTreeSet<_> = graphs
+            .keys()
+            .filter_map(|m| rules.installed_releases.get(m).copied())
+            .collect();
+        // 精确依赖包组只允许整体替换，禁止半包组热换制造锁与实际执行不一致。
+        if rules
+            .installed_releases
+            .iter()
+            .any(|(m, c)| old_bundles.contains(c) && !graphs.contains_key(m))
+        {
+            return Err(ERROR);
+        }
+        for (module, graph) in graphs {
+            if !rules.config.rule_graphs.contains_key(module)
+                || rules.config.tier1_rules.contains_key(module)
+                || !rules.config.bindings.values().any(|b| b.module_id == *module)
+            {
+                return Err(ERROR);
+            }
+            rules.config.rule_graphs.insert(module.clone(), graph.clone());
+            rules.installed_releases.insert(module.clone(), evidence);
+        }
+        let compiled = rules.config.compile()?;
+        rules.config.validate_host(self, false)?;
+        rules.components.reconcile_registry(&rules.config.registry(&compiled))?;
+        candidate.rules = Some(rules);
+        Ok(candidate)
     }
     pub fn component_rules(&self) -> Option<&GeneralRulesState> {
         self.rules.as_ref()
